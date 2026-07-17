@@ -31,9 +31,18 @@ const AUTO_DISCOVER_NAMES: &[(&str, bool)] = &[
 /// 2. Config override path (relative to repo root or absolute)
 /// 3. Auto-discovery of known file/dir names
 pub fn find_guidelines(root: &Path, config_path: Option<&str>) -> Vec<GuidelineFile> {
+    let env_override = std::env::var("CONTRIBUTING_GUIDELINES").ok();
+    find_guidelines_inner(root, config_path, env_override.as_deref())
+}
+
+fn find_guidelines_inner(
+    root: &Path,
+    config_path: Option<&str>,
+    env_override: Option<&str>,
+) -> Vec<GuidelineFile> {
     // 1. Env var override (highest priority)
-    if let Ok(env_path) = std::env::var("CONTRIBUTING_GUIDELINES") {
-        let p = PathBuf::from(&env_path);
+    if let Some(env_path) = env_override {
+        let p = PathBuf::from(env_path);
         let found = resolve_guideline_path(&p);
         if !found.is_empty() {
             return found;
@@ -185,8 +194,11 @@ pub fn format_guidelines_section(files: &[GuidelineFile]) -> String {
 
         if !gf.content.is_empty() {
             let truncated = if gf.content.len() > 4096 {
-                format!("{}\n\n[Content truncated at 4096 characters — full file at {}]",
-                    &gf.content[..4096], gf.path.display())
+                format!(
+                    "{}\n\n[Content truncated at 4096 characters — full file at {}]",
+                    &gf.content[..4096],
+                    gf.path.display()
+                )
             } else {
                 gf.content.clone()
             };
@@ -241,9 +253,8 @@ mod tests {
         std::fs::write(&custom_file, "# Custom Rules\n- [ ] Do the thing\n").unwrap();
         std::fs::write(dir.path().join("CONTRIBUTING.md"), "# Ignored\n").unwrap();
 
-        std::env::set_var("CONTRIBUTING_GUIDELINES", custom_file.to_str().unwrap());
-        let files = find_guidelines(dir.path(), None);
-        std::env::remove_var("CONTRIBUTING_GUIDELINES");
+        // Use find_guidelines_inner to avoid mutating process env vars (unsafe in parallel tests)
+        let files = find_guidelines_inner(dir.path(), None, custom_file.to_str());
 
         assert_eq!(files.len(), 1);
         assert!(files[0].path.to_string_lossy().contains("MYRULES.md"));
@@ -278,12 +289,19 @@ mod tests {
         let contrib_dir = dir.path().join("CONTRIBUTING");
         std::fs::create_dir_all(&contrib_dir).unwrap();
         std::fs::write(contrib_dir.join("CODE_OF_CONDUCT.md"), "# Code\n").unwrap();
-        std::fs::write(contrib_dir.join("STYLE_GUIDE.md"), "# Style\n- [ ] Use tabs\n").unwrap();
+        std::fs::write(
+            contrib_dir.join("STYLE_GUIDE.md"),
+            "# Style\n- [ ] Use tabs\n",
+        )
+        .unwrap();
 
         // Use config override path (not auto-discovery) to avoid parallel test env var races
         let override_path = contrib_dir.join("CODE_OF_CONDUCT.md");
         let files = find_guidelines(dir.path(), Some(override_path.to_str().unwrap()));
         assert_eq!(files.len(), 1);
-        assert!(files[0].path.to_string_lossy().contains("CODE_OF_CONDUCT.md"));
+        assert!(files[0]
+            .path
+            .to_string_lossy()
+            .contains("CODE_OF_CONDUCT.md"));
     }
 }

@@ -16,7 +16,9 @@ pub fn run_check(
     config: &Config,
 ) -> Result<Findings> {
     if !git::is_git_repo() && !path.is_some() {
-        anyhow::bail!("Not in a git repository. Run codasaurus check <path> or use from within a git repo.");
+        anyhow::bail!(
+            "Not in a git repository. Run codasaurus check <path> or use from within a git repo."
+        );
     }
 
     let mut findings = Findings::new();
@@ -89,7 +91,8 @@ pub fn run_check(
                     ..Default::default()
                 };
 
-                let result = rt.block_on(crate::llm::review_diff(&diff, &llm_cfg, Some(&review_ctx)));
+                let result =
+                    rt.block_on(crate::llm::review_diff(&diff, &llm_cfg, Some(&review_ctx)));
 
                 spin.set_status(clx::progress::ProgressStatus::Done);
 
@@ -160,16 +163,9 @@ pub async fn run_watch(path: &str) -> Result<()> {
                                 crate::config::Config::default()
                             }
                         };
-                        let findings = run_check(
-                            &true,
-                            &None,
-                            &false,
-                            &false,
-                            &false,
-                            &None,
-                            &config,
-                        )
-                        .unwrap_or_default();
+                        let findings =
+                            run_check(&true, &None, &false, &false, &false, &None, &config)
+                                .unwrap_or_default();
 
                         print!("\x1B[2J\x1B[H"); // Clear screen
                         if findings.is_empty() {
@@ -193,17 +189,15 @@ fn process_file(file_path: &str, findings: &mut Findings, config: &Config) {
         return;
     }
     match std::fs::read_to_string(file_path) {
-        Ok(content) => {
-            match parser::parse_file(file_path, &content) {
-                Ok(parsed) => {
-                    findings.findings.extend(
-                        detectors::run_all(&[parsed], config).findings,
-                    );
-                }
-                Err(e) => eprintln!("Warning: failed to parse file {}: {}", file_path, e)
+        Ok(content) => match parser::parse_file(file_path, &content) {
+            Ok(parsed) => {
+                findings
+                    .findings
+                    .extend(detectors::run_all(&[parsed], config).findings);
             }
-        }
-        Err(e) => eprintln!("Warning: failed to read file {}: {}", file_path, e)
+            Err(e) => eprintln!("Warning: failed to parse file {}: {}", file_path, e),
+        },
+        Err(e) => eprintln!("Warning: failed to read file {}: {}", file_path, e),
     }
 }
 

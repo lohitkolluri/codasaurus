@@ -70,7 +70,9 @@ pub fn detect_todos(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                         "Leftover placeholder or incomplete code: \"{}\"",
                         trimmed.chars().take(80).collect::<String>()
                     ),
-                    suggestion: Some("Complete the implementation or remove the placeholder.".to_string()),
+                    suggestion: Some(
+                        "Complete the implementation or remove the placeholder.".to_string(),
+                    ),
                     evidence: Some(trimmed.chars().take(120).collect()),
                     codemod: None,
                 });
@@ -88,7 +90,14 @@ fn mask_value(value: &str) -> String {
         return "***".to_string();
     }
     let prefix: String = chars.iter().take(4).collect();
-    let suffix: String = chars.iter().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+    let suffix: String = chars
+        .iter()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     format!("{}...{}", prefix, suffix)
 }
 
@@ -110,15 +119,39 @@ use once_cell::sync::Lazy;
 
 static SECRET_PATTERNS: Lazy<Vec<SecretPattern>> = Lazy::new(|| {
     vec![
-        SecretPattern::new("AWS Access Key", r#"(?i)(?:aws_access_key_id|AWS_ACCESS_KEY|AKIA[0-9A-Z]{16,}|AWS_KEY)\s*[:=]\s*['"]?([A-Za-z0-9/+=]{20,})['"]?"#),
-        SecretPattern::new("AWS Secret Key", r#"(?i)(?:aws_secret_access_key|AWS_SECRET_KEY)\s*[:=]\s*['"]?([A-Za-z0-9/+=]{40,})['\"]?"#),
-        SecretPattern::new("GitHub Token", r"(?i)(?:ghp_|gho_|ghu_|ghs_|ghr_)[A-Za-z0-9_]{36,}"),
-        SecretPattern::new("API Key", r#"(?i)(?:api[_-]?key|apikey|api_secret|api_secret_key)\s*[:=]\s*['"]?([A-Za-z0-9_\-]{16,})['"]?"#),
+        SecretPattern::new(
+            "AWS Access Key",
+            r#"(?i)(?:aws_access_key_id|AWS_ACCESS_KEY|AKIA[0-9A-Z]{16,}|AWS_KEY)\s*[:=]\s*['"]?([A-Za-z0-9/+=]{20,})['"]?"#,
+        ),
+        SecretPattern::new(
+            "AWS Secret Key",
+            r#"(?i)(?:aws_secret_access_key|AWS_SECRET_KEY)\s*[:=]\s*['"]?([A-Za-z0-9/+=]{40,})['\"]?"#,
+        ),
+        SecretPattern::new(
+            "GitHub Token",
+            r"(?i)(?:ghp_|gho_|ghu_|ghs_|ghr_)[A-Za-z0-9_]{36,}",
+        ),
+        SecretPattern::new(
+            "API Key",
+            r#"(?i)(?:api[_-]?key|apikey|api_secret|api_secret_key)\s*[:=]\s*['"]?([A-Za-z0-9_\-]{16,})['"]?"#,
+        ),
         SecretPattern::new("Bearer Token", r"(?i)bearer\s+[A-Za-z0-9_\-\.]{20,}"),
         SecretPattern::new("Slack Token", r"xox[baprs]-[0-9a-z-]{10,}"),
-        SecretPattern::new("Private Key", r"-----BEGIN\s?(?:RSA|DSA|EC|OPENSSH|PRIVATE)\s?KEY-----"),
-        SecretPattern::new("JWT Token", r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"),
-        SecretPattern::new("Password", r#"(?i)(?:password|passwd|pwd)\s*[:=]\s*['"]?([^'"\s]{8,})['"]?"#),
-        SecretPattern::new("Connection String", r"(?i)(?:mongodb|postgresql|mysql|redis)://[^\s]{10,}"),
+        SecretPattern::new(
+            "Private Key",
+            r"-----BEGIN\s?(?:RSA|DSA|EC|OPENSSH|PRIVATE)\s?KEY-----",
+        ),
+        SecretPattern::new(
+            "JWT Token",
+            r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+",
+        ),
+        SecretPattern::new(
+            "Password",
+            r#"(?i)(?:password|passwd|pwd)\s*[:=]\s*['"]?([^'"\s]{8,})['"]?"#,
+        ),
+        SecretPattern::new(
+            "Connection String",
+            r"(?i)(?:mongodb|postgresql|mysql|redis)://[^\s]{10,}",
+        ),
     ]
 });

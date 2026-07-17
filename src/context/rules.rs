@@ -1,13 +1,23 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-static CHECKBOX_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*[-*]\s+\[([ xX])\]\s+(.+)$").unwrap());
+static CHECKBOX_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^\s*[-*]\s+\[([ xX])\]\s+(.+)$").unwrap());
 static HEADING_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^#{2,4}\s+(.+)$").unwrap());
-static BRANCH_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)branch\s*(naming|pattern|name|format)?\s*[:]\s*(.+?)(?:[,.\n]|$)").unwrap());
-static BRANCH_INLINE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(branches?\s+(?:must|should)\s+(?:start|begin)\s+with\s+`([^`]+)`)").unwrap());
-static DCO_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(signed.off.by|DCO|developer.certificate.of.origin)").unwrap());
-static CONVENTIONAL_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(conventional\s*commits?|commit\s*(message)?\s*(convention|format|style))").unwrap());
-static FILE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(?:required|must\s+have|must\s+include)\s+`([^`]+)`").unwrap());
+static BRANCH_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)branch\s*(naming|pattern|name|format)?\s*[:]\s*(.+?)(?:[,.\n]|$)").unwrap()
+});
+static BRANCH_INLINE_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)(branches?\s+(?:must|should)\s+(?:start|begin)\s+with\s+`([^`]+)`)").unwrap()
+});
+static DCO_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)(signed.off.by|DCO|developer.certificate.of.origin)").unwrap());
+static CONVENTIONAL_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)(conventional\s*commits?|commit\s*(message)?\s*(convention|format|style))")
+        .unwrap()
+});
+static FILE_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)(?:required|must\s+have|must\s+include)\s+`([^`]+)`").unwrap());
 
 /// A structured rule extracted from a contribution guideline file.
 #[derive(Debug, Clone)]
@@ -176,7 +186,10 @@ mod tests {
     fn test_parse_checklist_items() {
         let md = "- [ ] Add tests\n- [x] Sign commits\n- [ ] Update docs\n";
         let rules = parse_guidelines_md(md);
-        let items: Vec<&ExtractedRule> = rules.iter().filter(|r| matches!(r, ExtractedRule::ChecklistItem { .. })).collect();
+        let items: Vec<&ExtractedRule> = rules
+            .iter()
+            .filter(|r| matches!(r, ExtractedRule::ChecklistItem { .. }))
+            .collect();
         assert_eq!(items.len(), 3);
     }
 
@@ -184,7 +197,10 @@ mod tests {
     fn test_parse_commit_convention() {
         let md = "## Commit Convention\nUse conventional commits: `type(scope): description`\n";
         let rules = parse_guidelines_md(md);
-        let commit_rules: Vec<&ExtractedRule> = rules.iter().filter(|r| matches!(r, ExtractedRule::CommitRule { .. })).collect();
+        let commit_rules: Vec<&ExtractedRule> = rules
+            .iter()
+            .filter(|r| matches!(r, ExtractedRule::CommitRule { .. }))
+            .collect();
         assert!(!commit_rules.is_empty());
     }
 
@@ -199,7 +215,10 @@ mod tests {
     fn test_parse_branch_pattern() {
         let md = "Branch naming: `feat/`, `fix/`, or `chore/`";
         let rules = parse_guidelines_md(md);
-        let branches: Vec<&ExtractedRule> = rules.iter().filter(|r| matches!(r, ExtractedRule::BranchPattern { .. })).collect();
+        let branches: Vec<&ExtractedRule> = rules
+            .iter()
+            .filter(|r| matches!(r, ExtractedRule::BranchPattern { .. }))
+            .collect();
         assert!(!branches.is_empty());
     }
 
@@ -207,7 +226,10 @@ mod tests {
     fn test_parse_required_files() {
         let md = "Your PR must include `CHANGELOG.md` and `README.md`.";
         let rules = parse_guidelines_md(md);
-        let files: Vec<&ExtractedRule> = rules.iter().filter(|r| matches!(r, ExtractedRule::FileRequired { .. })).collect();
+        let files: Vec<&ExtractedRule> = rules
+            .iter()
+            .filter(|r| matches!(r, ExtractedRule::FileRequired { .. }))
+            .collect();
         assert!(!files.is_empty());
     }
 
@@ -215,7 +237,10 @@ mod tests {
     fn test_parse_sections() {
         let md = "## Testing\nRun tests with `cargo test`.\n## Docs\nUpdate docs.";
         let rules = parse_guidelines_md(md);
-        let sections: Vec<&ExtractedRule> = rules.iter().filter(|r| matches!(r, ExtractedRule::SectionRule { .. })).collect();
+        let sections: Vec<&ExtractedRule> = rules
+            .iter()
+            .filter(|r| matches!(r, ExtractedRule::SectionRule { .. }))
+            .collect();
         assert_eq!(sections.len(), 2);
     }
 
@@ -223,7 +248,12 @@ mod tests {
     fn test_dedup_rules() {
         let md = "- [ ] Add tests\n- [ ] Add tests\n## Commit Convention\nconventional commits\nconventional commits\n";
         let rules = parse_guidelines_md(md);
-        let checklists: Vec<&ExtractedRule> = rules.iter().filter(|r| matches!(r, ExtractedRule::ChecklistItem { text, .. } if text == "Add tests")).collect();
+        let checklists: Vec<&ExtractedRule> = rules
+            .iter()
+            .filter(
+                |r| matches!(r, ExtractedRule::ChecklistItem { text, .. } if text == "Add tests"),
+            )
+            .collect();
         assert_eq!(checklists.len(), 1);
     }
 
@@ -231,7 +261,10 @@ mod tests {
     fn test_requirements_section_lists() {
         let md = "## Requirements\n- Node.js 18+\n- Rust 1.70+\n- Docker";
         let rules = parse_guidelines_md(md);
-        let items: Vec<&ExtractedRule> = rules.iter().filter(|r| matches!(r, ExtractedRule::ChecklistItem { .. })).collect();
+        let items: Vec<&ExtractedRule> = rules
+            .iter()
+            .filter(|r| matches!(r, ExtractedRule::ChecklistItem { .. }))
+            .collect();
         assert!(!items.is_empty());
     }
 
@@ -239,7 +272,10 @@ mod tests {
     fn test_branch_inline_rule() {
         let md = "Branches must start with `feat/` or `fix/`.";
         let rules = parse_guidelines_md(md);
-        let branches: Vec<&ExtractedRule> = rules.iter().filter(|r| matches!(r, ExtractedRule::BranchPattern { .. })).collect();
+        let branches: Vec<&ExtractedRule> = rules
+            .iter()
+            .filter(|r| matches!(r, ExtractedRule::BranchPattern { .. }))
+            .collect();
         assert!(!branches.is_empty());
     }
 

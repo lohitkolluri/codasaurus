@@ -120,7 +120,10 @@ function process() {
         .iter()
         .filter(|f| f.detector == "todo-leaks")
         .collect();
-    assert!(!todo_findings.is_empty(), "should detect TODO/FIXME placeholders");
+    assert!(
+        !todo_findings.is_empty(),
+        "should detect TODO/FIXME placeholders"
+    );
 }
 
 #[test]
@@ -158,7 +161,10 @@ class MyComponent extends React.Component {
         .iter()
         .filter(|f| f.detector == "stale-api")
         .collect();
-    assert!(!stale_findings.is_empty(), "should detect deprecated componentWillMount");
+    assert!(
+        !stale_findings.is_empty(),
+        "should detect deprecated componentWillMount"
+    );
 }
 
 #[test]
@@ -240,7 +246,10 @@ class User {
         .iter()
         .filter(|f| f.detector == "over-engineering")
         .collect();
-    assert!(!style_findings.is_empty(), "should detect unnecessary factory pattern");
+    assert!(
+        !style_findings.is_empty(),
+        "should detect unnecessary factory pattern"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +271,10 @@ fn test_detects_long_function() {
         .iter()
         .filter(|f| f.detector == "boilerplate")
         .collect();
-    assert!(!boilerplate.is_empty(), "should detect long function as boilerplate");
+    assert!(
+        !boilerplate.is_empty(),
+        "should detect long function as boilerplate"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -344,7 +356,10 @@ fn test_no_phantom_dep_when_declared() {
         .iter()
         .filter(|f| f.detector == "phantom-deps")
         .collect();
-    assert!(phantom.is_empty(), "all deps declared, no phantom deps expected");
+    assert!(
+        phantom.is_empty(),
+        "all deps declared, no phantom deps expected"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -426,7 +441,10 @@ fn test_finding_has_required_fields() {
     let findings = detectors::run_all(&[file], &all_checks_config());
 
     for finding in &findings.findings {
-        assert!(!finding.detector.is_empty(), "detector name must not be empty");
+        assert!(
+            !finding.detector.is_empty(),
+            "detector name must not be empty"
+        );
         assert!(!finding.severity.is_empty(), "severity must not be empty");
         assert!(!finding.file.is_empty(), "file path must not be empty");
         assert!(!finding.message.is_empty(), "message must not be empty");
@@ -477,10 +495,7 @@ fn test_multi_language_clean_files() {
         "class Math { static int add(int x, int y) { return x + y; } }",
     );
 
-    let findings = detectors::run_all(
-        &[rs, py, js, ts, go, java],
-        &all_checks_config(),
-    );
+    let findings = detectors::run_all(&[rs, py, js, ts, go, java], &all_checks_config());
     assert!(
         findings.is_empty(),
         "clean files in 6 languages should have no findings, got: {:?}",

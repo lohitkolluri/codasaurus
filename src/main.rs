@@ -1,13 +1,15 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use codasaurus::config;
-use codasaurus::cli;
 use codasaurus::bot;
+use codasaurus::cli;
+use codasaurus::config;
 use codasaurus::output;
 
 #[derive(Parser)]
 #[command(name = "codasaurus")]
-#[command(about = "🦕 AI-generated code verification — catches hallucinated imports, phantom deps, stale APIs, and security issues")]
+#[command(
+    about = "🦕 AI-generated code verification — catches hallucinated imports, phantom deps, stale APIs, and security issues"
+)]
 #[command(version, long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -94,9 +96,12 @@ fn main() -> Result<()> {
         }
         Commands::Serve { port, host } => {
             let config = bot::BotConfig {
-                app_id: std::env::var("GITHUB_APP_ID").map_err(|_| anyhow::anyhow!("GITHUB_APP_ID required"))?,
-                private_key: std::env::var("GITHUB_APP_PRIVATE_KEY").map_err(|_| anyhow::anyhow!("GITHUB_APP_PRIVATE_KEY required"))?,
-                webhook_secret: std::env::var("GITHUB_WEBHOOK_SECRET").map_err(|_| anyhow::anyhow!("GITHUB_WEBHOOK_SECRET required"))?,
+                app_id: std::env::var("GITHUB_APP_ID")
+                    .map_err(|_| anyhow::anyhow!("GITHUB_APP_ID required"))?,
+                private_key: std::env::var("GITHUB_APP_PRIVATE_KEY")
+                    .map_err(|_| anyhow::anyhow!("GITHUB_APP_PRIVATE_KEY required"))?,
+                webhook_secret: std::env::var("GITHUB_WEBHOOK_SECRET")
+                    .map_err(|_| anyhow::anyhow!("GITHUB_WEBHOOK_SECRET required"))?,
                 host: host.clone(),
                 port: *port,
             };

@@ -25,10 +25,21 @@ fn render_terminal(findings: &Findings) {
 
     // One-line summary
     let mut summary_parts = vec![];
-    if blocking > 0 { summary_parts.push(format!("{} blocking", blocking.to_string().red().bold())); }
-    if warnings > 0 { summary_parts.push(format!("{} warnings", warnings.to_string().yellow().bold())); }
-    if infos > 0 { summary_parts.push(format!("{} infos", infos.to_string().cyan().bold())); }
-    println!("  {} {} — {}", "🦕".bold(), "Codasaurus".bold(), summary_parts.join(", "));
+    if blocking > 0 {
+        summary_parts.push(format!("{} blocking", blocking.to_string().red().bold()));
+    }
+    if warnings > 0 {
+        summary_parts.push(format!("{} warnings", warnings.to_string().yellow().bold()));
+    }
+    if infos > 0 {
+        summary_parts.push(format!("{} infos", infos.to_string().cyan().bold()));
+    }
+    println!(
+        "  {} {} — {}",
+        "🦕".bold(),
+        "Codasaurus".bold(),
+        summary_parts.join(", ")
+    );
     println!();
 
     // Sort findings by file then line (indirect sort to avoid cloning)

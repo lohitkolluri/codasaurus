@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant};
 
+mod crates_io;
 mod npm;
 mod pypi;
-mod crates_io;
 
 /// Default cache TTL in seconds (can be overridden via `set_cache_ttl`)
 static CACHE_TTL: Lazy<Mutex<u64>> = Lazy::new(|| Mutex::new(3600));
@@ -163,24 +163,25 @@ fn check_osv(ecosystem: &str, package: &str) -> Result<Vec<OsvVulnerability>> {
                         .and_then(|s| s.as_str())
                         .unwrap_or("UNKNOWN")
                         .to_string();
-                    let fixed = v["affected"]
-                        .as_array()
-                        .and_then(|affected| {
-                            affected.first().and_then(|a| {
-                                a["ranges"]
-                                    .as_array()
-                                    .and_then(|ranges| {
-                                        ranges.first().and_then(|r| {
-                                            r["events"].as_array().and_then(|events| {
-                                                events.iter().find_map(|e| {
-                                                    e["fixed"].as_str().map(|s| s.to_string())
-                                                })
-                                            })
+                    let fixed = v["affected"].as_array().and_then(|affected| {
+                        affected.first().and_then(|a| {
+                            a["ranges"].as_array().and_then(|ranges| {
+                                ranges.first().and_then(|r| {
+                                    r["events"].as_array().and_then(|events| {
+                                        events.iter().find_map(|e| {
+                                            e["fixed"].as_str().map(|s| s.to_string())
                                         })
                                     })
+                                })
                             })
-                        });
-                    Some(OsvVulnerability { id, summary, severity, fixed_version: fixed })
+                        })
+                    });
+                    Some(OsvVulnerability {
+                        id,
+                        summary,
+                        severity,
+                        fixed_version: fixed,
+                    })
                 })
                 .collect::<Vec<_>>()
         })

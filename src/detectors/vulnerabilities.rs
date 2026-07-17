@@ -51,10 +51,7 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                         file: file.path.clone(),
                         line: import.line,
                         column: import.column,
-                        message: format!(
-                            "{}: {}{}",
-                            vuln.id, vuln.summary, fixed
-                        ),
+                        message: format!("{}: {}{}", vuln.id, vuln.summary, fixed),
                         suggestion: Some(format!(
                             "Update package `{}` to the latest version to fix {}.",
                             package, vuln.id

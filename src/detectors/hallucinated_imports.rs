@@ -36,7 +36,12 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                 Ok(Some(true)) => {} // package exists
                 Ok(Some(false)) => {
                     let correct_name = if import.name.contains('/') {
-                        import.name.split('/').next_back().unwrap_or(&package).to_string()
+                        import
+                            .name
+                            .split('/')
+                            .next_back()
+                            .unwrap_or(&package)
+                            .to_string()
                     } else {
                         package.clone()
                     };
@@ -75,21 +80,39 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
 
 static NPM_BUILTINS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
     HashSet::from([
-        "react", "vue", "express", "lodash", "axios", "typescript",
-        "next", "webpack", "vite", "jest", "mocha", "chai",
-        "moment", "date-fns", "uuid",
-        "node:fs", "node:path", "node:http", "node:crypto",
-        "node:os", "node:stream", "node:buffer", "node:child_process",
-        "node:util", "node:events", "node:url", "node:querystring",
+        "react",
+        "vue",
+        "express",
+        "lodash",
+        "axios",
+        "typescript",
+        "next",
+        "webpack",
+        "vite",
+        "jest",
+        "mocha",
+        "chai",
+        "moment",
+        "date-fns",
+        "uuid",
+        "node:fs",
+        "node:path",
+        "node:http",
+        "node:crypto",
+        "node:os",
+        "node:stream",
+        "node:buffer",
+        "node:child_process",
+        "node:util",
+        "node:events",
+        "node:url",
+        "node:querystring",
         "node:assert",
     ])
 });
 
-static RUST_BUILTINS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
-    HashSet::from([
-        "std", "core", "alloc", "proc_macro",
-    ])
-});
+static RUST_BUILTINS: Lazy<HashSet<&'static str>> =
+    Lazy::new(|| HashSet::from(["std", "core", "alloc", "proc_macro"]));
 
 /// Known built-in packages for common languages
 pub(crate) fn is_builtin(package: &str, registry: &str) -> bool {

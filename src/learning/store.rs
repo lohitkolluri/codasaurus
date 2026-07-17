@@ -19,14 +19,15 @@ impl LearningStore {
             std::fs::create_dir_all(parent).ok();
         }
         let conn = Connection::open(&path)?;
-        let store = Self { conn: Mutex::new(conn) };
+        let store = Self {
+            conn: Mutex::new(conn),
+        };
         store.initialize()?;
         Ok(store)
     }
 
     fn db_path() -> Result<PathBuf> {
-        let home = dirs::data_dir()
-            .unwrap_or_else(|| PathBuf::from("."));
+        let home = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
         Ok(home.join("codasaurus").join("learnings.db"))
     }
 
@@ -54,7 +55,7 @@ impl LearningStore {
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
             CREATE INDEX IF NOT EXISTS idx_dismissed_fingerprint ON dismissed_findings(fingerprint);
-            CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector);"
+            CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector);",
         )?;
         Ok(())
     }
@@ -68,7 +69,13 @@ impl LearningStore {
         conn.execute(
             "INSERT OR IGNORE INTO dismissed_findings (fingerprint, detector, file, line, message)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![fingerprint, finding.detector, finding.file, finding.line, finding.message],
+            rusqlite::params![
+                fingerprint,
+                finding.detector,
+                finding.file,
+                finding.line,
+                finding.message
+            ],
         )?;
         Ok(())
     }
@@ -129,9 +136,8 @@ impl LearningStore {
         }
         let mut rules: Vec<Rule> = Vec::new();
         {
-            let mut stmt = conn.prepare(
-                "SELECT detector, file_pattern, message_pattern FROM learned_rules",
-            )?;
+            let mut stmt =
+                conn.prepare("SELECT detector, file_pattern, message_pattern FROM learned_rules")?;
             let rows = stmt.query_map([], |row| {
                 Ok(Rule {
                     detector: row.get(0)?,
@@ -205,7 +211,9 @@ mod tests {
         };
 
         // Before dismissal, filter should include it
-        let result = store.filter_findings(std::slice::from_ref(&finding)).unwrap();
+        let result = store
+            .filter_findings(std::slice::from_ref(&finding))
+            .unwrap();
         assert_eq!(result.len(), 1, "should include finding before dismissal");
 
         // Dismiss it

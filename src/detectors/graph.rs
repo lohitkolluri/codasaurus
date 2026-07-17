@@ -56,7 +56,8 @@ pub fn populate(files: &[ParsedFile]) {
     }
 
     // Deduplicate to avoid redundant edge processing
-    let mut seen_edges: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut seen_edges: std::collections::HashSet<(String, String)> =
+        std::collections::HashSet::new();
 
     // Build inverted index: word → [(import_name, file_b_path)]
     // Avoids O(L × W × I) nested loop — each word does O(1) index lookup
@@ -64,7 +65,10 @@ pub fn populate(files: &[ParsedFile]) {
     for &(import_name, file_b_path) in &all_imports {
         for word in import_name.split(|c: char| !c.is_alphanumeric() && c != '_') {
             if word.len() >= 3 {
-                word_to_imports.entry(word).or_default().push((import_name, file_b_path));
+                word_to_imports
+                    .entry(word)
+                    .or_default()
+                    .push((import_name, file_b_path));
             }
         }
     }
@@ -90,8 +94,16 @@ pub fn populate(files: &[ParsedFile]) {
                             let to_sym = format!("{}::{}", file_b_path, import_name);
                             let edge_key = (from_sym.clone(), to_sym.clone());
                             if seen_edges.insert(edge_key) {
-                                graph.add_symbol(&from_sym, a_path, crate::graph::SymbolKind::Variable);
-                                graph.add_symbol(&to_sym, file_b_path, crate::graph::SymbolKind::Variable);
+                                graph.add_symbol(
+                                    &from_sym,
+                                    a_path,
+                                    crate::graph::SymbolKind::Variable,
+                                );
+                                graph.add_symbol(
+                                    &to_sym,
+                                    file_b_path,
+                                    crate::graph::SymbolKind::Variable,
+                                );
                                 graph.add_edge(&from_sym, &to_sym, crate::graph::EdgeKind::Calls);
                             }
                         }
@@ -140,7 +152,8 @@ pub fn detect(parsed_files: &[ParsedFile], _config: &Config) -> Vec<Finding> {
                     message: format!(
                         "Symbol `{}` appears in the dependency path of {} other symbols. \
                          Changes here may have wide-reaching effects.",
-                        sym, affected.len()
+                        sym,
+                        affected.len()
                     ),
                     suggestion: Some(
                         "Consider the impact of changes to this symbol across the codebase. \

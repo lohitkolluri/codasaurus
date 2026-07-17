@@ -1,6 +1,6 @@
-use anyhow::Result;
 use crate::bot::WebhookPayload;
 use crate::detectors::{self, Finding, Findings};
+use anyhow::Result;
 
 pub async fn review_pr(token: &str, payload: &WebhookPayload) -> Result<()> {
     let pr = match &payload.pull_request {
@@ -45,9 +45,8 @@ pub async fn review_pr(token: &str, payload: &WebhookPayload) -> Result<()> {
         if !patch.is_empty() && patch.len() < 100_000 {
             let parsed = crate::parser::parse_file(filename, patch).ok();
             if let Some(p) = parsed {
-                findings.extend(
-                    detectors::run_all(&[p], &crate::config::Config::default()).findings,
-                );
+                findings
+                    .extend(detectors::run_all(&[p], &crate::config::Config::default()).findings);
             }
         }
         // Track added lines for inline comment mapping
@@ -64,7 +63,10 @@ pub async fn review_pr(token: &str, payload: &WebhookPayload) -> Result<()> {
         if f.severity == "blocking" {
             has_blocking = true;
         }
-        summary_parts.push(format!("- [{}] {}:{} — {}", f.severity, f.file, f.line, f.message));
+        summary_parts.push(format!(
+            "- [{}] {}:{} — {}",
+            f.severity, f.file, f.line, f.message
+        ));
 
         // Map finding line number to the PR diff position
         if f.line > 0 {
@@ -101,7 +103,14 @@ pub async fn review_pr(token: &str, payload: &WebhookPayload) -> Result<()> {
         return Ok(());
     }
 
-    let body = build_review_body(&findings, total_findings, has_blocking, repo_name, pr_number, head_sha);
+    let body = build_review_body(
+        &findings,
+        total_findings,
+        has_blocking,
+        repo_name,
+        pr_number,
+        head_sha,
+    );
 
     // Try to create a review with inline comments; fall back to single comment
     let review_body = serde_json::json!({

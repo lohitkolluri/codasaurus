@@ -169,7 +169,10 @@ pub(crate) fn extract_package_name(import: &str) -> Option<String> {
 
     // Rust relative paths — these reference items within the current crate,
     // not crates.io packages, so skip them entirely.
-    if trimmed.starts_with("self::") || trimmed.starts_with("crate::") || trimmed.starts_with("super::") {
+    if trimmed.starts_with("self::")
+        || trimmed.starts_with("crate::")
+        || trimmed.starts_with("super::")
+    {
         return None;
     }
 

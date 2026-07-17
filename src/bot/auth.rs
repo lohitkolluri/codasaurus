@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
 use crate::bot::BotConfig;
+use anyhow::{Context, Result};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub async fn get_installation_token(config: &BotConfig) -> Result<String> {
@@ -18,8 +18,8 @@ pub async fn get_installation_token(config: &BotConfig) -> Result<String> {
     let key = jsonwebtoken::EncodingKey::from_rsa_pem(config.private_key.as_bytes())
         .context("Failed to parse GitHub App private key")?;
 
-    let jwt = jsonwebtoken::encode(&jwt_header, &jwt_payload, &key)
-        .context("Failed to create JWT")?;
+    let jwt =
+        jsonwebtoken::encode(&jwt_header, &jwt_payload, &key).context("Failed to create JWT")?;
 
     let client = reqwest::Client::new();
     let installations: Vec<serde_json::Value> = client

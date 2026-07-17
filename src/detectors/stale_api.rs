@@ -208,7 +208,10 @@ mod tests {
             imports: vec![],
         };
         let findings = detect(&[file]);
-        assert!(!findings.is_empty(), "should detect stale componentWillMount");
+        assert!(
+            !findings.is_empty(),
+            "should detect stale componentWillMount"
+        );
         assert_eq!(findings[0].detector, "stale-api");
     }
 
@@ -251,12 +254,21 @@ mod tests {
             language: "javascript".to_string(),
             raw_content: "const x = 1;\nfunction foo() { return x; }".to_string(),
             lines: vec![
-                crate::parser::SourceLine { number: 1, content: "const x = 1;".to_string() },
-                crate::parser::SourceLine { number: 2, content: "function foo() { return x; }".to_string() },
+                crate::parser::SourceLine {
+                    number: 1,
+                    content: "const x = 1;".to_string(),
+                },
+                crate::parser::SourceLine {
+                    number: 2,
+                    content: "function foo() { return x; }".to_string(),
+                },
             ],
             imports: vec![],
         };
         let findings = detect(&[file]);
-        assert!(findings.is_empty(), "clean code should have no stale-api findings");
+        assert!(
+            findings.is_empty(),
+            "clean code should have no stale-api findings"
+        );
     }
 }

@@ -76,7 +76,10 @@ fn detect_language(path: &str) -> String {
 
 /// Extract import statements from parsed lines using regex patterns per language
 fn extract_imports(language: &str, lines: &[SourceLine]) -> Vec<Import> {
-    let patterns = IMPORT_PATTERNS.get(language).map(|v| v.as_slice()).unwrap_or(&[]);
+    let patterns = IMPORT_PATTERNS
+        .get(language)
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
     let mut imports = Vec::new();
 
     for line in lines {
@@ -153,39 +156,69 @@ static IMPORT_PATTERNS: Lazy<HashMap<&'static str, Vec<ImportPattern>>> = Lazy::
         ImportPattern::new("dynamic", r#"import\s*\(\s*['"](?P<pkg>[^'"]+)['"]"#),
         ImportPattern::new("esm-default2", r#"import\s+\w+\s+from\s+['"](?P<pkg>[^'"]+)['"]"#),
     ]);
-    m.insert("python", vec![
-        ImportPattern::new("import", r"^\s*import\s+(?P<pkg>\w+)"),
-        ImportPattern::new("from-import", r"^\s*from\s+(?P<pkg>[\w.]+)\s+import"),
-    ]);
-    m.insert("rust", vec![
-        ImportPattern::new("use", r"^\s*use\s+(?:::)?(?P<pkg>[\w:]+)"),
-        ImportPattern::new("extern-crate", r"^\s*extern\s+crate\s+(?P<pkg>\w+)"),
-    ]);
-    m.insert("go", vec![
-        ImportPattern::new("import", r#"^\s*import\s+["](?P<pkg>[^"]+)["]"#),
-        ImportPattern::new("import-alias", r#"^\s*import\s+\w+\s+["](?P<pkg>[^"]+)["]"#),
-    ]);
-    m.insert("java", vec![
-        ImportPattern::new("import", r"^\s*import\s+(?:static\s+)?(?P<pkg>[\w.]+);"),
-    ]);
-    m.insert("ruby", vec![
-        ImportPattern::new("require", r#"^\s*require\s+['"](?P<pkg>[^'"]+)['"]"#),
-        ImportPattern::new("require-rel", r#"^\s*require_relative\s+['"](?P<pkg>[^'"]+)['"]"#),
-        ImportPattern::new("gem", r#"^\s*gem\s+['"](?P<pkg>[^'"]+)['"]"#),
-    ]);
-    m.insert("php", vec![
-        ImportPattern::new("use", r"^\s*use\s+(?P<pkg>[\w\\]+);"),
-    ]);
+    m.insert(
+        "python",
+        vec![
+            ImportPattern::new("import", r"^\s*import\s+(?P<pkg>\w+)"),
+            ImportPattern::new("from-import", r"^\s*from\s+(?P<pkg>[\w.]+)\s+import"),
+        ],
+    );
+    m.insert(
+        "rust",
+        vec![
+            ImportPattern::new("use", r"^\s*use\s+(?:::)?(?P<pkg>[\w:]+)"),
+            ImportPattern::new("extern-crate", r"^\s*extern\s+crate\s+(?P<pkg>\w+)"),
+        ],
+    );
+    m.insert(
+        "go",
+        vec![
+            ImportPattern::new("import", r#"^\s*import\s+["](?P<pkg>[^"]+)["]"#),
+            ImportPattern::new("import-alias", r#"^\s*import\s+\w+\s+["](?P<pkg>[^"]+)["]"#),
+        ],
+    );
+    m.insert(
+        "java",
+        vec![ImportPattern::new(
+            "import",
+            r"^\s*import\s+(?:static\s+)?(?P<pkg>[\w.]+);",
+        )],
+    );
+    m.insert(
+        "ruby",
+        vec![
+            ImportPattern::new("require", r#"^\s*require\s+['"](?P<pkg>[^'"]+)['"]"#),
+            ImportPattern::new(
+                "require-rel",
+                r#"^\s*require_relative\s+['"](?P<pkg>[^'"]+)['"]"#,
+            ),
+            ImportPattern::new("gem", r#"^\s*gem\s+['"](?P<pkg>[^'"]+)['"]"#),
+        ],
+    );
+    m.insert(
+        "php",
+        vec![ImportPattern::new("use", r"^\s*use\s+(?P<pkg>[\w\\]+);")],
+    );
     m
 });
 
 /// Supported languages for checking
 pub fn supported_languages() -> &'static [&'static str] {
     &[
-        "javascript", "typescript", "jsx", "tsx",
-        "python", "rust", "go", "java",
-        "ruby", "php", "csharp", "kotlin",
-        "swift", "scala",
+        "javascript",
+        "typescript",
+        "jsx",
+        "tsx",
+        "python",
+        "rust",
+        "go",
+        "java",
+        "ruby",
+        "php",
+        "csharp",
+        "kotlin",
+        "swift",
+        "scala",
     ]
 }
 
@@ -247,7 +280,11 @@ fn extract_file_content(lines: &[&str]) -> Option<String> {
             }
         }
     }
-    if content.is_empty() { None } else { Some(content) }
+    if content.is_empty() {
+        None
+    } else {
+        Some(content)
+    }
 }
 
 #[cfg(test)]

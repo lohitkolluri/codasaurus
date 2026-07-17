@@ -169,8 +169,7 @@ fn check_deep_nesting(path: &str, lines: &[&str]) -> Option<Finding> {
                 max_depth
             ),
             suggestion: Some(
-                "Extract nested logic into separate functions to improve readability."
-                    .to_string(),
+                "Extract nested logic into separate functions to improve readability.".to_string(),
             ),
             evidence: None,
             codemod: None,
@@ -276,7 +275,12 @@ fn check_long_functions(path: &str, content: &str) -> Option<Finding> {
             let mut depth = 0;
             let mut found_body = false;
 
-            for (j, l) in lines.iter().enumerate().take(lines.len().min(start + 200)).skip(start) {
+            for (j, l) in lines
+                .iter()
+                .enumerate()
+                .take(lines.len().min(start + 200))
+                .skip(start)
+            {
                 depth += l.matches('{').count();
                 depth = depth.saturating_sub(l.matches('}').count());
                 if depth == 0 && j > start {
@@ -332,7 +336,11 @@ fn check_repeated_code(path: &str, lines: &[&str]) -> Option<Finding> {
         i += 1;
     }
 
-    let repeats: usize = blocks.values().filter(|v| v.len() > 1).map(|v| v.len()).sum();
+    let repeats: usize = blocks
+        .values()
+        .filter(|v| v.len() > 1)
+        .map(|v| v.len())
+        .sum();
 
     if repeats > 3 {
         Some(Finding {
@@ -408,10 +416,14 @@ mod tests {
             path: "test.rs".to_string(),
             language: "rust".to_string(),
             raw_content: content.to_string(),
-            lines: content.lines().enumerate().map(|(i, l)| crate::parser::SourceLine {
-                number: i + 1,
-                content: l.to_string(),
-            }).collect(),
+            lines: content
+                .lines()
+                .enumerate()
+                .map(|(i, l)| crate::parser::SourceLine {
+                    number: i + 1,
+                    content: l.to_string(),
+                })
+                .collect(),
             imports: vec![],
         };
         let findings = detect_over_engineering(&[file]);
@@ -422,17 +434,23 @@ mod tests {
     fn test_detect_boilerplate_long_function() {
         let mut lines = vec![];
         lines.push("fn foo() {".to_string());
-        for i in 0..70 { lines.push(format!("    let x_{} = {};", i, i)); }
+        for i in 0..70 {
+            lines.push(format!("    let x_{} = {};", i, i));
+        }
         lines.push("}".to_string());
         let content = lines.join("\n");
         let file = ParsedFile {
             path: "test.rs".to_string(),
             language: "rust".to_string(),
             raw_content: content,
-            lines: lines.iter().enumerate().map(|(i, l)| crate::parser::SourceLine {
-                number: i + 1,
-                content: l.to_string(),
-            }).collect(),
+            lines: lines
+                .iter()
+                .enumerate()
+                .map(|(i, l)| crate::parser::SourceLine {
+                    number: i + 1,
+                    content: l.to_string(),
+                })
+                .collect(),
             imports: vec![],
         };
         let findings = detect_boilerplate(&[file]);
@@ -446,12 +464,21 @@ mod tests {
             path: "test.rs".to_string(),
             language: "rust".to_string(),
             raw_content: content.to_string(),
-            lines: vec![crate::parser::SourceLine { number: 1, content: content.to_string() }],
+            lines: vec![crate::parser::SourceLine {
+                number: 1,
+                content: content.to_string(),
+            }],
             imports: vec![],
         };
         let findings_o = detect_over_engineering(std::slice::from_ref(&file));
         let findings_b = detect_boilerplate(&[file]);
-        assert!(findings_o.is_empty(), "small clean fn should not trigger over-engineering");
-        assert!(findings_b.is_empty(), "small clean fn should not trigger boilerplate");
+        assert!(
+            findings_o.is_empty(),
+            "small clean fn should not trigger over-engineering"
+        );
+        assert!(
+            findings_b.is_empty(),
+            "small clean fn should not trigger boilerplate"
+        );
     }
 }

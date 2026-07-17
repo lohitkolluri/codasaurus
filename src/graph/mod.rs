@@ -1,4 +1,3 @@
-
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::HashMap;
 
@@ -66,10 +65,7 @@ impl CodeGraph {
             kind,
         });
         self.node_indices.insert(name.to_string(), idx);
-        self.files
-            .entry(file.to_string())
-            .or_default()
-            .push(idx);
+        self.files.entry(file.to_string()).or_default().push(idx);
     }
 
     pub fn add_edge(&mut self, from: &str, to: &str, kind: EdgeKind) {

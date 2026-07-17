@@ -160,7 +160,10 @@ fn check_conventional_commits(gf: &GuidelineFile, _description: &str, findings: 
         Err(_) => return,
     };
 
-    let re = regex::Regex::new(r"^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(\(.+\))?!?: .+").unwrap();
+    let re = regex::Regex::new(
+        r"^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(\(.+\))?!?: .+",
+    )
+    .unwrap();
 
     let non_conventional: Vec<&str> = commits
         .iter()

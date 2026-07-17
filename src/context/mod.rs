@@ -8,18 +8,46 @@ use std::path::Path;
 
 /// Directories whose names (lowercased) are skipped from traversal entirely.
 const SKIP_DIRS: &[&str] = &[
-    "node_modules", "target", "build", "dist", ".git", ".svn",
-    "__pycache__", ".venv", "venv", "env", ".tox",
-    "vendor", ".next", ".nuxt", "out", "bin", "obj",
-    "coverage", ".nyc_output", "elm-stuff", ".gradle",
-    ".idea", ".vscode", ".terraform", ".serverless",
-    "third_party", "third-party",
+    "node_modules",
+    "target",
+    "build",
+    "dist",
+    ".git",
+    ".svn",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "env",
+    ".tox",
+    "vendor",
+    ".next",
+    ".nuxt",
+    "out",
+    "bin",
+    "obj",
+    "coverage",
+    ".nyc_output",
+    "elm-stuff",
+    ".gradle",
+    ".idea",
+    ".vscode",
+    ".terraform",
+    ".serverless",
+    "third_party",
+    "third-party",
 ];
 
 /// Dependency manifest file names we recognize (lowercased).
 const DEP_FILE_NAMES: &[&str] = &[
-    "package.json", "requirements.txt", "pyproject.toml", "setup.py",
-    "setup.cfg", "cargo.toml", "go.mod", "gemfile", "gemfile.lock",
+    "package.json",
+    "requirements.txt",
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    "cargo.toml",
+    "go.mod",
+    "gemfile",
+    "gemfile.lock",
 ];
 
 /// Maps a dep file name (lowered) to its registry label.
@@ -133,7 +161,8 @@ fn extract_pyproject_deps(content: &str) -> Vec<String> {
             if let Some(deps) = project.get("dependencies").and_then(|d| d.as_array()) {
                 for dep in deps {
                     if let Some(s) = dep.as_str() {
-                        let pkg = s.split(&['=', '<', '>', '~', '!', ';', ' ', '\t'][..])
+                        let pkg = s
+                            .split(&['=', '<', '>', '~', '!', ';', ' ', '\t'][..])
                             .next()
                             .unwrap_or("")
                             .trim()
@@ -225,7 +254,11 @@ fn count_lines(path: &Path) -> usize {
 fn read_dep_file(path: &Path) -> Option<(usize, String)> {
     let content = std::fs::read_to_string(path).ok()?;
     // content.lines().count() correctly handles files with and without trailing newline
-    let lines = if content.is_empty() { 0 } else { content.lines().count() };
+    let lines = if content.is_empty() {
+        0
+    } else {
+        content.lines().count()
+    };
     Some((lines, content))
 }
 
@@ -379,7 +412,8 @@ pub fn build_repo_context(root: &str, guidelines_override: Option<&str>) -> Opti
                 root_files.push(fname);
             }
         } else if depth == 2 {
-            let parent = path.parent()
+            let parent = path
+                .parent()
                 .and_then(|p| p.file_name())
                 .and_then(|n| n.to_str())
                 .map(|n| n.to_string());
@@ -423,9 +457,7 @@ pub fn build_repo_context(root: &str, guidelines_override: Option<&str>) -> Opti
                 };
                 if !pkgs.is_empty() {
                     let registry = file_name_to_registry(&file_name_lower).unwrap_or("pypi");
-                    deps.entry(registry.to_string())
-                        .or_default()
-                        .extend(pkgs);
+                    deps.entry(registry.to_string()).or_default().extend(pkgs);
                 }
                 // Track language for dep files too
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {

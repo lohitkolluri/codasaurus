@@ -81,21 +81,14 @@ pub fn current_branch() -> Result<String> {
         .output()
         .context("Failed to get current branch")?;
 
-    let branch = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_string();
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
     Ok(branch)
 }
 
 /// Get recent commit messages (up to `count`)
 pub fn recent_commits(count: usize) -> Result<Vec<String>> {
     let output = std::process::Command::new("git")
-        .args([
-            "log",
-            &format!("-{}", count),
-            "--format=%B",
-            "--no-color",
-        ])
+        .args(["log", &format!("-{}", count), "--format=%B", "--no-color"])
         .output()
         .context("Failed to get recent commits")?;
 
@@ -116,8 +109,6 @@ pub fn repo_root() -> Result<String> {
         .output()
         .context("Failed to get repository root")?;
 
-    let root = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .to_string();
+    let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
     Ok(root)
 }

@@ -81,7 +81,9 @@ fn build_dep_map(files: &[ParsedFile]) -> std::collections::HashMap<String, Vec<
         // npm
         if path.ends_with("package.json") {
             let pkgs = extract_npm_deps(&file.raw_content);
-            map.entry("npm".to_string()).or_insert_with(Vec::new).extend(pkgs);
+            map.entry("npm".to_string())
+                .or_insert_with(Vec::new)
+                .extend(pkgs);
         }
 
         // Python
@@ -91,13 +93,17 @@ fn build_dep_map(files: &[ParsedFile]) -> std::collections::HashMap<String, Vec<
             || path.ends_with("setup.cfg")
         {
             let pkgs = extract_python_deps(&file.raw_content);
-            map.entry("pypi".to_string()).or_insert_with(Vec::new).extend(pkgs);
+            map.entry("pypi".to_string())
+                .or_insert_with(Vec::new)
+                .extend(pkgs);
         }
 
         // Rust
         if path.ends_with("cargo.toml") {
             let pkgs = extract_cargo_deps(&file.raw_content);
-            map.entry("crates.io".to_string()).or_insert_with(Vec::new).extend(pkgs);
+            map.entry("crates.io".to_string())
+                .or_insert_with(Vec::new)
+                .extend(pkgs);
         }
     }
 
@@ -173,5 +179,3 @@ fn is_dep_file(path: &str) -> bool {
     let filename = path.rsplit('/').next().unwrap_or("").to_lowercase();
     DEP_FILE_NAMES.contains(filename.as_str())
 }
-
-
