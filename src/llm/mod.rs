@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::fmt;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,9 +149,73 @@ pub fn review_schema() -> serde_json::Value {
     })
 }
 
-/// Reviews a diff by sending it to an LLM and parsing the structured response.
-pub async fn review_diff(diff: &str, config: &LlmConfig) -> Result<LlmReviewOutput> {
-    let prompt = build_review_prompt(diff);
+/// Context about the review being performed
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReviewContext {
+    /// Repository name (e.g. "owner/repo")
+    pub repo: Option<String>,
+
+    /// Branch or ref being reviewed
+    pub branch: Option<String>,
+
+    /// PR title if reviewing a pull request
+    pub pr_title: Option<String>,
+
+    /// PR description / body
+    pub pr_description: Option<String>,
+
+    /// Linked issue numbers and their content
+    pub linked_issues: Vec<IssueContext>,
+
+    /// Related PRs that touched the same areas
+    pub related_prs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IssueContext {
+    pub number: u64,
+    pub title: String,
+    pub body: Option<String>,
+}
+
+impl fmt::Display for ReviewContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(repo) = &self.repo {
+            writeln!(f, "Repository: {}", repo)?;
+        }
+        if let Some(branch) = &self.branch {
+            writeln!(f, "Branch: {}", branch)?;
+        }
+        if let Some(title) = &self.pr_title {
+            writeln!(f, "PR Title: {}", title)?;
+        }
+        if let Some(body) = &self.pr_description {
+            writeln!(f, "PR Description: {}", body)?;
+        }
+        if !self.linked_issues.is_empty() {
+            writeln!(f, "\nLinked Issues:")?;
+            for issue in &self.linked_issues {
+                writeln!(f, "  #{}: {}", issue.number, issue.title)?;
+                if let Some(body) = &issue.body {
+                    let preview: String = body.chars().take(200).collect();
+                    writeln!(f, "    {}", preview)?;
+                }
+            }
+        }
+        if !self.related_prs.is_empty() {
+            writeln!(f, "\nRelated PRs: {}", self.related_prs.join(", "))?;
+        }
+        Ok(())
+    }
+}
+
+/// Reviews a diff with optional PR/issue context.
+pub async fn review_diff(
+    diff: &str,
+    config: &LlmConfig,
+    context: Option<&ReviewContext>,
+) -> Result<LlmReviewOutput> {
+    let prompt = build_review_prompt(diff, context);
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
@@ -168,12 +233,38 @@ pub async fn review_diff(diff: &str, config: &LlmConfig) -> Result<LlmReviewOutp
         }
     });
 
+    let system_prompt = "\
+You are a senior staff engineer reviewing a pull request. You have 15+ years of experience \
+shipping production systems and have seen every category of bug, anti-pattern, and design \
+mistake. You are direct, precise, and opinionated.
+
+HOW YOU REVIEW:
+- You read the diff with a focus on what will break in production, not style or nitpicks.
+- You prioritize issues by impact: security holes > correctness bugs > performance > maintainability.
+- You ignore whitespace, import ordering, naming conventions, and other bikeshed topics.
+- You are comfortable saying \"no issues found\" when the code is solid.
+
+YOUR OUTPUT:
+- For each issue: file:line, severity (critical/warning/info), category, description, and a \
+concrete suggested fix (<=30 words).
+- Your verdict is one of: \"ship\" (merge as-is), \"fix-before-ship\" (address issues first), \
+or \"hold\" (needs design discussion).
+- If you are unsure about a finding, set confidence to \"low\" and explain why. \
+Never report something you made up.
+
+RULES:
+1. Only report issues you are confident are real. False positives erode trust.
+2. No evidence = no finding. Every issue must cite the specific file and line.
+3. If the PR description references requirements, verify the code actually implements them.
+4. Consider: null safety, error handling, concurrency, input validation, authz, data leakage.
+5. If the diff is large, focus on the most impactful changes, not the first ones you see.";
+
     let body = json!({
         "model": config.model,
         "messages": [
             {
                 "role": "system",
-                "content": "You are a code review assistant. Review the provided diff and respond with a JSON object matching the specified schema."
+                "content": system_prompt
             },
             {
                 "role": "user",
@@ -198,11 +289,7 @@ pub async fn review_diff(diff: &str, config: &LlmConfig) -> Result<LlmReviewOutp
     let status = resp.status();
     if !status.is_success() {
         let error_text = resp.text().await.unwrap_or_default();
-        bail!(
-            "LLM API returned {}: {}",
-            status,
-            error_text
-        );
+        bail!("LLM API returned {}: {}", status, error_text);
     }
 
     let resp_json: serde_json::Value = resp.json().await?;
@@ -211,13 +298,13 @@ pub async fn review_diff(diff: &str, config: &LlmConfig) -> Result<LlmReviewOutp
         .context("LLM response missing content")?;
 
     let output: LlmReviewOutput =
-        serde_json::from_str(content).context("Failed to parse LLM response as LlmReviewOutput")?;
+        serde_json::from_str(content).context("Failed to parse LLM response")?;
 
     Ok(output)
 }
 
-/// Builds a prompt for reviewing a code diff.
-pub fn build_review_prompt(diff: &str) -> String {
+/// Builds a prompt for reviewing a code diff, with optional PR/issue context.
+pub fn build_review_prompt(diff: &str, context: Option<&ReviewContext>) -> String {
     const MAX_DIFF_LENGTH: usize = 8000;
 
     let truncated = if diff.len() > MAX_DIFF_LENGTH {
@@ -231,22 +318,43 @@ pub fn build_review_prompt(diff: &str) -> String {
         diff.to_string()
     };
 
-    format!(
-        r#"Review the following code diff and identify potential issues.
+    let context_section = match context {
+        Some(ctx) => {
+            let ctx_str = ctx.to_string();
+            if ctx_str.trim().is_empty() {
+                String::new()
+            } else {
+                format!("---\n\nContext:\n{}\n", ctx_str)
+            }
+        }
+        None => String::new(),
+    };
 
-Focus on these areas:
-- **Security**: Vulnerabilities, injection risks, unsafe handling of inputs
-- **Logic bugs**: Off-by-one, incorrect conditions, missing edge cases
-- **API misuse**: Incorrect function signatures, missing error handling
-- **Maintainability**: Dead code, excessive complexity, poor naming
-- **Edge cases**: Null/unexpected inputs, boundary conditions, concurrency issues
+    if context_section.is_empty() {
+        format!(
+            r#"Review the diff below.
 
-IMPORTANT: Only report issues you are highly confident about. False positives are worse than missing a real issue.
+Focus on security, logic bugs, API misuse, and edge cases.
+Only report issues you are highly confident about.
 
 Diff:
 ```
 {}
 ```"#,
-        truncated
-    )
+            truncated
+        )
+    } else {
+        format!(
+            r#"{}Review the diff below.
+
+Focus on security, logic bugs, API misuse, and edge cases.
+Only report issues you are highly confident about.
+
+Diff:
+```
+{}
+```"#,
+            context_section, truncated
+        )
+    }
 }

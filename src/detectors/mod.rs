@@ -124,7 +124,7 @@ pub async fn run_llm(parsed_files: &[ParsedFile], _config: &Config) -> Findings 
     };
 
     // Call crate::llm::review_diff()
-    let Ok(output) = crate::llm::review_diff(&diff, &llm_cfg).await else {
+    let Ok(output) = crate::llm::review_diff(&diff, &llm_cfg, None).await else {
         return Findings::new();
     };
 
