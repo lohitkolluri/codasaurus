@@ -5,6 +5,10 @@
   <img src="https://img.shields.io/badge/rust-1.85+-blue" alt="Rust">
 </p>
 
+<p align="center">
+  <img src="assets/logo.png" alt="Codasaurus logo" width="240">
+</p>
+
 <h1 align="center">🦕 Codasaurus</h1>
 <p align="center"><b>Munches on AI-generated bugs so you don't have to.</b></p>
 <p align="center">
