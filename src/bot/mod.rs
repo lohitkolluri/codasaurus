@@ -6,6 +6,7 @@ use axum::{
     Json, Router,
 };
 use serde::Deserialize;
+use tower_http::limit::RequestBodyLimitLayer;
 
 mod auth;
 mod review;
@@ -26,7 +27,8 @@ pub async fn serve(config: BotConfig) -> Result<()> {
     let app = Router::new()
         .route("/health", get(health))
         .route("/webhook", post(handle_webhook))
-        .with_state(config);
+        .with_state(config)
+        .layer(RequestBodyLimitLayer::new(1024 * 1024));
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
@@ -76,7 +78,9 @@ async fn handle_webhook(
                             pull_request: Some(pr),
                             _repo: None,
                         };
-                        let _ = review::review_pr(&t, &wrapped).await;
+                        if let Err(e) = review::review_pr(&t, &wrapped).await {
+                            eprintln!("  Review error: {}", e);
+                        }
                     }
                     Err(e) => eprintln!("  Auth error: {}", e),
                 }

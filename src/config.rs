@@ -12,6 +12,9 @@ pub struct Config {
 
     #[serde(default)]
     pub registry: RegistryConfig,
+
+    #[serde(default)]
+    pub guidelines: GuidelinesConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -47,6 +50,10 @@ pub struct CheckConfig {
     /// Detect TODO/FIXME placeholders left by AI
     #[serde(default = "default_true")]
     pub todo_leaks: bool,
+
+    /// Validate PR/changes against repo contribution guidelines
+    #[serde(default = "default_true")]
+    pub guidelines: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -69,6 +76,16 @@ pub struct RegistryConfig {
     /// Cache registry responses for N seconds
     #[serde(default = "default_cache_ttl")]
     pub cache_ttl_secs: u64,
+}
+
+/// Per-repo contribution guideline configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GuidelinesConfig {
+    /// Path or directory to contributing guidelines (overrides auto-discovery).
+    /// Relative paths are resolved from the repo root.
+    /// Also set via CONTRIBUTING_GUIDELINES env var (takes precedence).
+    #[serde(default)]
+    pub contributing_guidelines: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -103,6 +120,7 @@ impl Default for Config {
                 boilerplate: true,
                 stale_api: false,
                 todo_leaks: true,
+                guidelines: true,
             },
             behavior: BehaviorConfig {
                 default_severity: "warn".to_string(),
@@ -112,6 +130,7 @@ impl Default for Config {
                 timeout_ms: 5000,
                 cache_ttl_secs: 3600,
             },
+            guidelines: GuidelinesConfig::default(),
         }
     }
 }
@@ -159,6 +178,7 @@ over_engineering = true
 boilerplate = true
 stale_api = false
 todo_leaks = true
+guidelines = true
 
 [behavior]
 default_severity = "warn"
@@ -167,5 +187,9 @@ strict = false
 [registry]
 timeout_ms = 5000
 cache_ttl_secs = 3600
+
+# Per-repo contribution guidelines path (overrides auto-discovery)
+# [guidelines]
+# contributing_guidelines = "docs/CONTRIBUTING.md"
 "#
 }

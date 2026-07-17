@@ -1,15 +1,20 @@
 use anyhow::Result;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 mod npm;
 mod pypi;
 mod crates_io;
 
-static CACHE: Lazy<Mutex<HashMap<String, (bool, Instant)>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+/// Default cache TTL in seconds (can be overridden via `set_cache_ttl`)
+static CACHE_TTL: Lazy<Mutex<u64>> = Lazy::new(|| Mutex::new(3600));
+
+/// Readers don't block each other — only writes are exclusive.
+/// Avoids the double-lock TOCTOU pattern of the old Mutex cache.
+static CACHE: Lazy<RwLock<HashMap<String, (bool, Instant)>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 #[allow(dead_code)]
 static BLOCKING_CLIENT: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
@@ -19,12 +24,30 @@ static BLOCKING_CLIENT: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
         .expect("Failed to build HTTP client")
 });
 
+/// Override the default cache TTL
+#[allow(dead_code)]
+pub fn set_cache_ttl(secs: u64) {
+    if let Ok(mut ttl) = CACHE_TTL.lock() {
+        *ttl = secs;
+    }
+}
+
+/// Get the current cache TTL in seconds
+#[allow(dead_code)]
+pub fn get_cache_ttl() -> u64 {
+    CACHE_TTL.lock().map(|t| *t).unwrap_or(3600)
+}
+
 pub fn check_package(registry: &str, package: &str) -> Result<Option<bool>> {
     let cache_key = format!("{}:{}", registry, package);
+    let ttl_secs = get_cache_ttl();
     {
-        let cache = CACHE.lock().unwrap();
+        let cache = CACHE.read().unwrap_or_else(|e| {
+            eprintln!("Warning: cache RwLock poisoned");
+            e.into_inner()
+        });
         if let Some((result, time)) = cache.get(&cache_key) {
-            if time.elapsed() < Duration::from_secs(3600) {
+            if time.elapsed() < Duration::from_secs(ttl_secs) {
                 return Ok(Some(*result));
             }
         }
@@ -36,10 +59,52 @@ pub fn check_package(registry: &str, package: &str) -> Result<Option<bool>> {
         _ => return Ok(None),
     };
     if let Ok(Some(exists)) = &result {
-        let mut cache = CACHE.lock().unwrap();
+        let mut cache = CACHE.write().unwrap_or_else(|e| {
+            eprintln!("Warning: cache RwLock poisoned");
+            e.into_inner()
+        });
         cache.insert(cache_key, (*exists, Instant::now()));
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cache_ttl_default() {
+        assert_eq!(get_cache_ttl(), 3600);
+    }
+
+    #[test]
+    fn test_cache_ttl_set_and_get() {
+        set_cache_ttl(600);
+        assert_eq!(get_cache_ttl(), 600);
+        set_cache_ttl(3600); // restore
+    }
+
+    #[test]
+    fn test_extract_package_name() {
+        assert_eq!(
+            crate::detectors::extract_package_name("react").as_deref(),
+            Some("react")
+        );
+        assert_eq!(
+            crate::detectors::extract_package_name("@scope/package").as_deref(),
+            Some("@scope/package")
+        );
+        assert_eq!(
+            crate::detectors::extract_package_name("lodash/fp").as_deref(),
+            Some("lodash")
+        );
+    }
+}
+
+/// Initialize cache TTL from RegistryConfig
+#[allow(dead_code)]
+pub fn init_cache_from_config(config: &crate::config::Config) {
+    set_cache_ttl(config.registry.cache_ttl_secs);
 }
 
 #[allow(dead_code)]

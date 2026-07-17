@@ -1,9 +1,10 @@
-use anyhow::Result;
+
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::HashMap;
 
 mod blast;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SymbolNode {
     pub name: String,
@@ -11,6 +12,7 @@ pub struct SymbolNode {
     pub kind: SymbolKind,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum SymbolKind {
     Function,
@@ -20,11 +22,13 @@ pub enum SymbolKind {
     Type,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Edge {
     pub kind: EdgeKind,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum EdgeKind {
     Calls,
@@ -36,8 +40,14 @@ pub enum EdgeKind {
 /// Codebase dependency graph
 pub struct CodeGraph {
     graph: DiGraph<SymbolNode, EdgeKind>,
-    node_indices: HashMap<String, NodeIndex>,
-    files: HashMap<String, Vec<NodeIndex>>,
+    pub node_indices: HashMap<String, NodeIndex>,
+    pub files: HashMap<String, Vec<NodeIndex>>,
+}
+
+impl Default for CodeGraph {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CodeGraph {
@@ -100,6 +110,7 @@ impl CodeGraph {
     }
 
     /// Get all files that contain symbols affected by a change
+    #[allow(dead_code)]
     pub fn affected_files(&self, symbol: &str, max_hops: usize) -> Vec<&str> {
         let mut files: Vec<&str> = self
             .blast_radius(symbol, max_hops)

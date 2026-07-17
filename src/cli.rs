@@ -65,14 +65,31 @@ pub fn run_check(
             if !diff.is_empty() {
                 let rt = match tokio::runtime::Runtime::new() {
                     Ok(r) => r,
-                    Err(_) => return Ok(findings),
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: Failed to create async runtime: {}; skipping LLM review",
+                            e
+                        );
+                        return Ok(findings);
+                    }
                 };
 
                 let spin = clx::progress::ProgressJobBuilder::new()
                     .prop("message", "Running LLM review...")
                     .start();
 
-                let result = rt.block_on(crate::llm::review_diff(&diff, &llm_cfg, None));
+                let guidelines_override = config.guidelines.contributing_guidelines.as_deref();
+                let repo_context_str = git::repo_root()
+                    .ok()
+                    .and_then(|r| crate::context::build_repo_context(&r, guidelines_override))
+                    .map(|c| c.to_string());
+
+                let review_ctx = crate::llm::ReviewContext {
+                    repo_context: repo_context_str,
+                    ..Default::default()
+                };
+
+                let result = rt.block_on(crate::llm::review_diff(&diff, &llm_cfg, Some(&review_ctx)));
 
                 spin.set_status(clx::progress::ProgressStatus::Done);
 
@@ -88,6 +105,7 @@ pub fn run_check(
                                 message: issue.description,
                                 suggestion: issue.suggestion,
                                 evidence: None,
+                                codemod: None,
                             });
                         }
                     }
@@ -132,6 +150,16 @@ pub async fn run_watch(path: &str) -> Result<()> {
                 if last_check.elapsed() >= Duration::from_millis(500) {
                     let diff = git::get_staged_diff().unwrap_or_default();
                     if !diff.is_empty() {
+                        let config = match crate::config::load() {
+                            Ok(c) => c,
+                            Err(e) => {
+                                eprintln!(
+                                    "Warning: Could not load config file: {}; using defaults",
+                                    e
+                                );
+                                crate::config::Config::default()
+                            }
+                        };
                         let findings = run_check(
                             &true,
                             &None,
@@ -139,7 +167,7 @@ pub async fn run_watch(path: &str) -> Result<()> {
                             &false,
                             &false,
                             &None,
-                            &crate::config::Config::default(),
+                            &config,
                         )
                         .unwrap_or_default();
 
@@ -172,10 +200,10 @@ fn process_file(file_path: &str, findings: &mut Findings, config: &Config) {
                         detectors::run_all(&[parsed], config).findings,
                     );
                 }
-                Err(_) => {}
+                Err(e) => eprintln!("Warning: failed to parse file {}: {}", file_path, e)
             }
         }
-        Err(_) => {}
+        Err(e) => eprintln!("Warning: failed to read file {}: {}", file_path, e)
     }
 }
 

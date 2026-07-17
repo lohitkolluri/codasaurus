@@ -1,4 +1,4 @@
-mod store;
+pub mod store;
 
 /// A rule learned from user feedback
 #[allow(dead_code)]

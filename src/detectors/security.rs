@@ -31,6 +31,7 @@ pub fn detect_secrets(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                             pattern.name
                         )),
                         evidence: Some(format!("`{}`", masked)),
+                        codemod: None,
                     });
                 }
             }
@@ -47,7 +48,7 @@ pub fn detect_todos(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     for file in parsed_files {
         for line in &file.lines {
             let trimmed = line.content.trim();
-            let lower = trimmed.to_lowercase();
+            let lower = trimmed.to_ascii_lowercase();
 
             if lower.contains("todo")
                 || lower.contains("fixme")
@@ -71,6 +72,7 @@ pub fn detect_todos(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                     ),
                     suggestion: Some("Complete the implementation or remove the placeholder.".to_string()),
                     evidence: Some(trimmed.chars().take(120).collect()),
+                    codemod: None,
                 });
             }
         }
@@ -80,11 +82,13 @@ pub fn detect_todos(parsed_files: &[ParsedFile]) -> Vec<Finding> {
 }
 
 fn mask_value(value: &str) -> String {
-    if value.len() <= 8 {
+    // Must not panic on multi-byte UTF-8 — safe character-level slicing
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() <= 8 {
         return "***".to_string();
     }
-    let prefix = &value[..4];
-    let suffix = &value[value.len() - 4..];
+    let prefix: String = chars.iter().take(4).collect();
+    let suffix: String = chars.iter().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
     format!("{}...{}", prefix, suffix)
 }
 

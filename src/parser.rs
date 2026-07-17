@@ -30,14 +30,14 @@ pub struct Import {
 /// Parse a file and extract structured information
 pub fn parse_file(path: &str, content: &str) -> Result<ParsedFile> {
     let language = detect_language(path);
-    let lines: Vec<SourceLine> = content
-        .lines()
-        .enumerate()
-        .map(|(i, l)| SourceLine {
+    let total_lines = content.lines().count();
+    let mut lines = Vec::with_capacity(total_lines);
+    for (i, l) in content.lines().enumerate() {
+        lines.push(SourceLine {
             number: i + 1,
             content: l.to_string(),
-        })
-        .collect();
+        });
+    }
 
     let imports = extract_imports(&language, &lines);
 
@@ -180,8 +180,8 @@ static IMPORT_PATTERNS: Lazy<HashMap<&'static str, Vec<ImportPattern>>> = Lazy::
 });
 
 /// Supported languages for checking
-pub fn supported_languages() -> Vec<&'static str> {
-    vec![
+pub fn supported_languages() -> &'static [&'static str] {
+    &[
         "javascript", "typescript", "jsx", "tsx",
         "python", "rust", "go", "java",
         "ruby", "php", "csharp", "kotlin",
@@ -197,9 +197,10 @@ pub fn is_supported(path: &str) -> bool {
 
 #[allow(dead_code)]
 pub fn parse_files_from_diff(diff: &str) -> Result<Vec<ParsedFile>> {
-    let mut files = Vec::new();
+    let diff_lines = diff.lines().count();
+    let mut files = Vec::with_capacity(diff_lines / 20 + 1); // ~1 file per 20 diff lines
     let mut current_path = String::new();
-    let mut current_lines = Vec::new();
+    let mut current_lines = Vec::with_capacity(diff_lines / 10 + 1);
 
     for line in diff.lines() {
         if let Some(path) = line.strip_prefix("+++ b/") {
@@ -247,4 +248,69 @@ fn extract_file_content(lines: &[&str]) -> Option<String> {
         }
     }
     if content.is_empty() { None } else { Some(content) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detect_language() {
+        assert_eq!(detect_language("file.rs"), "rust");
+        assert_eq!(detect_language("file.py"), "python");
+        assert_eq!(detect_language("file.ts"), "typescript");
+        assert_eq!(detect_language("file.js"), "javascript");
+        assert_eq!(detect_language("file.go"), "go");
+        assert_eq!(detect_language("file.java"), "java");
+        assert_eq!(detect_language("file.unknown"), "unknown");
+    }
+
+    #[test]
+    fn test_parse_js_imports() {
+        let content = r#"import React from 'react';
+import { useState } from 'react';
+import fs from 'node:fs';
+const express = require('express');"#;
+        let parsed = parse_file("test.js", content).unwrap();
+        assert_eq!(parsed.language, "javascript");
+        assert!(!parsed.imports.is_empty(), "should extract imports");
+        let names: Vec<&str> = parsed.imports.iter().map(|i| i.name.as_str()).collect();
+        assert!(names.contains(&"react"), "should find react import");
+    }
+
+    #[test]
+    fn test_parse_python_imports() {
+        let content = "import os\nfrom datetime import datetime\nimport numpy as np";
+        let parsed = parse_file("test.py", content).unwrap();
+        assert_eq!(parsed.language, "python");
+        let names: Vec<&str> = parsed.imports.iter().map(|i| i.name.as_str()).collect();
+        assert!(names.contains(&"os"), "should find os import");
+        assert!(names.contains(&"datetime"), "should find datetime import");
+    }
+
+    #[test]
+    fn test_parse_rust_imports() {
+        let content = "use std::collections::HashMap;\nuse serde::{Deserialize, Serialize};";
+        let parsed = parse_file("test.rs", content).unwrap();
+        assert_eq!(parsed.language, "rust");
+        assert!(!parsed.imports.is_empty(), "should extract rust imports");
+    }
+
+    #[test]
+    fn test_unsupported_file() {
+        assert!(!is_supported("file.bin"));
+        assert!(is_supported("file.rs"));
+        assert!(is_supported("file.py"));
+    }
+
+    #[test]
+    fn test_parse_files_from_diff() {
+        let diff = "diff --git a/test.js b/test.js\nnew file mode 100644\n--- /dev/null\n+++ b/test.js\n@@ -0,0 +1 @@\n+import React from 'react';";
+        let files = parse_files_from_diff(diff).unwrap();
+        assert!(!files.is_empty(), "should parse files from diff");
+        if let Some(f) = files.first() {
+            assert_eq!(f.path, "test.js");
+            assert!(!f.imports.is_empty());
+        }
+    }
 }

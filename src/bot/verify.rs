@@ -1,5 +1,6 @@
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
+use subtle::ConstantTimeEq;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -17,6 +18,6 @@ pub fn verify_signature(secret: &str, body: &[u8], signature: &str) -> bool {
     mac.update(body);
     let computed = hex::encode(mac.finalize().into_bytes());
 
-    // Constant-time comparison
-    computed == sig_hex
+    // Constant-time comparison to prevent timing side-channel attacks
+    bool::from(computed.as_bytes().ct_eq(sig_hex.as_bytes()))
 }

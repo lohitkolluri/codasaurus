@@ -1,0 +1,12 @@
+pub mod bot;
+pub mod cli;
+pub mod config;
+pub mod context;
+pub mod detectors;
+pub mod git;
+pub mod graph;
+pub mod learning;
+pub mod llm;
+pub mod output;
+pub mod parser;
+pub mod registry;

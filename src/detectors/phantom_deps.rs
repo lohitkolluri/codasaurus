@@ -1,15 +1,14 @@
 use crate::detectors::Finding;
 use crate::parser::ParsedFile;
+use once_cell::sync::Lazy;
 
 /// Detect packages used in imports but not declared in dependency files
 pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     let mut findings = Vec::new();
 
-    // Collect all dependency files and their declared packages
     let dep_map = build_dep_map(parsed_files);
 
     for file in parsed_files {
-        // Skip dependency files themselves
         if is_dep_file(&file.path) {
             continue;
         }
@@ -43,6 +42,12 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
             }
 
             if !declared.contains(&package) {
+                let codemod = match registry {
+                    "npm" => Some(format!("npm install {}", package)),
+                    "pypi" => Some(format!("pip install {}", package)),
+                    "crates.io" => Some(format!("cargo add {}", package)),
+                    _ => None,
+                };
                 findings.push(Finding {
                     detector: "phantom-deps".to_string(),
                     severity: "blocking".to_string(),
@@ -58,6 +63,7 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                         package
                     )),
                     evidence: Some(import.name.clone()),
+                    codemod,
                 });
             }
         }
@@ -148,17 +154,24 @@ fn extract_cargo_deps(content: &str) -> Vec<String> {
     pkgs
 }
 
+static DEP_FILE_NAMES: Lazy<std::collections::HashSet<&'static str>> = Lazy::new(|| {
+    let mut set = std::collections::HashSet::new();
+    set.insert("package.json");
+    set.insert("requirements.txt");
+    set.insert("pyproject.toml");
+    set.insert("cargo.toml");
+    set.insert("setup.py");
+    set.insert("setup.cfg");
+    set.insert("go.mod");
+    set.insert("gemfile");
+    set.insert("gemfile.lock");
+    set
+});
+
 fn is_dep_file(path: &str) -> bool {
-    let lower = path.to_lowercase();
-    lower.ends_with("package.json")
-        || lower.ends_with("requirements.txt")
-        || lower.ends_with("pyproject.toml")
-        || lower.ends_with("cargo.toml")
-        || lower.ends_with("setup.py")
-        || lower.ends_with("setup.cfg")
-        || lower.ends_with("go.mod")
-        || lower.ends_with("gemfile")
-        || lower.ends_with("gemfile.lock")
+    // O(1) HashSet lookup instead of linear OR chain
+    let filename = path.rsplit('/').next().unwrap_or("").to_lowercase();
+    DEP_FILE_NAMES.contains(filename.as_str())
 }
 
 

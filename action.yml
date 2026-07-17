@@ -1,0 +1,46 @@
+name: 'Codasaurus Code Review'
+description: 'Catches hallucinated imports, phantom deps, security holes, and AI slop in pull requests'
+author: 'Lohit Kolluri'
+
+branding:
+  icon: 'shield'
+  color: 'green'
+
+inputs:
+  llm:
+    description: 'Enable LLM-powered deep review'
+    required: false
+    default: false
+  ci:
+    description: 'Exit with non-zero on blocking issues'
+    required: false
+    default: true
+  config:
+    description: 'Path to config'
+    required: false
+    default: '.codasaurus.toml'
+  diff:
+    description: 'Git ref to diff against'
+    required: false
+    default: '${{ github.event.pull_request.base.sha }}'
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions-rust-lang/setup-rust-toolchain@v1
+
+    - name: Install codasaurus
+      shell: bash
+      run: cargo install --git https://github.com/lohitkolluri/codasaurus codasaurus
+
+    - name: Run codasaurus check
+      shell: bash
+      run: |
+        FLAGS=""
+        if [[ "${{ inputs.ci }}" == "true" ]]; then
+          FLAGS="$FLAGS --ci"
+        fi
+        if [[ "${{ inputs.llm }}" == "true" ]]; then
+          FLAGS="$FLAGS --llm"
+        fi
+        codasaurus check --diff "${{ inputs.diff }}" --config "${{ inputs.config }}" $FLAGS

@@ -1,0 +1,12 @@
+services:
+  codasaurus-bot:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      GITHUB_APP_ID: ""
+      GITHUB_APP_PRIVATE_KEY: ""
+      GITHUB_WEBHOOK_SECRET: ""
+      OPENROUTER_API_KEY: ""
+      ENVIRONMENT: "dev"
+    restart: unless-stopped

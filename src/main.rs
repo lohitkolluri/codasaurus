@@ -1,16 +1,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-
-mod bot;
-mod cli;
-mod config;
-mod detectors;
-mod git;
-mod learning;
-mod llm;
-mod output;
-mod parser;
-mod registry;
+use codasaurus::config;
+use codasaurus::cli;
+use codasaurus::bot;
+use codasaurus::output;
 
 #[derive(Parser)]
 #[command(name = "codasaurus")]

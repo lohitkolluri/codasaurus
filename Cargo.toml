@@ -55,7 +55,7 @@ clx = "2"
 # Web server (for GitHub App bot)
 axum = "0.8"
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.6", features = ["cors", "limit"] }
 tokio-util = "0.7"
 
 # Database (for feedback learning loop)
@@ -68,6 +68,7 @@ uuid = { version = "1", features = ["v4"] }
 jsonwebtoken = "9"
 
 # Crypto
+subtle = "2.6"
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"

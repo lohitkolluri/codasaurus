@@ -74,6 +74,40 @@ pub fn is_git_repo() -> bool {
         .unwrap_or(false)
 }
 
+/// Get the current branch name
+pub fn current_branch() -> Result<String> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .context("Failed to get current branch")?;
+
+    let branch = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .to_string();
+    Ok(branch)
+}
+
+/// Get recent commit messages (up to `count`)
+pub fn recent_commits(count: usize) -> Result<Vec<String>> {
+    let output = std::process::Command::new("git")
+        .args([
+            "log",
+            &format!("-{}", count),
+            "--format=%B",
+            "--no-color",
+        ])
+        .output()
+        .context("Failed to get recent commits")?;
+
+    let raw = String::from_utf8_lossy(&output.stdout).to_string();
+    let commits: Vec<String> = raw
+        .split("\n\n")
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty())
+        .collect();
+    Ok(commits)
+}
+
 /// Get the repository root path
 #[allow(dead_code)]
 pub fn repo_root() -> Result<String> {

@@ -10,22 +10,18 @@ pub fn detect_over_engineering(parsed_files: &[ParsedFile]) -> Vec<Finding> {
         let content = &file.raw_content;
         let lines: Vec<&str> = content.lines().collect();
 
-        // Check for unnecessary interface/trait with single implementation
         if let Some(finding) = check_single_impl_interface(&file.path, &lines) {
             findings.push(finding);
         }
 
-        // Check for deep nesting (more than 4 levels is suspicious in AI code)
         if let Some(finding) = check_deep_nesting(&file.path, &lines) {
             findings.push(finding);
         }
 
-        // Check for factory pattern with very few variants
         if let Some(finding) = check_unnecessary_factory(&file.path, content) {
             findings.push(finding);
         }
 
-        // Check for excessive abstraction layers
         if let Some(finding) = check_abstraction_overload(&file.path, content) {
             findings.push(finding);
         }
@@ -43,17 +39,14 @@ pub fn detect_boilerplate(parsed_files: &[ParsedFile]) -> Vec<Finding> {
         let lines: Vec<&str> = content.lines().collect();
         let line_count = lines.len();
 
-        // Check for very long functions/methods (AI tendency: write long functions)
         if let Some(finding) = check_long_functions(&file.path, content) {
             findings.push(finding);
         }
 
-        // Check for repeated code blocks
         if let Some(finding) = check_repeated_code(&file.path, &lines) {
             findings.push(finding);
         }
 
-        // Check for excessive comments (AI tendency: over-comment)
         if line_count > 30 {
             let comment_ratio = count_comment_lines(&lines) as f64 / line_count as f64;
             if comment_ratio > 0.4 {
@@ -72,11 +65,11 @@ pub fn detect_boilerplate(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                             .to_string(),
                 ),
                     evidence: None,
+                    codemod: None,
                 });
             }
         }
 
-        // Check for repetitive getter/setter patterns
         if let Some(finding) = check_boilerplate_getters_setters(&file.path, content) {
             findings.push(finding);
         }
@@ -129,6 +122,7 @@ fn check_single_impl_interface(path: &str, lines: &[&str]) -> Option<Finding> {
                     .to_string(),
             ),
             evidence: None,
+            codemod: None,
         });
     }
 
@@ -179,6 +173,7 @@ fn check_deep_nesting(path: &str, lines: &[&str]) -> Option<Finding> {
                     .to_string(),
             ),
             evidence: None,
+            codemod: None,
         })
     } else {
         None
@@ -215,6 +210,7 @@ fn check_unnecessary_factory(path: &str, content: &str) -> Option<Finding> {
                     .to_string(),
             ),
             evidence: None,
+            codemod: None,
         })
     } else {
         None
@@ -253,6 +249,7 @@ fn check_abstraction_overload(path: &str, content: &str) -> Option<Finding> {
                     .to_string(),
             ),
             evidence: None,
+            codemod: None,
         })
     } else {
         None
@@ -260,7 +257,6 @@ fn check_abstraction_overload(path: &str, content: &str) -> Option<Finding> {
 }
 
 fn check_long_functions(path: &str, content: &str) -> Option<Finding> {
-    // Simple heuristic: count lines between function-like patterns
     let mut long_funcs = Vec::new();
     let lines: Vec<&str> = content.lines().collect();
     let mut i = 0;
@@ -269,7 +265,6 @@ fn check_long_functions(path: &str, content: &str) -> Option<Finding> {
         let line = lines[i];
         let trimmed = line.trim();
 
-        // Detect function/method definitions
         let is_function = trimmed.contains("fn ")
             || trimmed.contains("def ")
             || trimmed.contains("function ")
@@ -281,8 +276,7 @@ fn check_long_functions(path: &str, content: &str) -> Option<Finding> {
             let mut depth = 0;
             let mut found_body = false;
 
-            for j in start..lines.len().min(start + 200) {
-                let l = lines[j];
+            for (j, l) in lines.iter().enumerate().take(lines.len().min(start + 200)).skip(start) {
                 depth += l.matches('{').count();
                 depth = depth.saturating_sub(l.matches('}').count());
                 if depth == 0 && j > start {
@@ -319,6 +313,7 @@ fn check_long_functions(path: &str, content: &str) -> Option<Finding> {
                     .to_string(),
             ),
             evidence: None,
+            codemod: None,
         })
     } else {
         None
@@ -326,20 +321,18 @@ fn check_long_functions(path: &str, content: &str) -> Option<Finding> {
 }
 
 fn check_repeated_code(path: &str, lines: &[&str]) -> Option<Finding> {
-    // Simple check: look for repeated blocks of 3+ identical lines
-    let mut repeats = 0;
-    let mut i = 0;
+    // O(n) detection via HashMap of 3-line block hashes instead of O(n²) sliding window.
+    // Each 3-line block is stored by its line indices; any block with >1 occurrence is a repeat.
+    let mut blocks: std::collections::HashMap<&[&str], Vec<usize>> =
+        std::collections::HashMap::new();
 
+    let mut i = 0;
     while i + 3 < lines.len() {
-        let block = &lines[i..i + 3];
-        for j in (i + 3..lines.len() - 3).step_by(1) {
-            if lines[j..j + 3] == *block {
-                repeats += 1;
-                break;
-            }
-        }
+        blocks.entry(&lines[i..i + 3]).or_default().push(i);
         i += 1;
     }
+
+    let repeats: usize = blocks.values().filter(|v| v.len() > 1).map(|v| v.len()).sum();
 
     if repeats > 3 {
         Some(Finding {
@@ -354,6 +347,7 @@ fn check_repeated_code(path: &str, lines: &[&str]) -> Option<Finding> {
             ),
             suggestion: Some("Extract repeated blocks into reusable functions.".to_string()),
             evidence: None,
+            codemod: None,
         })
     } else {
         None
@@ -396,8 +390,68 @@ fn check_boilerplate_getters_setters(path: &str, content: &str) -> Option<Findin
                     .to_string(),
             ),
             evidence: None,
+            codemod: None,
         })
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detect_over_engineering_single_trait() {
+        let content = "pub trait MyTrait { fn foo(&self); }\nstruct X;\nimpl MyTrait for X { fn foo(&self) {} }";
+        let file = ParsedFile {
+            path: "test.rs".to_string(),
+            language: "rust".to_string(),
+            raw_content: content.to_string(),
+            lines: content.lines().enumerate().map(|(i, l)| crate::parser::SourceLine {
+                number: i + 1,
+                content: l.to_string(),
+            }).collect(),
+            imports: vec![],
+        };
+        let findings = detect_over_engineering(&[file]);
+        assert!(!findings.is_empty(), "should detect single-impl trait");
+    }
+
+    #[test]
+    fn test_detect_boilerplate_long_function() {
+        let mut lines = vec![];
+        lines.push("fn foo() {".to_string());
+        for i in 0..70 { lines.push(format!("    let x_{} = {};", i, i)); }
+        lines.push("}".to_string());
+        let content = lines.join("\n");
+        let file = ParsedFile {
+            path: "test.rs".to_string(),
+            language: "rust".to_string(),
+            raw_content: content,
+            lines: lines.iter().enumerate().map(|(i, l)| crate::parser::SourceLine {
+                number: i + 1,
+                content: l.to_string(),
+            }).collect(),
+            imports: vec![],
+        };
+        let findings = detect_boilerplate(&[file]);
+        assert!(!findings.is_empty(), "should detect long function");
+    }
+
+    #[test]
+    fn test_clean_code_no_style_findings() {
+        let content = "fn add(a: i32, b: i32) -> i32 { a + b }";
+        let file = ParsedFile {
+            path: "test.rs".to_string(),
+            language: "rust".to_string(),
+            raw_content: content.to_string(),
+            lines: vec![crate::parser::SourceLine { number: 1, content: content.to_string() }],
+            imports: vec![],
+        };
+        let findings_o = detect_over_engineering(std::slice::from_ref(&file));
+        let findings_b = detect_boilerplate(&[file]);
+        assert!(findings_o.is_empty(), "small clean fn should not trigger over-engineering");
+        assert!(findings_b.is_empty(), "small clean fn should not trigger boilerplate");
     }
 }

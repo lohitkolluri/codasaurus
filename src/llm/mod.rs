@@ -6,7 +6,7 @@ use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub api_key: String,
 
     #[serde(default = "default_model")]
@@ -175,6 +175,9 @@ pub struct ReviewContext {
 
     /// Related PRs that touched the same areas
     pub related_prs: Vec<String>,
+
+    /// Repository codebase context (files, languages, dependencies)
+    pub repo_context: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -210,6 +213,9 @@ impl fmt::Display for ReviewContext {
         }
         if !self.related_prs.is_empty() {
             writeln!(f, "\nRelated PRs: {}", self.related_prs.join(", "))?;
+        }
+        if let Some(ctx) = &self.repo_context {
+            writeln!(f, "\n{}", ctx)?;
         }
         Ok(())
     }
@@ -314,9 +320,20 @@ pub fn build_review_prompt(diff: &str, context: Option<&ReviewContext>) -> Strin
     const MAX_DIFF_LENGTH: usize = 8000;
 
     let truncated = if diff.len() > MAX_DIFF_LENGTH {
+        // Find the nearest char boundary to avoid mid-character panic on multi-byte UTF-8
+        let trunc_byte = MAX_DIFF_LENGTH.min(diff.len());
+        let trunc_byte = if diff.is_char_boundary(trunc_byte) {
+            trunc_byte
+        } else {
+            diff.char_indices()
+                .take_while(|&(i, _)| i < trunc_byte)
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(trunc_byte)
+        };
         format!(
             "{}\n\n[Diff truncated: original was {} characters, showing first {}]",
-            &diff[..MAX_DIFF_LENGTH],
+            &diff[..trunc_byte],
             diff.len(),
             MAX_DIFF_LENGTH
         )
