@@ -95,6 +95,9 @@ flowchart TB
 | **over-engineering** | Factory patterns for 1–2 variants, unnecessary interfaces | AST heuristics | Free | **~5%** — heuristic |
 | **boilerplate** | 200+ line functions, repeated blocks | Pattern matching | Free | **~5%** — heuristic |
 | **vulnerabilities** | Known package vulnerabilities | OSV.dev API query | Free | **Zero** — database-backed |
+| **stale-api** | Deprecated methods and outdated API patterns | Pattern matching against known migrations | Free | **~5%** — heuristic |
+| **graph** | Dead code and unused exports via call-graph analysis | Builds a code graph, checks reachability | Free | **~5%** — heuristic |
+| **guidelines** | Branch naming, commit conventions, DCO sign-off, required files | Parses `CONTRIBUTING`/guidelines into checkable rules | Free | **Zero** — exact match |
 | **LLM review** | Security flaws, logic bugs, API misuse | OpenRouter → any model | BYOK | **~5%** — model-dependent |
 
 ## Quick Start
@@ -120,36 +123,31 @@ codasaurus check src/main.rs
 
 ## Example Output
 
-```diff
-🦕 Codasaurus found 5 issue(s):
-  3 blocking
-  2 warnings
+```text
+  🦕 Codasaurus — 3 blocking, 2 warnings
 
-📁 src/app.js
+  src/app.js
+    ✗ hallucinated-imports [:1]
+      Package `non-existent-package` not found on npm.
+      → Check the correct package name and install it.
 
-  ✗ [hallucinated-imports]:1
-    Package `non-existent-package` not found on npm.
-    → This import will crash at runtime. AI coding assistants
-      sometimes invent package names that don't exist.
-    → Check the correct package name and install it.
+    ✗ secrets [:15]
+      Potential API key detected: `sk-live-...abcd`
+      → Move the credential to an environment variable and rotate the key.
 
-  ✗ [secrets]:15
-    Potential API Key detected: `sk-live-...abcd`
-    → Hardcoded credentials in committed code.
-    → Use environment variables and rotate this key.
+    ✗ phantom-deps [:22]
+      Package `lodash` is used but not declared in package.json.
+      → Run: npm install lodash
 
-  ✗ [phantom-deps]:22
-    Package `lodash` is used but not declared in package.json.
-    → AI added the import but forgot to add the dependency.
-    → Run: npm install lodash
+  src/utils.ts
+    ⚠ todo-leaks [:8]
+      Leftover placeholder: "// TODO: implement error handling"
 
-  ⚠ [todo-leaks]:8
-    Leftover placeholder: "// TODO: implement error handling"
-
-  ⚠ [over-engineering]:30
-    Factory pattern detected with only 2 variants — unnecessary
-    abstraction for this scope.
+    ⚠ over-engineering [:30]
+      Factory pattern detected with only 2 variants — unnecessary abstraction for this scope.
 ```
+
+Severity is `✗` blocking, `⚠` warning, and `ℹ` info. Each finding shows the detector, the location, the message, and a suggested fix. JSON output (`--json`) emits the same findings as machine-readable records for CI.
 
 ## Configuration
 
