@@ -23,7 +23,13 @@ pub struct LlmConfig {
 }
 
 fn default_model() -> String {
-    "qwen/qwen3-coder:free".to_string()
+    // Force free models in dev/test. Set ENVIRONMENT=Prod to use paid models.
+    let env = std::env::var("ENVIRONMENT").unwrap_or_default();
+    if env.eq_ignore_ascii_case("prod") {
+        "anthropic/claude-sonnet-4.6".to_string()
+    } else {
+        "qwen/qwen3-coder:free".to_string()
+    }
 }
 
 fn default_max_tokens() -> u32 {

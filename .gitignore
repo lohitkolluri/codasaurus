@@ -21,3 +21,6 @@ Thumbs.db
 *.profraw
 lcov.info
 coverage/
+
+# Research artifacts
+.omo/
