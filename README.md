@@ -20,25 +20,27 @@
 
 ## Why Codasaurus
 
-AI coding assistants produce code quickly, but they also introduce predictable defects:
+AI assistants write fast, and they make the same mistakes every time. The model reaches for a package it half-remembers, wires up an API it last saw in 2022, or leaves a hardcoded key in the diff. None of it surfaces until something breaks in production.
 
-- **Hallucinated imports** — referencing packages that do not exist on npm, PyPI, or crates.io
-- **Undeclared dependencies** — using a library without adding it to the manifest
-- **Leaked secrets** — hardcoded API keys, tokens, and connection strings
-- **Stale or deprecated APIs** — calls trained on outdated documentation
-- **Over-engineering** — unnecessary abstraction for the scope at hand
-- **Leftover placeholders** — `TODO`, `FIXME`, and `XXX` markers committed to the tree
+Codasaurus checks your staged or diffed changes before they land:
 
-Codasaurus runs these checks deterministically against staged or diffed changes, and optionally layers in LLM-based review for logic and security analysis.
+- **Hallucinated imports** — packages that don't exist on npm, PyPI, or crates.io
+- **Undeclared dependencies** — a library used but missing from the manifest
+- **Leaked secrets** — API keys, tokens, connection strings
+- **Stale APIs** — calls against deprecated or outdated signatures
+- **Over-engineering** — abstraction that isn't warranted by the scope
+- **Leftover markers** — `TODO`, `FIXME`, `XXX` committed to the tree
+
+Static checks are deterministic. Add `--llm` with your own OpenRouter key and it also reviews for logic and security issues the patterns can't see.
 
 ## Features
 
-- **Deterministic Tier 1 detectors** — registry lookups, dependency cross-referencing, and pattern matching with zero or near-zero false positives
-- **LLM review (optional, BYOK)** — bring your own OpenRouter key for context-aware analysis across 400+ models
-- **Multi-language** — parses 10+ languages out of the box
-- **CI-ready** — JSON output and non-zero exit codes for blocking issues
-- **Local-first** — no account or cloud dependency required for static checks
-- **Self-hosted GitHub Action** — runs as a composite action in your own workflows
+- **Deterministic by default.** Registry lookups, dependency cross-referencing, and pattern matching — zero false positives on Tier 1.
+- **Optional LLM review.** Bring your own OpenRouter key; works with 400+ models, no per-seat fee.
+- **10+ languages** parsed out of the box.
+- **CI-ready.** JSON output and non-zero exit on blocking issues.
+- **Local-first.** Static checks need no account and no cloud.
+- **Self-hosted GitHub Action.** Runs as a composite action inside your own workflows.
 
 ## Architecture
 
