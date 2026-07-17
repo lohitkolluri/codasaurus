@@ -9,30 +9,40 @@
   <img src="assets/logo.png" alt="Codasaurus logo" width="240">
 </p>
 
-<h1 align="center">🦕 Codasaurus</h1>
-<p align="center"><b>Munches on AI-generated bugs so you don't have to.</b></p>
+<h1 align="center">Codasaurus</h1>
+<p align="center"><b>Static and AI-powered code review for AI-generated changes.</b></p>
 <p align="center">
-  Catches hallucinated imports, phantom deps, security holes, and AI slop.<br>
-  Works locally ⚡, in CI 🤖, and as a GitHub bot (coming soon).<br>
-  Bring your own LLM key for deep review.
+  Detects hallucinated imports, undeclared dependencies, leaked secrets, and vulnerable packages<br>
+  before they reach your repository — locally, in CI, or as a GitHub Action.
 </p>
 
 ---
 
-## The Problem
+## Why Codasaurus
 
-AI coding assistants write code fast. They also:
+AI coding assistants produce code quickly, but they also introduce predictable defects:
 
-- **Hallucinate packages** — `import { magicSauce } from 'non-existent-package'`
-- **Forget deps** — use lodash but never add it to `package.json`
-- **Over-engineer** — factory pattern for 2 variants, 400-line functions
-- **Leave TODOs** — `// TODO: implement proper error handling`
-- **Leak secrets** — hardcoded API keys, tokens, connection strings
-- **Use stale APIs** — trained on old docs, calls deprecated methods
+- **Hallucinated imports** — referencing packages that do not exist on npm, PyPI, or crates.io
+- **Undeclared dependencies** — using a library without adding it to the manifest
+- **Leaked secrets** — hardcoded API keys, tokens, and connection strings
+- **Stale or deprecated APIs** — calls trained on outdated documentation
+- **Over-engineering** — unnecessary abstraction for the scope at hand
+- **Leftover placeholders** — `TODO`, `FIXME`, and `XXX` markers committed to the tree
 
-Codasaurus catches all of this **before** it hits your repo.
+Codasaurus runs these checks deterministically against staged or diffed changes, and optionally layers in LLM-based review for logic and security analysis.
 
-## Two-Tier Architecture
+## Features
+
+- **Deterministic Tier 1 detectors** — registry lookups, dependency cross-referencing, and pattern matching with zero or near-zero false positives
+- **LLM review (optional, BYOK)** — bring your own OpenRouter key for context-aware analysis across 400+ models
+- **Multi-language** — parses 10+ languages out of the box
+- **CI-ready** — JSON output and non-zero exit codes for blocking issues
+- **Local-first** — no account or cloud dependency required for static checks
+- **Self-hosted GitHub Action** — runs as a composite action in your own workflows
+
+## Architecture
+
+Codasaurus runs in two tiers. Tier 1 is fully static and deterministic; Tier 2 is an optional LLM pass.
 
 ```mermaid
 flowchart TB
@@ -43,12 +53,12 @@ flowchart TB
 
     subgraph Tier1["Tier 1 · Static Detectors"]
         direction TB
-        HALLUC[🚫 hallucinated-imports] --> REGISTRY[npm / PyPI / crates.io<br/>registry lookup]
-        PHANTOM[👻 phantom-deps] --> DEPS[dependency file<br/>cross-reference]
-        SEC[🔑 secrets] --> REGEX[regex patterns]
-        TODO[📝 todo-leaks] --> SCAN[line scan]
-        OVER[🏭 over-engineering] --> AST[AST heuristics]
-        VULN[🛡️ vulnerabilities] --> OSV[OSV.dev API]
+        HALLUC[hallucinated-imports] --> REGISTRY[npm / PyPI / crates.io<br/>registry lookup]
+        PHANTOM[phantom-deps] --> DEPS[dependency file<br/>cross-reference]
+        SEC[secrets] --> REGEX[regex patterns]
+        TODO[todo-leaks] --> SCAN[line scan]
+        OVER[over-engineering] --> AST[AST heuristics]
+        VULN[vulnerabilities] --> OSV[OSV.dev API]
     end
 
     subgraph Tier2["Tier 2 · LLM Review (optional — BYOK)"]
@@ -56,9 +66,9 @@ flowchart TB
         DIFF[diff + context] --> OR[OpenRouter API<br/>400+ models]
         OR --> STRUCT[JSON Schema<br/>structured output]
         STRUCT --> VERDICT{verdict}
-        VERDICT -->|ship| SHIP[✅ merge as-is]
-        VERDICT -->|fix-before-ship| FIX[🔧 address issues]
-        VERDICT -->|hold| HOLD[⛔ needs design<br/>discussion]
+        VERDICT -->|ship| SHIP[merge as-is]
+        VERDICT -->|fix-before-ship| FIX[address issues]
+        VERDICT -->|hold| HOLD[needs design<br/>discussion]
     end
 
     subgraph OUTPUT["Unified Report"]
@@ -72,18 +82,18 @@ flowchart TB
     Tier2 --> OUTPUT
 ```
 
-## What Codasaurus Catches
+## Detectors
 
-| Detector | What it catches | How | Cost | False Positives |
-|----------|----------------|-----|------|-----------------|
-| 🚫 **hallucinated-imports** | Imports that don't exist on npm/PyPI/crates.io | Lives HEAD request to registry API | Free | **Zero** — deterministic |
-| 👻 **phantom-deps** | Packages used but not in `package.json`/`Cargo.toml` | Cross-refs imports vs dependency files | Free | **Zero** — deterministic |
-| 🔑 **secrets** | API keys, tokens, passwords, JWTs, connection strings | Regex patterns for 15+ credential formats | Free | **~2%** — known patterns only |
-| 📝 **todo-leaks** | `TODO`, `FIXME`, `XXX`, `HACK` left by AI | Line scan of staged changes | Free | **Zero** — exact match |
-| 🏭 **over-engineering** | Factory pattern for 1-2 variants, unnecessary interfaces | AST heuristics | Free | **~5%** — heuristic-based |
-| 📦 **boilerplate** | 200+ line functions, excessive getters, repeated blocks | Pattern matching | Free | **~5%** — heuristic-based |
-| 🛡️ **vulnerabilities** | Known package vulnerabilities | OSV.dev API query | Free | **Zero** — database-backed |
-| 🤖 **LLM review** | Security flaws, logic bugs, API misuse, architecture | OpenRouter → any LLM model | BYOK | **~5%** — model-dependent |
+| Detector | Catches | Method | Cost | False Positives |
+|----------|---------|--------|------|-----------------|
+| **hallucinated-imports** | Imports absent from npm/PyPI/crates.io | Live HEAD request to registry API | Free | **Zero** — deterministic |
+| **phantom-deps** | Packages used but missing from the manifest | Cross-references imports vs dependency files | Free | **Zero** — deterministic |
+| **secrets** | API keys, tokens, passwords, JWTs, connection strings | Regex for 15+ credential formats | Free | **~2%** — known patterns only |
+| **todo-leaks** | `TODO`, `FIXME`, `XXX`, `HACK` in changes | Line scan of staged diff | Free | **Zero** — exact match |
+| **over-engineering** | Factory patterns for 1–2 variants, unnecessary interfaces | AST heuristics | Free | **~5%** — heuristic |
+| **boilerplate** | 200+ line functions, repeated blocks | Pattern matching | Free | **~5%** — heuristic |
+| **vulnerabilities** | Known package vulnerabilities | OSV.dev API query | Free | **Zero** — database-backed |
+| **LLM review** | Security flaws, logic bugs, API misuse | OpenRouter → any model | BYOK | **~5%** — model-dependent |
 
 ## Quick Start
 
@@ -98,7 +108,7 @@ codasaurus check --staged
 # CI mode (JSON output, exits non-zero on issues)
 codasaurus check --diff origin/main --ci
 
-# With deep LLM review (bring your own key)
+# Deep LLM review (bring your own key)
 export OPENROUTER_API_KEY="sk-or-..."
 codasaurus check --staged --llm
 
@@ -175,7 +185,14 @@ export CODASAURUS_MODEL="anthropic/claude-sonnet-4.6"               # Paid
 codasaurus check --staged --llm
 ```
 
-### What the LLM catches that static detectors miss
+### What LLM review adds
+
+The LLM pass provides context-aware analysis that static detectors cannot:
+
+- Explains *why* a change fails — e.g. *"The app will crash at startup with a module-not-found error"* rather than *"Package not found"*
+- Flags **mixed module systems** (ESM `import` + CJS `require`)
+- Detects **missing error handling** around risky operations
+- Catches **logical inconsistencies** across multiple changes
 
 ```mermaid
 flowchart LR
@@ -200,29 +217,23 @@ flowchart LR
     A3 ~~~ B3
 ```
 
-The LLM provides context-aware analysis:
-- *"The app will crash at startup with a module-not-found error"* instead of just *"Package not found"*
-- Flags **mixed module systems** (ESM `import` + CJS `require`)
-- Detects **missing error handling** around risky operations
-- Catches **logical inconsistencies** across multiple changes
-
-## How It's Different
+## Comparison
 
 | | CodeRabbit | Greptile | Hawk / Duck | **Codasaurus** |
 |---|---|---|---|---|
 | **Price** | $24/seat/mo | $15+/seat/mo | Free/BYOK | **Free, open source** |
-| **Local checks** | ❌ Cloud only | ❌ Cloud only | Partial | ✅ **Pre-commit + CLI** |
-| **AI-specific detectors** | ❌ Generic | ❌ Generic | Some | ✅ **Hallucinated imports, phantom deps** |
+| **Local checks** | Cloud only | Cloud only | Partial | **Pre-commit + CLI** |
+| **AI-specific detectors** | Generic | Generic | Some | **Hallucinated imports, phantom deps** |
 | **Multi-language** | JS/TS heavy | Limited | Varies | **10+ languages** |
-| **Security (free)** | ✅ Paid tier | ✅ | ❌ | ✅ **OSV.dev + secrets** |
-| **LLM review** | ✅ Built-in | ✅ Built-in | ❌ | ✅ **BYOK via OpenRouter** |
-| **Deterministic** | Some | ❌ | ❌ | ✅ **Zero false positives on Tier 1** |
-| **PR context** | ✅ Linked issues | ❌ | ❌ | ✅ **Linked issues + related PRs** |
+| **Security (free)** | Paid tier | Yes | No | **OSV.dev + secrets** |
+| **LLM review** | Built-in | Built-in | No | **BYOK via OpenRouter** |
+| **Deterministic** | Partial | No | No | **Zero false positives on Tier 1** |
+| **PR context** | Linked issues | No | No | **Linked issues + related PRs** |
 | **Install** | SaaS signup | SaaS signup | `npm install` | **`cargo install`** |
 
 ## CI Integration
 
-The repo ships with a [CI workflow](.github/workflows/ci.yml) that runs format check, clippy, tests, release build, and a **self-review** — Codasaurus checks itself on every push:
+The repository ships with a [CI workflow](.github/workflows/ci.yml) that runs format check, clippy, tests, release build, and a **self-review** — Codasaurus checks itself on every push:
 
 ```yaml
 # .github/workflows/ci.yml (check, test, build, and self-review)
@@ -262,7 +273,7 @@ export OPENROUTER_API_KEY="sk-or-..."
 codasaurus check --staged --llm
 ```
 
-## Architecture
+## Architecture Detail
 
 ```mermaid
 graph TD
@@ -312,10 +323,10 @@ graph TD
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
 
 ---
 
 <p align="center">
-  <sub>Built with 🦕 by <a href="https://github.com/lohitkolluri">Lohit Kolluri</a></sub>
+  <sub>Maintained by <a href="https://github.com/lohitkolluri">Lohit Kolluri</a></sub>
 </p>
