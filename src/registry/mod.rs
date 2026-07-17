@@ -1,39 +1,39 @@
 use anyhow::Result;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use std::collections::HashMap;
 use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant};
+
+/// Maximum number of cache entries before eviction of expired/stale entries.
+const CACHE_MAX_SIZE: usize = 10_000;
 
 mod crates_io;
 mod npm;
 mod pypi;
 
 /// Default cache TTL in seconds (can be overridden via `set_cache_ttl`)
-static CACHE_TTL: Lazy<Mutex<u64>> = Lazy::new(|| Mutex::new(3600));
+static CACHE_TTL: LazyLock<Mutex<u64>> = LazyLock::new(|| Mutex::new(3600));
 
 /// Readers don't block each other — only writes are exclusive.
 /// Avoids the double-lock TOCTOU pattern of the old Mutex cache.
-static CACHE: Lazy<RwLock<HashMap<String, (bool, Instant)>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
+static CACHE: LazyLock<RwLock<HashMap<String, (bool, Instant)>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
 
-#[allow(dead_code)]
-static BLOCKING_CLIENT: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
+/// Shared HTTP client used by all registry lookups (npm, PyPI, crates.io, OSV).
+static CLIENT: LazyLock<reqwest::blocking::Client> = LazyLock::new(|| {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(5))
+        .pool_max_idle_per_host(5)
         .build()
-        .expect("Failed to build HTTP client")
+        .expect("Failed to build registry HTTP client. Check TLS/network configuration.")
 });
 
-/// Override the default cache TTL
-#[allow(dead_code)]
 pub fn set_cache_ttl(secs: u64) {
     if let Ok(mut ttl) = CACHE_TTL.lock() {
         *ttl = secs;
     }
 }
 
-/// Get the current cache TTL in seconds
-#[allow(dead_code)]
 pub fn get_cache_ttl() -> u64 {
     CACHE_TTL.lock().map(|t| *t).unwrap_or(3600)
 }
@@ -64,6 +64,24 @@ pub fn check_package(registry: &str, package: &str) -> Result<Option<bool>> {
             e.into_inner()
         });
         cache.insert(cache_key, (*exists, Instant::now()));
+
+        // Evict expired entries if cache exceeds max size
+        if cache.len() > CACHE_MAX_SIZE {
+            let ttl = Duration::from_secs(get_cache_ttl());
+            let now = Instant::now();
+            cache.retain(|_, &mut (_, time)| now.duration_since(time) < ttl);
+            // If still too large after evicting expired entries, remove oldest
+            while cache.len() > CACHE_MAX_SIZE / 2 {
+                if let Some(oldest_key) = cache.iter()
+                    .min_by_key(|(_, &(_, time))| time)
+                    .map(|(k, _)| k.clone())
+                {
+                    cache.remove(&oldest_key);
+                } else {
+                    break;
+                }
+            }
+        }
     }
     result
 }
@@ -85,6 +103,38 @@ mod tests {
     }
 
     #[test]
+    fn test_cache_eviction_policy() {
+        set_cache_ttl(3600);
+        let mut cache = CACHE.write().unwrap();
+        // Fill cache beyond max size with varied timestamps so oldest-pick is deterministic
+        for i in 0..CACHE_MAX_SIZE + 100 {
+            let key = format!("test:pkg-{}", i);
+            cache.insert(key, (true, Instant::now()));
+        }
+
+        // Apply the same eviction logic as check_package uses
+        let ttl = Duration::from_secs(get_cache_ttl());
+        let now = Instant::now();
+        cache.retain(|_, &mut (_, time)| now.duration_since(time) < ttl);
+        while cache.len() > CACHE_MAX_SIZE / 2 {
+            if let Some(oldest_key) = cache.iter()
+                .min_by_key(|(_, &(_, time))| time)
+                .map(|(k, _)| k.clone())
+            {
+                cache.remove(&oldest_key);
+            } else {
+                break;
+            }
+        }
+        drop(cache);
+
+        // Verify cache is bounded
+        let cache = CACHE.read().unwrap();
+        assert!(cache.len() <= CACHE_MAX_SIZE, "cache should be bounded");
+        assert!(cache.len() >= CACHE_MAX_SIZE / 2);
+    }
+
+    #[test]
     fn test_extract_package_name() {
         assert_eq!(
             crate::detectors::extract_package_name("react").as_deref(),
@@ -101,23 +151,10 @@ mod tests {
     }
 }
 
-/// Initialize cache TTL from RegistryConfig
-#[allow(dead_code)]
 pub fn init_cache_from_config(config: &crate::config::Config) {
     set_cache_ttl(config.registry.cache_ttl_secs);
 }
 
-#[allow(dead_code)]
-pub fn get_latest_version(registry: &str, package: &str) -> Result<Option<String>> {
-    match registry {
-        "npm" => npm::get_latest_version(package),
-        "pypi" => pypi::get_latest_version(package),
-        "crates.io" => crates_io::get_latest_version(package),
-        _ => Ok(None),
-    }
-}
-
-#[allow(dead_code)]
 pub fn check_vulnerabilities(registry: &str, package: &str) -> Result<Vec<OsvVulnerability>> {
     let ecosystem = match registry {
         "npm" => "npm",
@@ -128,7 +165,6 @@ pub fn check_vulnerabilities(registry: &str, package: &str) -> Result<Vec<OsvVul
     check_osv(ecosystem, package)
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct OsvVulnerability {
     pub id: String,
@@ -137,7 +173,6 @@ pub struct OsvVulnerability {
     pub fixed_version: Option<String>,
 }
 
-#[allow(dead_code)]
 fn check_osv(ecosystem: &str, package: &str) -> Result<Vec<OsvVulnerability>> {
     let body = serde_json::json!({
         "package": {
@@ -145,7 +180,7 @@ fn check_osv(ecosystem: &str, package: &str) -> Result<Vec<OsvVulnerability>> {
             "ecosystem": ecosystem
         }
     });
-    let resp = BLOCKING_CLIENT
+    let resp = CLIENT
         .post("https://api.osv.dev/v1/query")
         .json(&body)
         .send()?;

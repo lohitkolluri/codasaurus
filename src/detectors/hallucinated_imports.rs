@@ -1,10 +1,9 @@
 use crate::detectors::Finding;
 use crate::parser::ParsedFile;
 use crate::registry;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use std::collections::HashSet;
 
-/// Detect imports that reference packages not found in package registries
 pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     let mut findings = Vec::new();
 
@@ -35,16 +34,9 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
             match registry::check_package(registry_name, &package) {
                 Ok(Some(true)) => {} // package exists
                 Ok(Some(false)) => {
-                    let correct_name = if import.name.contains('/') {
-                        import
-                            .name
-                            .split('/')
-                            .next_back()
-                            .unwrap_or(&package)
-                            .to_string()
-                    } else {
-                        package.clone()
-                    };
+                    // extract_package_name already resolved the base package
+                    // (handling @scoped/packages, submodule paths, Rust :: paths).
+                    let correct_name = package.clone();
                     let codemod = match registry_name {
                         "npm" => Some(format!("npm install {}", correct_name)),
                         "pypi" => Some(format!("pip install {}", correct_name)),
@@ -53,7 +45,7 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                     };
                     findings.push(Finding {
                         detector: "hallucinated-imports".to_string(),
-                        severity: "blocking".to_string(),
+                        severity: "blocking",
                         file: file.path.clone(),
                         line: import.line,
                         column: import.column,
@@ -78,7 +70,7 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     findings
 }
 
-static NPM_BUILTINS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
+static NPM_BUILTINS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     HashSet::from([
         "react",
         "vue",
@@ -111,10 +103,9 @@ static NPM_BUILTINS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
     ])
 });
 
-static RUST_BUILTINS: Lazy<HashSet<&'static str>> =
-    Lazy::new(|| HashSet::from(["std", "core", "alloc", "proc_macro"]));
+static RUST_BUILTINS: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| HashSet::from(["std", "core", "alloc", "proc_macro"]));
 
-/// Known built-in packages for common languages
 pub(crate) fn is_builtin(package: &str, registry: &str) -> bool {
     match registry {
         "npm" => NPM_BUILTINS.contains(package),

@@ -95,7 +95,6 @@ fn default_confidence() -> String {
     "medium".to_string()
 }
 
-/// Returns a JSON Schema value that matches the LlmReviewOutput structure.
 pub fn review_schema() -> serde_json::Value {
     json!({
         "type": "object",
@@ -166,7 +165,6 @@ pub struct ReviewContext {
     /// Repository name (e.g. "owner/repo")
     pub repo: Option<String>,
 
-    /// Branch or ref being reviewed
     pub branch: Option<String>,
 
     /// PR title if reviewing a pull request
@@ -226,7 +224,6 @@ impl fmt::Display for ReviewContext {
     }
 }
 
-/// Reviews a diff with optional PR/issue context.
 pub async fn review_diff(
     diff: &str,
     config: &LlmConfig,
@@ -320,11 +317,10 @@ RULES:
     Ok(output)
 }
 
-/// Builds a prompt for reviewing a code diff, with optional PR/issue context.
 pub fn build_review_prompt(diff: &str, context: Option<&ReviewContext>) -> String {
     const MAX_DIFF_LENGTH: usize = 8000;
 
-    let truncated = if diff.len() > MAX_DIFF_LENGTH {
+    let truncated: std::borrow::Cow<'_, str> = if diff.len() > MAX_DIFF_LENGTH {
         // Find the nearest char boundary to avoid mid-character panic on multi-byte UTF-8
         let trunc_byte = MAX_DIFF_LENGTH.min(diff.len());
         let trunc_byte = if diff.is_char_boundary(trunc_byte) {
@@ -342,8 +338,9 @@ pub fn build_review_prompt(diff: &str, context: Option<&ReviewContext>) -> Strin
             diff.len(),
             MAX_DIFF_LENGTH
         )
+        .into()
     } else {
-        diff.to_string()
+        std::borrow::Cow::Borrowed(diff)
     };
 
     let context_section = match context {

@@ -1,9 +1,6 @@
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::HashMap;
 
-mod blast;
-
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SymbolNode {
     pub name: String,
@@ -11,7 +8,6 @@ pub struct SymbolNode {
     pub kind: SymbolKind,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum SymbolKind {
     Function,
@@ -21,26 +17,17 @@ pub enum SymbolKind {
     Type,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct Edge {
-    pub kind: EdgeKind,
-}
-
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum EdgeKind {
     Calls,
     Imports,
-    Extends,
-    Contains,
 }
 
-/// Codebase dependency graph
 pub struct CodeGraph {
     graph: DiGraph<SymbolNode, EdgeKind>,
     pub node_indices: HashMap<String, NodeIndex>,
     pub files: HashMap<String, Vec<NodeIndex>>,
+    pub file_to_nodes: HashMap<String, Vec<String>>,
 }
 
 impl Default for CodeGraph {
@@ -55,6 +42,7 @@ impl CodeGraph {
             graph: DiGraph::new(),
             node_indices: HashMap::new(),
             files: HashMap::new(),
+            file_to_nodes: HashMap::new(),
         }
     }
 
@@ -66,6 +54,10 @@ impl CodeGraph {
         });
         self.node_indices.insert(name.to_string(), idx);
         self.files.entry(file.to_string()).or_default().push(idx);
+        self.file_to_nodes
+            .entry(file.to_string())
+            .or_default()
+            .push(name.to_string());
     }
 
     pub fn add_edge(&mut self, from: &str, to: &str, kind: EdgeKind) {
@@ -105,16 +97,5 @@ impl CodeGraph {
         affected
     }
 
-    /// Get all files that contain symbols affected by a change
-    #[allow(dead_code)]
-    pub fn affected_files(&self, symbol: &str, max_hops: usize) -> Vec<&str> {
-        let mut files: Vec<&str> = self
-            .blast_radius(symbol, max_hops)
-            .iter()
-            .map(|n| n.file.as_str())
-            .collect();
-        files.sort();
-        files.dedup();
-        files
-    }
+
 }

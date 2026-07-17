@@ -6,17 +6,15 @@ use std::sync::Mutex;
 use crate::detectors::Finding;
 
 /// Persistent store for feedback learning
-#[allow(dead_code)]
 pub struct LearningStore {
     conn: Mutex<Connection>,
 }
 
-#[allow(dead_code)]
 impl LearningStore {
     pub fn open() -> Result<Self> {
         let path = Self::db_path()?;
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).ok();
+            std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(&path)?;
         let store = Self {
@@ -200,7 +198,7 @@ mod tests {
 
         let finding = Finding {
             detector: "test-detector".to_string(),
-            severity: "warning".to_string(),
+            severity: "warning",
             file: "test.rs".to_string(),
             line: 10,
             column: 0,

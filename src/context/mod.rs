@@ -60,7 +60,6 @@ const DEP_REGISTRY_MAP: &[(&str, &str)] = &[
     // everything else -> "pypi"
 ];
 
-/// Maps file extensions to language names.
 fn ext_to_lang(ext: &str) -> Option<&'static str> {
     match ext {
         "rs" => Some("Rust"),
@@ -104,7 +103,6 @@ fn ext_to_lang(ext: &str) -> Option<&'static str> {
     }
 }
 
-/// Maps a lowered file name to its registry, or `None` if not a dep file.
 fn file_name_to_registry(name: &str) -> Option<&'static str> {
     for (n, reg) in DEP_REGISTRY_MAP {
         if *n == name {
@@ -114,115 +112,7 @@ fn file_name_to_registry(name: &str) -> Option<&'static str> {
     None
 }
 
-// ---------------------------------------------------------------------------
-// Dep-file extractors
-// ---------------------------------------------------------------------------
-
-fn extract_npm_deps(content: &str) -> Vec<String> {
-    let mut pkgs = Vec::new();
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
-        if let Some(deps) = json.get("dependencies").and_then(|d| d.as_object()) {
-            pkgs.reserve(deps.len());
-            pkgs.extend(deps.keys().cloned());
-        }
-        if let Some(dev_deps) = json.get("devDependencies").and_then(|d| d.as_object()) {
-            pkgs.reserve(dev_deps.len());
-            pkgs.extend(dev_deps.keys().cloned());
-        }
-    }
-    pkgs
-}
-
-fn extract_requirements_deps(content: &str) -> Vec<String> {
-    let mut pkgs = Vec::new();
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') || line.starts_with('-') {
-            continue;
-        }
-        let pkg = line
-            .split(&['=', '<', '>', '~', '!', ';', ' ', '\t'][..])
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_lowercase();
-        if !pkg.is_empty() {
-            pkgs.push(pkg);
-        }
-    }
-    pkgs
-}
-
-fn extract_pyproject_deps(content: &str) -> Vec<String> {
-    let mut pkgs = Vec::new();
-    if let Ok(toml_table) = content.parse::<toml::Table>() {
-        // [project] dependencies
-        if let Some(project) = toml_table.get("project") {
-            if let Some(deps) = project.get("dependencies").and_then(|d| d.as_array()) {
-                for dep in deps {
-                    if let Some(s) = dep.as_str() {
-                        let pkg = s
-                            .split(&['=', '<', '>', '~', '!', ';', ' ', '\t'][..])
-                            .next()
-                            .unwrap_or("")
-                            .trim()
-                            .to_lowercase();
-                        if !pkg.is_empty() {
-                            pkgs.push(pkg);
-                        }
-                    }
-                }
-            }
-        }
-        // [tool.poetry.dependencies]
-        if let Some(tool) = toml_table.get("tool") {
-            if let Some(poetry) = tool.get("poetry") {
-                if let Some(deps) = poetry.get("dependencies").and_then(|d| d.as_table()) {
-                    pkgs.reserve(deps.len());
-                    pkgs.extend(deps.keys().cloned());
-                }
-            }
-        }
-    }
-    pkgs
-}
-
-fn extract_cargo_deps(content: &str) -> Vec<String> {
-    let mut pkgs = Vec::new();
-    if let Ok(toml_table) = content.parse::<toml::Table>() {
-        for key in &["dependencies", "dev-dependencies", "build-dependencies"] {
-            if let Some(deps) = toml_table.get(*key).and_then(|d| d.as_table()) {
-                pkgs.reserve(deps.len());
-                pkgs.extend(deps.keys().cloned());
-            }
-        }
-    }
-    pkgs
-}
-
-fn extract_go_mod_deps(content: &str) -> Vec<String> {
-    let mut pkgs = Vec::new();
-    for line in content.lines() {
-        let line = line.trim();
-        if line.starts_with("require (")
-            || line.starts_with(')')
-            || line.starts_with("module ")
-            || line.starts_with("go ")
-        {
-            continue;
-        }
-        if let Some(pkg) = line.split_whitespace().next() {
-            if !pkg.is_empty() && pkg.contains('/') && !pkg.starts_with("//") {
-                pkgs.push(pkg.to_string());
-            }
-        }
-    }
-    pkgs
-}
-
-// ---------------------------------------------------------------------------
-// Count lines without loading entire file into memory
-// ---------------------------------------------------------------------------
+// Extraction functions moved to crate::dep_parser — all use through crate::dep_parser::*
 
 /// Count newlines in a file using a buffered reader. Avoids the allocation
 /// and UTF-8 validation cost of `read_to_string` + `lines().count()`.
@@ -261,10 +151,6 @@ fn read_dep_file(path: &Path) -> Option<(usize, String)> {
     };
     Some((lines, content))
 }
-
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
 
 /// Structured summary of a repository's codebase for LLM context enrichment.
 #[derive(Debug, Clone)]
@@ -374,6 +260,7 @@ pub fn build_repo_context(root: &str, guidelines_override: Option<&str>) -> Opti
     let mut sub_entries: HashMap<String, Vec<String>> = HashMap::new();
 
     let walker = walkdir::WalkDir::new(root_path)
+        .follow_links(false)
         .into_iter()
         .filter_entry(|e| {
             if e.depth() == 0 {
@@ -394,7 +281,12 @@ pub fn build_repo_context(root: &str, guidelines_override: Option<&str>) -> Opti
                 true
             }
         })
-        .filter_map(|e| e.ok());
+        .filter_map(|e| {
+            if let Err(err) = &e {
+                eprintln!("Warning: error reading directory entry: {}", err);
+            }
+            e.ok()
+        });
 
     for entry in walker {
         let depth = entry.depth();
@@ -447,12 +339,12 @@ pub fn build_repo_context(root: &str, guidelines_override: Option<&str>) -> Opti
             if let Some((lines, content)) = read_dep_file(path) {
                 total_lines += lines;
                 let pkgs = match file_name_lower.as_str() {
-                    "package.json" => extract_npm_deps(&content),
-                    "requirements.txt" => extract_requirements_deps(&content),
-                    "pyproject.toml" => extract_pyproject_deps(&content),
-                    "setup.py" | "setup.cfg" => extract_requirements_deps(&content),
-                    "cargo.toml" => extract_cargo_deps(&content),
-                    "go.mod" => extract_go_mod_deps(&content),
+                    "package.json" => crate::dep_parser::extract_npm_deps(&content),
+                    "requirements.txt" => crate::dep_parser::extract_requirements_deps(&content),
+                    "pyproject.toml" => crate::dep_parser::extract_pyproject_deps(&content),
+                    "setup.py" | "setup.cfg" => crate::dep_parser::extract_requirements_deps(&content),
+                    "cargo.toml" => crate::dep_parser::extract_cargo_deps(&content),
+                    "go.mod" => crate::dep_parser::extract_go_mod_deps(&content),
                     _ => Vec::new(),
                 };
                 if !pkgs.is_empty() {
@@ -521,7 +413,6 @@ pub fn build_repo_context(root: &str, guidelines_override: Option<&str>) -> Opti
     })
 }
 
-/// Format the tree from data already accumulated during the walk.
 fn build_tree_from_accum(
     mut root_dirs: Vec<String>,
     mut root_files: Vec<String>,
@@ -597,35 +488,7 @@ mod tests {
         assert!(langs.contains(&"TypeScript"));
     }
 
-    #[test]
-    fn test_extract_npm_deps() {
-        let content = r#"{"dependencies": {"react": "^18.0.0", "lodash": "^4.0.0"}}"#;
-        let deps = extract_npm_deps(content);
-        assert_eq!(deps, vec!["lodash", "react"]);
-    }
 
-    #[test]
-    fn test_extract_cargo_deps() {
-        let content = r#"[dependencies]
-serde = "1.0"
-tokio = { version = "1", features = ["full"] }
-
-[dev-dependencies]
-tempfile = "3"
-"#;
-        let deps = extract_cargo_deps(content);
-        assert!(deps.contains(&"serde".to_string()));
-        assert!(deps.contains(&"tokio".to_string()));
-        assert!(deps.contains(&"tempfile".to_string()));
-    }
-
-    #[test]
-    fn test_extract_requirements_deps() {
-        let content = "requests==2.31.0\nflask>=2.0.0\n# comment\n-e .\n";
-        let deps = extract_requirements_deps(content);
-        assert!(deps.contains(&"requests".to_string()));
-        assert!(deps.contains(&"flask".to_string()));
-    }
 
     #[test]
     fn test_build_repo_context_bad_path() {
@@ -658,36 +521,6 @@ tempfile = "3"
 
         let ctx = build_repo_context(root.to_str().unwrap(), None).unwrap();
         assert_eq!(ctx.file_count, 1);
-    }
-
-    #[test]
-    fn test_extract_pyproject_deps() {
-        let content = r#"[project]
-dependencies = ["requests>=2.0", "click"]
-
-[tool.poetry.dependencies]
-python = "^3.9"
-"#;
-        let deps = extract_pyproject_deps(content);
-        assert!(deps.contains(&"requests".to_string()));
-        assert!(deps.contains(&"click".to_string()));
-    }
-
-    #[test]
-    fn test_extract_go_mod_deps() {
-        let content = r#"module github.com/example/project
-
-go 1.21
-
-require (
-	github.com/gorilla/mux v1.8.0
-	github.com/sirupsen/logrus v1.9.0
-)
-"#;
-        let deps = extract_go_mod_deps(content);
-        assert!(deps.contains(&"github.com/gorilla/mux".to_string()));
-        assert!(deps.contains(&"github.com/sirupsen/logrus".to_string()));
-        assert!(!deps.contains(&"github.com/example/project".to_string()));
     }
 
     #[test]

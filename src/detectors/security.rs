@@ -1,7 +1,22 @@
 use crate::detectors::Finding;
 use crate::parser::ParsedFile;
+use aho_corasick::AhoCorasick;
+use std::sync::LazyLock;
 
-/// Detect potential secrets and credentials in code
+static TODO_RE: LazyLock<AhoCorasick> = LazyLock::new(|| {
+    AhoCorasick::builder()
+        .ascii_case_insensitive(true)
+        .build(["todo", "fixme", "xxx", "hack"])
+        .expect("valid TODO patterns")
+});
+
+static SECRET_PRE_CHECK: LazyLock<AhoCorasick> = LazyLock::new(|| {
+    AhoCorasick::builder()
+        .ascii_case_insensitive(true)
+        .build(["key", "token", "secret", "password", "bearer", "aws_", "ghp_", "gho_", "ghs_", "-----begin", "eyj", "mongodb", "postgresql", "mysql", "redis://", "api_key", "apikey", "passwd", "pwd", "xoxb"])
+        .expect("valid secret pre-check patterns")
+});
+
 pub fn detect_secrets(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     let mut findings = Vec::new();
 
@@ -9,8 +24,17 @@ pub fn detect_secrets(parsed_files: &[ParsedFile]) -> Vec<Finding> {
         for line in &file.lines {
             let trimmed = line.content.trim();
 
-            // Skip comments and empty lines
             if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with('#') {
+                continue;
+            }
+
+            // Fast pre-filter: skip lines without any secret-like keywords
+            if !SECRET_PRE_CHECK.is_match(trimmed) {
+                continue;
+            }
+
+            // Skip lines that are entirely inside string literals (test fixtures, example code)
+            if is_in_string_context(trimmed) {
                 continue;
             }
 
@@ -21,7 +45,7 @@ pub fn detect_secrets(parsed_files: &[ParsedFile]) -> Vec<Finding> {
 
                     findings.push(Finding {
                         detector: "secrets".to_string(),
-                        severity: "blocking".to_string(),
+                        severity: "blocking",
                         file: file.path.clone(),
                         line: line.number,
                         column: 0,
@@ -41,28 +65,94 @@ pub fn detect_secrets(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     findings
 }
 
-/// Detect TODO/FIXME placeholders left by AI or developers
+/// Heuristic: skip lines that are clearly within string literal context.
+/// This reduces false positives from test fixtures and example code.
+fn is_in_string_context(line: &str) -> bool {
+    let trimmed = line.trim();
+    // Entire line wrapped in quotes: "const API_KEY = ..." or '...'
+    if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+        || (trimmed.starts_with("// ") && trimmed.contains("example"))
+        || (trimmed.starts_with("# ") && trimmed.contains("example"))
+    {
+        return true;
+    }
+    // Line is a comment containing example/sample keywords (case-insensitive ASCII)
+    if trimmed.len() >= 7 {
+        let lower_7: [u8; 7] = [
+            trimmed
+                .as_bytes()
+                .first()
+                .copied()
+                .unwrap_or(0)
+                .to_ascii_lowercase(),
+            trimmed
+                .as_bytes()
+                .get(1)
+                .copied()
+                .unwrap_or(0)
+                .to_ascii_lowercase(),
+            trimmed
+                .as_bytes()
+                .get(2)
+                .copied()
+                .unwrap_or(0)
+                .to_ascii_lowercase(),
+            trimmed
+                .as_bytes()
+                .get(3)
+                .copied()
+                .unwrap_or(0)
+                .to_ascii_lowercase(),
+            trimmed
+                .as_bytes()
+                .get(4)
+                .copied()
+                .unwrap_or(0)
+                .to_ascii_lowercase(),
+            trimmed
+                .as_bytes()
+                .get(5)
+                .copied()
+                .unwrap_or(0)
+                .to_ascii_lowercase(),
+            trimmed
+                .as_bytes()
+                .get(6)
+                .copied()
+                .unwrap_or(0)
+                .to_ascii_lowercase(),
+        ];
+        if &lower_7 == b"example" {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn detect_todos(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     let mut findings = Vec::new();
 
     for file in parsed_files {
         for line in &file.lines {
             let trimmed = line.content.trim();
-            let lower = trimmed.to_ascii_lowercase();
 
-            if lower.contains("todo")
-                || lower.contains("fixme")
-                || lower.contains("xxx")
-                || lower.contains("hack")
-            {
-                // Skip if it's just a reference in documentation
-                if trimmed.starts_with('#') && trimmed.contains("todo") {
+            if TODO_RE.is_match(trimmed) {
+                // Skip markdown heading references to TODO
+                if trimmed.starts_with("##")
+                    && trimmed.as_bytes().windows(4).any(|w| w.eq_ignore_ascii_case(b"todo"))
+                {
+                    continue;
+                }
+
+                // Skip string-literal context to reduce false positives
+                if is_in_string_context(trimmed) {
                     continue;
                 }
 
                 findings.push(Finding {
                     detector: "todo-leaks".to_string(),
-                    severity: "warning".to_string(),
+                    severity: "warning",
                     file: file.path.clone(),
                     line: line.number,
                     column: 0,
@@ -84,20 +174,13 @@ pub fn detect_todos(parsed_files: &[ParsedFile]) -> Vec<Finding> {
 }
 
 fn mask_value(value: &str) -> String {
-    // Must not panic on multi-byte UTF-8 — safe character-level slicing
-    let chars: Vec<char> = value.chars().collect();
-    if chars.len() <= 8 {
+    let len = value.len();
+    if len <= 8 {
         return "***".to_string();
     }
-    let prefix: String = chars.iter().take(4).collect();
-    let suffix: String = chars
-        .iter()
-        .rev()
-        .take(4)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
+    let prefix = &value[..value.char_indices().nth(4).map(|(i, _)| i).unwrap_or(len)];
+    let suffix =
+        &value[value.char_indices().rev().nth(3).map(|(i, _)| i).unwrap_or(0)..];
     format!("{}...{}", prefix, suffix)
 }
 
@@ -115,9 +198,7 @@ impl SecretPattern {
     }
 }
 
-use once_cell::sync::Lazy;
-
-static SECRET_PATTERNS: Lazy<Vec<SecretPattern>> = Lazy::new(|| {
+static SECRET_PATTERNS: LazyLock<Vec<SecretPattern>> = LazyLock::new(|| {
     vec![
         SecretPattern::new(
             "AWS Access Key",

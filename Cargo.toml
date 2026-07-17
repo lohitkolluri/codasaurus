@@ -27,23 +27,22 @@ tokio = { version = "1", features = ["full"] }
 
 # Error handling
 anyhow = "1"
-thiserror = "2"
 
 # Terminal output
 colored = "3"
-terminal_size = "0.4"
-syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 
-# Parsing (regex-based for MVP; tree-sitter AST parsing will be added in a future release)
+# TUI (interactive review mode)
+ratatui = "0.29"
+crossterm = "0.28"
 
 # Config
 dirs = "6"
 
-# Lazy init
-once_cell = "1"
-
 # Regex & text processing
 regex = "1"
+
+# Multi-pattern string matching
+aho-corasick = "1"
 
 # File watching (for watch mode)
 notify = "7"
@@ -56,15 +55,10 @@ clx = "2"
 
 # Web server (for GitHub App bot)
 axum = "0.8"
-tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "limit"] }
-tokio-util = "0.7"
 
 # Database (for feedback learning loop)
 rusqlite = { version = "0.34", features = ["bundled"] }
-
-# UUID generation
-uuid = { version = "1", features = ["v4"] }
 
 # JWT generation (for GitHub App auth)
 jsonwebtoken = "9"

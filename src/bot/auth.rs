@@ -2,10 +2,10 @@ use crate::bot::BotConfig;
 use anyhow::{Context, Result};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub async fn get_installation_token(config: &BotConfig) -> Result<String> {
+pub async fn get_installation_token(config: &BotConfig, installation_id: Option<i64>) -> Result<String> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_secs();
 
     let jwt_header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
@@ -22,23 +22,28 @@ pub async fn get_installation_token(config: &BotConfig) -> Result<String> {
         jsonwebtoken::encode(&jwt_header, &jwt_payload, &key).context("Failed to create JWT")?;
 
     let client = reqwest::Client::new();
-    let installations: Vec<serde_json::Value> = client
-        .get("https://api.github.com/app/installations")
-        .header("Authorization", format!("Bearer {}", jwt))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "codasaurus/0.1.0")
-        .send()
-        .await
-        .context("Failed to get installations")?
-        .json()
-        .await?;
 
-    let inst_id = installations
-        .first()
-        .context("No installations found — install the app on a repo first")?
-        .get("id")
-        .and_then(|v| v.as_i64())
-        .context("Invalid installation ID")?;
+    let inst_id = if let Some(iid) = installation_id {
+        iid
+    } else {
+        // Fallback: fetch first installation
+        let installations: Vec<serde_json::Value> = client
+            .get("https://api.github.com/app/installations")
+            .header("Authorization", format!("Bearer {}", jwt))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "codasaurus/0.1.0")
+            .send()
+            .await
+            .context("Failed to get installations")?
+            .json()
+            .await?;
+        installations
+            .first()
+            .context("No installations found — install the app on a repo first")?
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .context("Invalid installation ID")?
+    };
 
     let resp: serde_json::Value = client
         .post(format!(

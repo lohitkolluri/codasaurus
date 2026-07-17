@@ -1,23 +1,23 @@
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 
-static CHECKBOX_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^\s*[-*]\s+\[([ xX])\]\s+(.+)$").unwrap());
-static HEADING_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^#{2,4}\s+(.+)$").unwrap());
-static BRANCH_RE: Lazy<Regex> = Lazy::new(|| {
+static CHECKBOX_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*[-*]\s+\[([ xX])\]\s+(.+)$").unwrap());
+static HEADING_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^#{2,4}\s+(.+)$").unwrap());
+static BRANCH_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)branch\s*(naming|pattern|name|format)?\s*[:]\s*(.+?)(?:[,.\n]|$)").unwrap()
 });
-static BRANCH_INLINE_RE: Lazy<Regex> = Lazy::new(|| {
+static BRANCH_INLINE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(branches?\s+(?:must|should)\s+(?:start|begin)\s+with\s+`([^`]+)`)").unwrap()
 });
-static DCO_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)(signed.off.by|DCO|developer.certificate.of.origin)").unwrap());
-static CONVENTIONAL_RE: Lazy<Regex> = Lazy::new(|| {
+static DCO_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)(signed.off.by|DCO|developer.certificate.of.origin)").unwrap());
+static CONVENTIONAL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(conventional\s*commits?|commit\s*(message)?\s*(convention|format|style))")
         .unwrap()
 });
-static FILE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)(?:required|must\s+have|must\s+include)\s+`([^`]+)`").unwrap());
+static FILE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)(?:required|must\s+have|must\s+include)\s+`([^`]+)`").unwrap());
 
 /// A structured rule extracted from a contribution guideline file.
 #[derive(Debug, Clone)]

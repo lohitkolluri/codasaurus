@@ -1,8 +1,6 @@
 use crate::detectors::Finding;
 use crate::parser::ParsedFile;
 
-/// Detect over-engineered patterns in AI-generated code
-/// Looks for unnecessary abstractions, excessive nesting, over-use of patterns
 pub fn detect_over_engineering(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     let mut findings = Vec::new();
 
@@ -30,7 +28,6 @@ pub fn detect_over_engineering(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     findings
 }
 
-/// Detect boilerplate and unnecessarily verbose code
 pub fn detect_boilerplate(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     let mut findings = Vec::new();
 
@@ -52,7 +49,7 @@ pub fn detect_boilerplate(parsed_files: &[ParsedFile]) -> Vec<Finding> {
             if comment_ratio > 0.4 {
                 findings.push(Finding {
                     detector: "boilerplate".to_string(),
-                    severity: "warning".to_string(),
+                    severity: "warning",
                     file: file.path.clone(),
                     line: 0,
                     column: 0,
@@ -83,12 +80,9 @@ fn check_single_impl_interface(path: &str, lines: &[&str]) -> Option<Finding> {
         .iter()
         .filter(|l| {
             let t = l.trim();
-            // Must start with "trait " or "pub trait " or "pub(crate) trait " etc
-            // Cannot be inside a comment
             if t.starts_with("//") || t.starts_with('#') {
                 return false;
             }
-            // Look for trait declaration (not trait usage as bound)
             t.contains("trait ") && (t.starts_with("pub") || t.starts_with("trait"))
         })
         .count();
@@ -100,7 +94,6 @@ fn check_single_impl_interface(path: &str, lines: &[&str]) -> Option<Finding> {
             if t.starts_with("//") || t.starts_with('#') {
                 return false;
             }
-            // Look for impl blocks
             t.starts_with("impl ")
                 || t.starts_with("pub impl ")
                 || t.starts_with("unsafe impl ")
@@ -111,7 +104,7 @@ fn check_single_impl_interface(path: &str, lines: &[&str]) -> Option<Finding> {
     if trait_count == 1 && impl_count == 1 {
         return Some(Finding {
             detector: "over-engineering".to_string(),
-            severity: "warning".to_string(),
+            severity: "warning",
             file: path.to_string(),
             line: 0,
             column: 0,
@@ -140,8 +133,8 @@ fn check_deep_nesting(path: &str, lines: &[&str]) -> Option<Finding> {
             continue;
         }
 
-        let opens = trimmed.matches('{').count();
-        let closes = trimmed.matches('}').count();
+        let opens = trimmed.bytes().filter(|&b| b == b'{').count();
+        let closes = trimmed.bytes().filter(|&b| b == b'}').count();
 
         // Calculate depth AFTER this line
         if opens > closes {
@@ -160,7 +153,7 @@ fn check_deep_nesting(path: &str, lines: &[&str]) -> Option<Finding> {
     if max_depth > 6 {
         Some(Finding {
             detector: "over-engineering".to_string(),
-            severity: "info".to_string(),
+            severity: "info",
             file: path.to_string(),
             line: deepest_line,
             column: 0,
@@ -188,15 +181,15 @@ fn check_unnecessary_factory(path: &str, content: &str) -> Option<Finding> {
     }
 
     // Count types/structs/classes that could be created directly
-    let struct_count = content.matches("struct ").count();
-    let class_count = content.matches("class ").count();
-    let total_types = struct_count + class_count;
+    let total_types = content.lines().filter(|line| {
+        line.contains("struct ") || line.contains("class ")
+    }).count();
 
     // Factory with very few types is over-engineering
     if total_types <= 3 && has_factory {
         Some(Finding {
             detector: "over-engineering".to_string(),
-            severity: "warning".to_string(),
+            severity: "warning",
             file: path.to_string(),
             line: 0,
             column: 0,
@@ -235,7 +228,7 @@ fn check_abstraction_overload(path: &str, content: &str) -> Option<Finding> {
     if count >= 2 {
         Some(Finding {
             detector: "over-engineering".to_string(),
-            severity: "warning".to_string(),
+            severity: "warning",
             file: path.to_string(),
             line: 0,
             column: 0,
@@ -281,8 +274,8 @@ fn check_long_functions(path: &str, content: &str) -> Option<Finding> {
                 .take(lines.len().min(start + 200))
                 .skip(start)
             {
-                depth += l.matches('{').count();
-                depth = depth.saturating_sub(l.matches('}').count());
+                depth += l.bytes().filter(|&b| b == b'{').count();
+                depth = depth.saturating_sub(l.bytes().filter(|&b| b == b'}').count());
                 if depth == 0 && j > start {
                     let func_lines = j - start;
                     if func_lines > 60 {
@@ -304,7 +297,7 @@ fn check_long_functions(path: &str, content: &str) -> Option<Finding> {
     if let Some(&(line, count)) = long_funcs.first() {
         Some(Finding {
             detector: "boilerplate".to_string(),
-            severity: "warning".to_string(),
+            severity: "warning",
             file: path.to_string(),
             line,
             column: 0,
@@ -345,7 +338,7 @@ fn check_repeated_code(path: &str, lines: &[&str]) -> Option<Finding> {
     if repeats > 3 {
         Some(Finding {
             detector: "boilerplate".to_string(),
-            severity: "warning".to_string(),
+            severity: "warning",
             file: path.to_string(),
             line: 0,
             column: 0,
@@ -379,13 +372,15 @@ fn count_comment_lines(lines: &[&str]) -> usize {
 }
 
 fn check_boilerplate_getters_setters(path: &str, content: &str) -> Option<Finding> {
-    let getter_count = content.matches("get_").count();
-    let setter_count = content.matches("set_").count();
+    let (getter_count, setter_count) = content.lines().fold((0, 0), |(g, s), line| {
+        (g + if line.contains("get_") { 1 } else { 0 },
+         s + if line.contains("set_") { 1 } else { 0 })
+    });
 
     if getter_count > 5 || setter_count > 5 {
         Some(Finding {
             detector: "boilerplate".to_string(),
-            severity: "info".to_string(),
+            severity: "info",
             file: path.to_string(),
             line: 0,
             column: 0,

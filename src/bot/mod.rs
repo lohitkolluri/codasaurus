@@ -39,6 +39,11 @@ async fn health() -> &'static str {
 }
 
 #[derive(Deserialize)]
+struct InstallationInfo {
+    id: i64,
+}
+
+#[derive(Deserialize)]
 struct WebhookPayload {
     #[serde(rename = "action")]
     _action: String,
@@ -46,6 +51,7 @@ struct WebhookPayload {
     pull_request: Option<serde_json::Value>,
     #[serde(rename = "repository")]
     _repo: Option<serde_json::Value>,
+    installation: Option<InstallationInfo>,
 }
 
 async fn handle_webhook(
@@ -69,14 +75,16 @@ async fn handle_webhook(
     if event == "pull_request" {
         if let Some(pr) = payload.pull_request {
             let cfg = config.clone();
+            let inst_id = payload.installation.as_ref().map(|i| i.id);
             tokio::spawn(async move {
-                let token = auth::get_installation_token(&cfg).await;
+                let token = auth::get_installation_token(&cfg, inst_id).await;
                 match token {
                     Ok(t) => {
                         let wrapped = WebhookPayload {
                             _action: String::new(),
                             pull_request: Some(pr),
                             _repo: None,
+                            installation: None,
                         };
                         if let Err(e) = review::review_pr(&t, &wrapped).await {
                             eprintln!("  Review error: {}", e);

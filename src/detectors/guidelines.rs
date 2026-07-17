@@ -5,6 +5,13 @@ use crate::context::guidelines::{find_guidelines, GuidelineFile};
 use crate::context::rules::ExtractedRule;
 use crate::detectors::Finding;
 use crate::git;
+use std::sync::LazyLock;
+use regex::Regex;
+
+static CONVENTIONAL_COMMIT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(\(.+\))?!?: .+")
+        .expect("invalid conventional commit regex")
+});
 
 /// Runs the guidelines compliance check.
 ///
@@ -50,7 +57,7 @@ pub fn detect(config: &Config) -> Vec<Finding> {
                 ExtractedRule::ChecklistItem { text, .. } => {
                     findings.push(Finding {
                         detector: "guidelines".to_string(),
-                        severity: "info".to_string(),
+                        severity: "info",
                         file: gf.path.to_string_lossy().to_string(),
                         line: 0,
                         column: 0,
@@ -68,14 +75,12 @@ pub fn detect(config: &Config) -> Vec<Finding> {
     findings
 }
 
-/// Check if the current branch matches the expected pattern.
 fn check_branch_pattern(gf: &GuidelineFile, pattern: &str, findings: &mut Vec<Finding>) {
     let branch = match git::current_branch() {
         Ok(b) => b,
         Err(_) => return,
     };
 
-    // Normalize pattern: remove backticks and trim
     let clean_pattern = pattern.trim_matches('`').trim().to_lowercase();
     let branch_lower = branch.to_lowercase();
 
@@ -104,7 +109,7 @@ fn check_branch_pattern(gf: &GuidelineFile, pattern: &str, findings: &mut Vec<Fi
     if !matches {
         findings.push(Finding {
             detector: "guidelines".to_string(),
-            severity: "warning".to_string(),
+            severity: "warning",
             file: gf.path.to_string_lossy().to_string(),
             line: 0,
             column: 0,
@@ -119,7 +124,6 @@ fn check_branch_pattern(gf: &GuidelineFile, pattern: &str, findings: &mut Vec<Fi
     }
 }
 
-/// Check if recent commits are signed off.
 fn check_sign_off(gf: &GuidelineFile, _description: &str, findings: &mut Vec<Finding>) {
     let commits = match git::recent_commits(10) {
         Ok(c) => c,
@@ -138,7 +142,7 @@ fn check_sign_off(gf: &GuidelineFile, _description: &str, findings: &mut Vec<Fin
     if !unsigned.is_empty() {
         findings.push(Finding {
             detector: "guidelines".to_string(),
-            severity: "warning".to_string(),
+            severity: "warning",
             file: gf.path.to_string_lossy().to_string(),
             line: 0,
             column: 0,
@@ -153,31 +157,25 @@ fn check_sign_off(gf: &GuidelineFile, _description: &str, findings: &mut Vec<Fin
     }
 }
 
-/// Check if recent commits follow conventional commit format.
 fn check_conventional_commits(gf: &GuidelineFile, _description: &str, findings: &mut Vec<Finding>) {
     let commits = match git::recent_commits(10) {
         Ok(c) => c,
         Err(_) => return,
     };
 
-    let re = regex::Regex::new(
-        r"^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(\(.+\))?!?: .+",
-    )
-    .unwrap();
-
     let non_conventional: Vec<&str> = commits
         .iter()
         .filter(|c| {
             let first_line = c.lines().next().unwrap_or(c);
-            !re.is_match(first_line)
+            !CONVENTIONAL_COMMIT_RE.is_match(first_line)
         })
         .map(|c| c.lines().next().unwrap_or(c))
         .collect();
 
-    if !non_conventional.is_empty() && non_conventional.len() == commits.len() {
+    if !non_conventional.is_empty() {
         findings.push(Finding {
             detector: "guidelines".to_string(),
-            severity: "info".to_string(),
+            severity: "info",
             file: gf.path.to_string_lossy().to_string(),
             line: 0,
             column: 0,

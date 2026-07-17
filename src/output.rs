@@ -1,7 +1,6 @@
 use crate::detectors::Findings;
 use colored::*;
 
-/// Render findings to terminal or JSON
 pub fn render(findings: &Findings, json_mode: bool) -> anyhow::Result<()> {
     if json_mode {
         let output = serde_json::to_string_pretty(&findings)?;
@@ -23,7 +22,6 @@ fn render_terminal(findings: &Findings) {
     let warnings = counts.get("warning").copied().unwrap_or(0);
     let infos = counts.get("info").copied().unwrap_or(0);
 
-    // One-line summary
     let mut summary_parts = vec![];
     if blocking > 0 {
         summary_parts.push(format!("{} blocking", blocking.to_string().red().bold()));
@@ -64,7 +62,7 @@ fn render_terminal(findings: &Findings) {
             println!("  {}", current_file.bold());
         }
 
-        let sev_char = match f.severity.as_str() {
+        let sev_char = match f.severity {
             "blocking" => "✗".red().bold().to_string(),
             "warning" => "⚠".yellow().bold().to_string(),
             _ => "ℹ".cyan().bold().to_string(),
@@ -76,7 +74,6 @@ fn render_terminal(findings: &Findings) {
             String::new()
         };
 
-        // Line 1: severity + detector + location
         println!(
             "    {} {} [{}]",
             sev_char,
@@ -84,10 +81,8 @@ fn render_terminal(findings: &Findings) {
             location.dimmed(),
         );
 
-        // Line 2: message
         println!("      {}", f.message);
 
-        // Line 3: fix (if exists)
         if let Some(suggestion) = &f.suggestion {
             println!("      {} {}", "→".blue().bold(), suggestion.blue());
         }

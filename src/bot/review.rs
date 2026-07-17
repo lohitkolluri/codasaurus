@@ -14,7 +14,7 @@ pub async fn review_pr(token: &str, payload: &WebhookPayload) -> Result<()> {
     let pr_number = pr["number"].as_i64().unwrap_or(0);
     let pr_title = pr["title"].as_str().unwrap_or("").to_string();
     let pr_body = pr["body"].as_str().unwrap_or("").to_string();
-    let head_sha = pr["head"]["sha"].as_str().unwrap_or("");
+    let _head_sha = pr["head"]["sha"].as_str().unwrap_or("");
 
     let client = reqwest::Client::new();
     let auth_header = format!("Bearer {}", token);
@@ -32,7 +32,13 @@ pub async fn review_pr(token: &str, payload: &WebhookPayload) -> Result<()> {
         .text()
         .await?;
 
-    let files: Vec<serde_json::Value> = serde_json::from_str(&files_text).unwrap_or_default();
+    let files: Vec<serde_json::Value> = match serde_json::from_str(&files_text) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Warning: failed to parse PR files response: {}", e);
+            return Ok(());
+        }
+    };
     if files.is_empty() {
         return Ok(());
     }
@@ -41,20 +47,22 @@ pub async fn review_pr(token: &str, payload: &WebhookPayload) -> Result<()> {
     for file in &files {
         let filename = file["filename"].as_str().unwrap_or("unknown");
         let patch = file["patch"].as_str().unwrap_or("");
-        let status = file["status"].as_str().unwrap_or("modified");
         if !patch.is_empty() && patch.len() < 100_000 {
-            let parsed = crate::parser::parse_file(filename, patch).ok();
+            let parsed = match crate::parser::parse_file(filename, patch) {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    eprintln!("Warning: failed to parse file {}: {}", filename, e);
+                    None
+                }
+            };
             if let Some(p) = parsed {
                 findings
                     .extend(detectors::run_all(&[p], &crate::config::Config::default()).findings);
             }
         }
-        // Track added lines for inline comment mapping
-        let _ = status;
     }
 
     let mut review_comments: Vec<serde_json::Value> = Vec::new();
-    let mut summary_parts: Vec<String> = Vec::new();
     let mut has_blocking = false;
     let mut total_findings = 0;
 
@@ -63,10 +71,6 @@ pub async fn review_pr(token: &str, payload: &WebhookPayload) -> Result<()> {
         if f.severity == "blocking" {
             has_blocking = true;
         }
-        summary_parts.push(format!(
-            "- [{}] {}:{} — {}",
-            f.severity, f.file, f.line, f.message
-        ));
 
         // Map finding line number to the PR diff position
         if f.line > 0 {
@@ -108,8 +112,6 @@ pub async fn review_pr(token: &str, payload: &WebhookPayload) -> Result<()> {
         total_findings,
         has_blocking,
         repo_name,
-        pr_number,
-        head_sha,
     );
 
     // Try to create a review with inline comments; fall back to single comment
@@ -151,7 +153,7 @@ pub async fn review_pr(token: &str, payload: &WebhookPayload) -> Result<()> {
 
     // Generate and post LLM summary if API key is available
     if let Some(llm_cfg) = crate::llm::LlmConfig::from_env() {
-        let _ = generate_and_post_summary(
+        if let Err(e) = generate_and_post_summary(
             &client,
             &auth_header,
             repo_name,
@@ -161,15 +163,17 @@ pub async fn review_pr(token: &str, payload: &WebhookPayload) -> Result<()> {
             &pr_title,
             &pr_body,
         )
-        .await;
+        .await
+        {
+            eprintln!("Warning: failed to generate LLM summary: {}", e);
+        }
     }
 
     Ok(())
 }
 
-/// Build a per-line comment body for a single finding
 fn build_comment_body(finding: &Finding) -> String {
-    let icon = match finding.severity.as_str() {
+    let icon = match finding.severity {
         "blocking" => "🔴",
         "warning" => "🟡",
         _ => "🔵",
@@ -179,23 +183,24 @@ fn build_comment_body(finding: &Finding) -> String {
         icon, finding.detector, finding.severity, finding.message
     );
     if let Some(s) = &finding.suggestion {
-        body.push_str(&format!("\n\n> 💡 {}", s));
+        use std::fmt::Write;
+        let _ = write!(body, "\n\n> 💡 {}", s);
     }
     if let Some(c) = &finding.codemod {
-        body.push_str(&format!("\n\n```\n{}\n```", c));
+        use std::fmt::Write;
+        let _ = write!(body, "\n\n```\n{}\n```", c);
     }
     body
 }
 
-/// Build the overall review body with a summary of all findings
 fn build_review_body(
     findings: &Findings,
     total: usize,
     has_blocking: bool,
     repo_name: &str,
-    _pr_number: i64,
-    _head_sha: &str,
 ) -> String {
+    use std::fmt::Write;
+
     let counts = findings.count_by_severity();
     let blocking = counts.get("blocking").copied().unwrap_or(0);
     let warnings = counts.get("warning").copied().unwrap_or(0);
@@ -219,32 +224,29 @@ fn build_review_body(
     let mut warning_items = String::new();
     let mut info_items = String::new();
     for f in &findings.findings {
-        let line = format!("- `{}:{}` — {}\n", f.file, f.line, f.message);
-        match f.severity.as_str() {
-            "blocking" => blocking_items.push_str(&line),
-            "warning" => warning_items.push_str(&line),
-            _ => info_items.push_str(&line),
-        }
+        let line = match f.severity {
+            "blocking" => &mut blocking_items,
+            "warning" => &mut warning_items,
+            _ => &mut info_items,
+        };
+        let _ = writeln!(line, "- `{}:{}` — {}", f.file, f.line, f.message);
     }
 
     if blocking > 0 {
-        body.push_str("\n### 🔴 Blocking\n");
-        body.push_str(&blocking_items);
+        let _ = write!(body, "\n### 🔴 Blocking\n{}", blocking_items);
     }
     if warnings > 0 {
-        body.push_str("\n### 🟡 Warnings\n");
-        body.push_str(&warning_items);
+        let _ = write!(body, "\n### 🟡 Warnings\n{}", warning_items);
     }
     if infos > 0 {
-        body.push_str("\n### 🔵 Info\n");
-        body.push_str(&info_items);
+        let _ = write!(body, "\n### 🔵 Info\n{}", info_items);
     }
 
-    body.push_str("\n---\n");
-    body.push_str(&format!(
-        "_Powered by [Codasaurus](https://github.com/lohitkolluri/codasaurus) — reviewing `{}`_\n",
+    let _ = write!(
+        body,
+        "\n---\n_Powered by [Codasaurus](https://github.com/lohitkolluri/codasaurus) — reviewing `{}`_\n",
         repo_name
-    ));
+    );
 
     body
 }
@@ -262,12 +264,11 @@ async fn generate_and_post_summary(
     pr_body: &str,
 ) -> Result<()> {
     // Build a summary from the findings
-    let findings_text: String = findings
-        .findings
-        .iter()
-        .map(|f| format!("- {}: {} (line {})", f.severity, f.message, f.line))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let mut findings_text = String::new();
+    for f in &findings.findings {
+        use std::fmt::Write;
+        let _ = writeln!(findings_text, "- {}: {} (line {})", f.severity, f.message, f.line);
+    }
 
     let prompt = format!(
         r#"Generate a concise PR review summary (2-3 paragraphs) for the following code review results.

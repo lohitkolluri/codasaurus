@@ -15,6 +15,9 @@ pub struct Config {
 
     #[serde(default)]
     pub guidelines: GuidelinesConfig,
+
+    #[serde(default)]
+    pub tui: TuiConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -88,6 +91,14 @@ pub struct GuidelinesConfig {
     pub contributing_guidelines: Option<String>,
 }
 
+/// Interactive TUI configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TuiConfig {
+    /// Editor command to open files (defaults to $EDITOR / $VISUAL)
+    #[serde(default)]
+    pub editor: Option<String>,
+}
+
 fn default_true() -> bool {
     true
 }
@@ -131,21 +142,43 @@ impl Default for Config {
                 cache_ttl_secs: 3600,
             },
             guidelines: GuidelinesConfig::default(),
+            tui: TuiConfig::default(),
         }
     }
 }
 
-/// Load config from .codasaurus.toml in current or parent directories
-pub fn load() -> Result<Config> {
-    let config_path = find_config()?;
-    match config_path {
+/// Load config from specified path or auto-discover from parent directories.
+///
+/// Pass `Some("/path/to/config.toml")` to load from an explicit path, or
+/// `None` to search for `.codasaurus.toml` in current/parent directories.
+pub fn load(path: Option<&str>) -> Result<Config> {
+    let config_path = match path {
+        Some(p) => {
+            let pb = PathBuf::from(p);
+            if pb.exists() {
+                Some(pb)
+            } else {
+                eprintln!(
+                    "Warning: config file '{}' not found, using defaults.",
+                    p
+                );
+                None
+            }
+        }
+        None => find_config()?,
+    };
+    let config = match config_path {
         Some(path) => {
             let contents = std::fs::read_to_string(&path)?;
             let config: Config = toml::from_str(&contents)?;
-            Ok(config)
+            config
         }
-        None => Ok(Config::default()),
-    }
+        None => Config::default(),
+    };
+
+    crate::registry::init_cache_from_config(&config);
+
+    Ok(config)
 }
 
 fn find_config() -> Result<Option<PathBuf>> {
@@ -163,33 +196,4 @@ fn find_config() -> Result<Option<PathBuf>> {
     Ok(None)
 }
 
-/// The default config file content for `codasaurus init`
-#[allow(dead_code)]
-pub fn default_config_content() -> &'static str {
-    r#"# Codasaurus configuration
-# See https://github.com/lohitkolluri/codasaurus for docs
 
-[checks]
-hallucinated_imports = true
-phantom_deps = true
-vulnerabilities = true
-secrets = true
-over_engineering = true
-boilerplate = true
-stale_api = false
-todo_leaks = true
-guidelines = true
-
-[behavior]
-default_severity = "warn"
-strict = false
-
-[registry]
-timeout_ms = 5000
-cache_ttl_secs = 3600
-
-# Per-repo contribution guidelines path (overrides auto-discovery)
-# [guidelines]
-# contributing_guidelines = "docs/CONTRIBUTING.md"
-"#
-}

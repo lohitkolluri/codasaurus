@@ -2,15 +2,14 @@ use crate::config::Config;
 use crate::detectors::Finding;
 use crate::graph::CodeGraph;
 use crate::parser::ParsedFile;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 /// Global mutable code graph populated during parsing.
 /// Each `run_all()` call rebuilds it from the parsed files.
-static CODE_GRAPH: Lazy<Mutex<CodeGraph>> = Lazy::new(|| Mutex::new(CodeGraph::new()));
+static CODE_GRAPH: LazyLock<Mutex<CodeGraph>> = LazyLock::new(|| Mutex::new(CodeGraph::new()));
 
-/// Populate the CodeGraph from parsed files (called by the pipeline).
 pub fn populate(files: &[ParsedFile]) {
     let mut graph = match CODE_GRAPH.lock() {
         Ok(g) => g,
@@ -114,7 +113,6 @@ pub fn populate(files: &[ParsedFile]) {
     }
 }
 
-/// Detect potential blast radius issues from the code graph
 pub fn detect(parsed_files: &[ParsedFile], _config: &Config) -> Vec<Finding> {
     let mut findings = Vec::new();
 
@@ -128,24 +126,13 @@ pub fn detect(parsed_files: &[ParsedFile], _config: &Config) -> Vec<Finding> {
         }
     };
 
-    let mut file_paths: Vec<&str> = graph.files.keys().map(|s| s.as_str()).collect();
-    file_paths.sort();
-    file_paths.dedup();
-
-    for file_path in &file_paths {
-        let symbols: Vec<String> = graph
-            .node_indices
-            .keys()
-            .filter(|k| k.contains(&format!("{}::", file_path)))
-            .cloned()
-            .collect();
-
-        for sym in &symbols {
+    for (file_path, symbols) in &graph.file_to_nodes {
+        for sym in symbols {
             let affected = graph.blast_radius(sym, 3);
             if affected.len() > 5 {
                 findings.push(Finding {
                     detector: "blast-radius".to_string(),
-                    severity: "info".to_string(),
+                    severity: "info",
                     file: file_path.to_string(),
                     line: 0,
                     column: 0,
@@ -170,15 +157,4 @@ pub fn detect(parsed_files: &[ParsedFile], _config: &Config) -> Vec<Finding> {
     findings
 }
 
-/// Reset the graph (for testing)
-#[allow(dead_code)]
-pub fn reset() {
-    let mut graph = match CODE_GRAPH.lock() {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("Warning: code graph mutex poisoned, resetting");
-            e.into_inner()
-        }
-    };
-    *graph = CodeGraph::new();
-}
+

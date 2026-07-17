@@ -6,16 +6,19 @@ use anyhow::Result;
 use colored::Colorize;
 use std::path::Path;
 
-pub fn run_check(
-    staged: &bool,
-    diff: &Option<String>,
-    _ci: &bool,
-    llm: &bool,
-    _json: &bool,
-    path: &Option<String>,
-    config: &Config,
-) -> Result<Findings> {
-    if !git::is_git_repo() && !path.is_some() {
+pub struct CheckOptions<'a> {
+    pub staged: bool,
+    pub diff: Option<String>,
+    pub ci: bool,
+    pub llm: bool,
+    pub json: bool,
+    pub path: Option<String>,
+    pub config: &'a Config,
+    pub quiet: bool,
+}
+
+pub fn run_check(opts: CheckOptions) -> Result<Findings> {
+    if !git::is_git_repo() && opts.path.is_none() {
         anyhow::bail!(
             "Not in a git repository. Run codasaurus check <path> or use from within a git repo."
         );
@@ -23,43 +26,47 @@ pub fn run_check(
 
     let mut findings = Findings::new();
 
-    if let Some(specific_path) = path {
+    if let Some(ref specific_path) = opts.path {
         let p = Path::new(specific_path);
         if p.is_dir() {
             for entry in walkdir::WalkDir::new(p)
                 .into_iter()
                 .filter_entry(|e| !is_hidden(e))
-                .filter_map(|e| e.ok())
+                .filter_map(|e| {
+                    if let Err(err) = &e {
+                        eprintln!("Warning: error accessing directory entry: {}", err);
+                    }
+                    e.ok()
+                })
             {
                 if entry.file_type().is_file() {
                     let path_str = entry.path().to_string_lossy().to_string();
-                    process_file(&path_str, &mut findings, config);
+                    process_file(&path_str, &mut findings, opts.config);
                 }
             }
         } else if p.is_file() {
             let path_str = p.to_string_lossy().to_string();
-            process_file(&path_str, &mut findings, config);
+            process_file(&path_str, &mut findings, opts.config);
         }
-    } else if *staged || (diff.is_none() && !staged) {
+    } else if opts.staged || (opts.diff.is_none() && !opts.staged) {
         let diff_output = git::get_staged_diff()?;
         let changed_files = extract_changed_files(&diff_output)?;
         for file_path in &changed_files {
-            process_file(file_path, &mut findings, config);
+            process_file(file_path, &mut findings, opts.config);
         }
-    } else if let Some(ref_a) = diff {
+    } else if let Some(ref ref_a) = opts.diff {
         let diff_output = git::get_diff_between(ref_a, "HEAD")?;
         let changed_files = extract_changed_files(&diff_output)?;
         for file_path in &changed_files {
-            process_file(file_path, &mut findings, config);
+            process_file(file_path, &mut findings, opts.config);
         }
     }
 
-    // Run LLM review if flag is set
-    if *llm {
+    if opts.llm {
         if let Some(llm_cfg) = crate::llm::LlmConfig::from_env() {
-            let diff = if *staged {
+            let diff = if opts.staged {
                 git::get_staged_diff().unwrap_or_default()
-            } else if let Some(ref_a) = diff {
+            } else if let Some(ref ref_a) = opts.diff {
                 git::get_diff_between(ref_a, "HEAD").unwrap_or_default()
             } else {
                 String::new()
@@ -76,11 +83,17 @@ pub fn run_check(
                     }
                 };
 
-                let spin = clx::progress::ProgressJobBuilder::new()
-                    .prop("message", "Running LLM review...")
-                    .start();
+                let spin = if !opts.quiet {
+                    Some(
+                        clx::progress::ProgressJobBuilder::new()
+                            .prop("message", "Running LLM review...")
+                            .start(),
+                    )
+                } else {
+                    None
+                };
 
-                let guidelines_override = config.guidelines.contributing_guidelines.as_deref();
+                let guidelines_override = opts.config.guidelines.contributing_guidelines.as_deref();
                 let repo_context_str = git::repo_root()
                     .ok()
                     .and_then(|r| crate::context::build_repo_context(&r, guidelines_override))
@@ -94,14 +107,20 @@ pub fn run_check(
                 let result =
                     rt.block_on(crate::llm::review_diff(&diff, &llm_cfg, Some(&review_ctx)));
 
-                spin.set_status(clx::progress::ProgressStatus::Done);
+                if let Some(ref s) = spin {
+                    s.set_status(clx::progress::ProgressStatus::Done);
+                }
 
                 match result {
                     Ok(output) => {
                         for issue in output.issues {
                             findings.findings.push(crate::detectors::Finding {
                                 detector: "llm-review".to_string(),
-                                severity: issue.severity,
+                                severity: match issue.severity.as_str() {
+                                    "critical" | "high" => "blocking",
+                                    "warning" | "moderate" | "medium" => "warning",
+                                    _ => "info",
+                                },
                                 file: issue.file,
                                 line: issue.line,
                                 column: 0,
@@ -125,8 +144,7 @@ pub fn run_check(
     Ok(findings)
 }
 
-/// Run watch mode — monitor files for changes
-pub async fn run_watch(path: &str) -> Result<()> {
+pub async fn run_watch(path: &str, config_path: Option<&str>) -> Result<()> {
     use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
     use std::sync::mpsc;
     use std::time::Duration;
@@ -153,7 +171,7 @@ pub async fn run_watch(path: &str) -> Result<()> {
                 if last_check.elapsed() >= Duration::from_millis(500) {
                     let diff = git::get_staged_diff().unwrap_or_default();
                     if !diff.is_empty() {
-                        let config = match crate::config::load() {
+                        let config = match crate::config::load(config_path) {
                             Ok(c) => c,
                             Err(e) => {
                                 eprintln!(
@@ -164,7 +182,16 @@ pub async fn run_watch(path: &str) -> Result<()> {
                             }
                         };
                         let findings =
-                            run_check(&true, &None, &false, &false, &false, &None, &config)
+                            run_check(CheckOptions {
+                                staged: true,
+                                diff: None,
+                                ci: false,
+                                llm: false,
+                                json: false,
+                                path: None,
+                                config: &config,
+                                quiet: true,
+                            })
                                 .unwrap_or_default();
 
                         print!("\x1B[2J\x1B[H"); // Clear screen
@@ -183,7 +210,6 @@ pub async fn run_watch(path: &str) -> Result<()> {
     Ok(())
 }
 
-/// Process a single file through the detector pipeline
 fn process_file(file_path: &str, findings: &mut Findings, config: &Config) {
     if !parser::is_supported(file_path) {
         return;
@@ -201,7 +227,6 @@ fn process_file(file_path: &str, findings: &mut Findings, config: &Config) {
     }
 }
 
-/// Extract list of changed files from a git diff output
 fn extract_changed_files(diff_output: &str) -> Result<Vec<String>> {
     let mut files = Vec::new();
 

@@ -35,9 +35,9 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
 
             if let Ok(vulns) = registry::check_vulnerabilities(registry_name, &package) {
                 for vuln in &vulns {
-                    let severity = match vuln.severity.to_lowercase().as_str() {
-                        "critical" | "high" => "blocking",
-                        "moderate" | "medium" => "warning",
+                    let severity = match vuln.severity.as_str() {
+                        s if s.eq_ignore_ascii_case("critical") || s.eq_ignore_ascii_case("high") => "blocking",
+                        s if s.eq_ignore_ascii_case("moderate") || s.eq_ignore_ascii_case("medium") => "warning",
                         _ => "info",
                     };
                     let fixed = vuln
@@ -47,7 +47,7 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                         .unwrap_or_default();
                     findings.push(Finding {
                         detector: "vulnerabilities".to_string(),
-                        severity: severity.to_string(),
+                        severity,
                         file: file.path.clone(),
                         line: import.line,
                         column: import.column,

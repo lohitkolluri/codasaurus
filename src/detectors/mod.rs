@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::learning::store::LearningStore;
 use crate::parser::ParsedFile;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 
 pub mod graph;
@@ -14,13 +14,13 @@ pub mod style;
 pub mod vulnerabilities;
 
 /// A single finding from a detector
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Finding {
     /// Detector name (e.g. "hallucinated-imports")
     pub detector: String,
 
     /// Severity: "blocking", "warning", "info"
-    pub severity: String,
+    pub severity: &'static str,
 
     /// File path
     pub file: String,
@@ -47,7 +47,6 @@ pub struct Finding {
 
 impl Finding {
     /// Stable fingerprint for deduplication and dismissal tracking
-    #[allow(dead_code)]
     pub fn fingerprint(&self) -> String {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         use std::hash::{Hash, Hasher};
@@ -59,8 +58,7 @@ impl Finding {
     }
 }
 
-/// Collection of findings
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct Findings {
     pub findings: Vec<Finding>,
 }
@@ -70,11 +68,6 @@ impl Findings {
         Self {
             findings: Vec::new(),
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn add(&mut self, finding: Finding) {
-        self.findings.push(finding);
     }
 
     pub fn extend(&mut self, findings: Vec<Finding>) {
@@ -89,21 +82,15 @@ impl Findings {
         self.findings.iter().any(|f| f.severity == "blocking")
     }
 
-    #[allow(dead_code)]
-    pub fn has_warnings(&self) -> bool {
-        self.findings.iter().any(|f| f.severity == "warning")
-    }
-
-    pub fn count_by_severity(&self) -> HashMap<String, usize> {
+    pub fn count_by_severity(&self) -> HashMap<&'static str, usize> {
         let mut counts = HashMap::new();
         for f in &self.findings {
-            *counts.entry(f.severity.clone()).or_insert(0) += 1;
+            *counts.entry(f.severity).or_insert(0) += 1;
         }
         counts
     }
 }
 
-/// Run all enabled detectors on the parsed files
 pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
     let mut all = Findings::new();
 
@@ -192,40 +179,4 @@ pub(crate) fn extract_package_name(import: &str) -> Option<String> {
     // npm-style submodule paths ("lodash/fp" -> "lodash")
     let parts: Vec<&str> = trimmed.splitn(2, '/').collect();
     Some(parts[0].to_string())
-}
-
-/// Run LLM-based review on the parsed files
-#[allow(dead_code)]
-pub async fn run_llm(parsed_files: &[ParsedFile], _config: &Config) -> Findings {
-    let diff: String = parsed_files
-        .iter()
-        .map(|f| format!("--- {}\n{}\n", f.path, f.raw_content))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let Some(llm_cfg) = crate::llm::LlmConfig::from_env() else {
-        return Findings::new();
-    };
-
-    let Ok(output) = crate::llm::review_diff(&diff, &llm_cfg, None).await else {
-        return Findings::new();
-    };
-
-    let findings: Vec<Finding> = output
-        .issues
-        .into_iter()
-        .map(|i| Finding {
-            detector: "llm".into(),
-            severity: i.severity,
-            file: i.file,
-            line: i.line,
-            column: 0,
-            message: i.description,
-            suggestion: i.suggestion,
-            evidence: None,
-            codemod: None,
-        })
-        .collect();
-
-    Findings { findings }
 }

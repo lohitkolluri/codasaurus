@@ -3,7 +3,9 @@ use clap::{Parser, Subcommand};
 use codasaurus::bot;
 use codasaurus::cli;
 use codasaurus::config;
+use codasaurus::interactive;
 use codasaurus::output;
+use std::io::IsTerminal;
 
 #[derive(Parser)]
 #[command(name = "codasaurus")]
@@ -53,13 +55,17 @@ enum Commands {
         /// Path to watch
         #[arg(default_value = ".")]
         path: String,
+
+        /// Path to config file
+        #[arg(long)]
+        config: Option<String>,
     },
 
     /// Start the GitHub App bot server
     Serve {
-        /// Port to listen on
-        #[arg(long, default_value = "3000")]
-        port: u16,
+        /// Port to listen on (defaults to $PORT env var, then 3000)
+        #[arg(long)]
+        port: Option<u16>,
 
         /// Host to bind to
         #[arg(long, default_value = "0.0.0.0")]
@@ -80,21 +86,48 @@ fn main() -> Result<()> {
             ci,
             llm,
             json,
-            config: _,
+            config,
             path,
         } => {
-            let cfg = config::load()?;
-            let findings = cli::run_check(staged, diff, ci, llm, json, path, &cfg)?;
-            output::render(&findings, *json || *ci)?;
-            if findings.has_blocking() && (*ci || *staged) {
+            let cfg = config::load(config.as_deref())?;
+            let interactive_mode = !json && !ci && std::io::stdout().is_terminal();
+            let findings = cli::run_check(cli::CheckOptions {
+                staged: *staged,
+                diff: diff.clone(),
+                ci: *ci,
+                llm: *llm,
+                json: *json,
+                path: path.clone(),
+                config: &cfg,
+                quiet: interactive_mode,
+            })?;
+
+            if interactive_mode {
+                interactive::run(&findings, &cfg)?;
+            } else {
+                output::render(&findings, *json || *ci)?;
+            }
+
+            let should_exit = if cfg.behavior.strict {
+                !findings.is_empty()
+            } else {
+                findings.has_blocking()
+            };
+            if should_exit && (*ci || *staged) {
                 std::process::exit(1);
             }
         }
-        Commands::Watch { path } => {
+        Commands::Watch { path, config } => {
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(cli::run_watch(path))?;
+            rt.block_on(cli::run_watch(path, config.as_deref()))?;
         }
         Commands::Serve { port, host } => {
+            let port = port.unwrap_or_else(|| {
+                std::env::var("PORT")
+                    .ok()
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(3000)
+            });
             let config = bot::BotConfig {
                 app_id: std::env::var("GITHUB_APP_ID")
                     .map_err(|_| anyhow::anyhow!("GITHUB_APP_ID required"))?,
@@ -103,7 +136,7 @@ fn main() -> Result<()> {
                 webhook_secret: std::env::var("GITHUB_WEBHOOK_SECRET")
                     .map_err(|_| anyhow::anyhow!("GITHUB_WEBHOOK_SECRET required"))?,
                 host: host.clone(),
-                port: *port,
+                port,
             };
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(bot::serve(config))?;

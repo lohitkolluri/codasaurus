@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use crate::context::rules::{parse_guidelines_md, ExtractedRule};
@@ -5,13 +6,10 @@ use crate::context::rules::{parse_guidelines_md, ExtractedRule};
 /// A discovered contribution guideline file.
 #[derive(Debug, Clone)]
 pub struct GuidelineFile {
-    /// Absolute path to the file
     pub path: PathBuf,
     /// Label describing the source ("CONTRIBUTING.md", "AGENTS.md", "env-var", etc.)
     pub source: String,
-    /// Full raw content
     pub content: String,
-    /// Extracted structured rules
     pub rules: Vec<ExtractedRule>,
 }
 
@@ -93,7 +91,6 @@ fn find_guidelines_inner(
     results
 }
 
-/// Resolve a single path (file or directory) to guideline files.
 fn resolve_guideline_path(path: &Path) -> Vec<GuidelineFile> {
     if path.is_file() {
         load_guideline_file(path, "env-var")
@@ -121,7 +118,6 @@ fn resolve_guideline_path(path: &Path) -> Vec<GuidelineFile> {
     }
 }
 
-/// Load a single file as a `GuidelineFile`, parsing rules from the content.
 fn load_guideline_file(path: &Path, source: &str) -> Option<GuidelineFile> {
     let content = std::fs::read_to_string(path).ok()?;
     if content.trim().is_empty() {
@@ -151,7 +147,7 @@ pub fn format_guidelines_section(files: &[GuidelineFile]) -> String {
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or(&gf.source);
-        out.push_str(&format!("### {} ({})\n\n", label, gf.source));
+        let _ = write!(out, "### {} ({})\n\n", label, gf.source);
 
         if !gf.rules.is_empty() {
             let mut checklist_count = 0;
@@ -174,35 +170,41 @@ pub fn format_guidelines_section(files: &[GuidelineFile]) -> String {
             }
 
             if checklist_count > 0 {
-                out.push_str(&format!("- **{} checklist items**\n", checklist_count));
+                let _ = writeln!(out, "- **{} checklist items**", checklist_count);
             }
             if req_count > 0 {
-                out.push_str(&format!("- **{} required files**\n", req_count));
+                let _ = writeln!(out, "- **{} required files**", req_count);
             }
             if commit_count > 0 {
-                out.push_str(&format!("- **{} commit rules**\n", commit_count));
+                let _ = writeln!(out, "- **{} commit rules**", commit_count);
             }
             if branch_count > 0 {
-                out.push_str(&format!("- **{} branch patterns**\n", branch_count));
+                let _ = writeln!(out, "- **{} branch patterns**", branch_count);
             }
 
             for text in checklist_items {
-                out.push_str(&format!("  - [ ] {}\n", text));
+                let _ = writeln!(out, "  - [ ] {}", text);
             }
             out.push('\n');
         }
 
         if !gf.content.is_empty() {
             let truncated = if gf.content.len() > 4096 {
+                let trunc_byte = gf
+                    .content
+                    .char_indices()
+                    .nth(4096)
+                    .map(|(i, _)| i)
+                    .unwrap_or(gf.content.len());
                 format!(
                     "{}\n\n[Content truncated at 4096 characters — full file at {}]",
-                    &gf.content[..4096],
+                    &gf.content[..trunc_byte],
                     gf.path.display()
                 )
             } else {
                 gf.content.clone()
             };
-            out.push_str(&format!("```\n{}\n```\n\n", truncated));
+            let _ = write!(out, "```\n{}\n```\n\n", truncated);
         }
     }
 
