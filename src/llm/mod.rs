@@ -23,11 +23,11 @@ pub struct LlmConfig {
 }
 
 fn default_model() -> String {
-    "anthropic/claude-sonnet-4.6".to_string()
+    "qwen/qwen3-coder:free".to_string()
 }
 
 fn default_max_tokens() -> u32 {
-    4096
+    2048
 }
 
 fn default_temperature() -> f32 {

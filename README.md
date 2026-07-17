@@ -160,10 +160,10 @@ Bring your own API key — no per-seat fees. Codasaurus uses OpenRouter, so one 
 # Set your API key
 export OPENROUTER_API_KEY="sk-or-..."
 
-# Pick a model (optional, defaults to claude-sonnet-4.6)
-export CODASAURUS_MODEL="anthropic/claude-sonnet-4.6"
-export CODASAURUS_MODEL="google/gemini-3.1-flash-lite"  # cheaper
-export CODASAURUS_MODEL="anthropic/claude-opus-4.8"     # best quality
+# Pick a model (optional, defaults to qwen/qwen3-coder:free — zero cost)
+export CODASAURUS_MODEL="qwen/qwen3-coder:free"                     # Default (free)
+export CODASAURUS_MODEL="meta-llama/llama-3.3-70b-instruct:free"    # Strong free model
+export CODASAURUS_MODEL="anthropic/claude-sonnet-4.6"               # Paid
 
 # Run with LLM review
 codasaurus check --staged --llm
