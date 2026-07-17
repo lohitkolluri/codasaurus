@@ -56,9 +56,14 @@ impl LlmConfig {
             return None;
         }
 
+        let model = std::env::var("CODASAURUS_MODEL")
+            .ok()
+            .filter(|m| !m.is_empty())
+            .unwrap_or_else(default_model);
+
         Some(Self {
             api_key,
-            model: default_model(),
+            model,
             max_tokens: default_max_tokens(),
             temperature: default_temperature(),
             base_url: default_base_url(),
