@@ -109,7 +109,16 @@ pub fn run_check(
                     Ok(r) => r,
                     Err(_) => return Ok(findings),
                 };
-                match rt.block_on(crate::llm::review_diff(&diff, &llm_cfg, None)) {
+
+                let spin = clx::progress::ProgressJobBuilder::new()
+                    .prop("message", "Running LLM review...")
+                    .start();
+
+                let result = rt.block_on(crate::llm::review_diff(&diff, &llm_cfg, None));
+
+                spin.set_status(clx::progress::ProgressStatus::Done);
+
+                match result {
                     Ok(output) => {
                         for issue in output.issues {
                             findings.findings.push(crate::detectors::Finding {

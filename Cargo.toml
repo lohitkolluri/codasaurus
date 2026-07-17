@@ -50,6 +50,9 @@ notify = "7"
 # Directory traversal
 walkdir = "2"
 
+# Terminal components (spinners, progress bars)
+clx = "2"
+
 # Git (using std::process::Command instead)
 
 [dev-dependencies]
