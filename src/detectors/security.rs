@@ -104,8 +104,8 @@ impl SecretPattern {
 
 lazy_static::lazy_static! {
     static ref SECRET_PATTERNS: Vec<SecretPattern> = vec![
-        SecretPattern::new("AWS Access Key", r#"(?i)(?:aws_access_key_id|AWS_ACCESS_KEY|AKIA[0-9A-Z]{16})\s*[:=]\s*['"]?([A-Za-z0-9/+=]{20,})['"]?"#),
-        SecretPattern::new("AWS Secret Key", r#"(?i)(?:aws_secret_access_key|AWS_SECRET_KEY)\s*[:=]\s*['"]?([A-Za-z0-9/+=]{40})['"]?"#),
+        SecretPattern::new("AWS Access Key", r#"(?i)(?:aws_access_key_id|AWS_ACCESS_KEY|AKIA[0-9A-Z]{16,}|AWS_KEY)\s*[:=]\s*['"]?([A-Za-z0-9/+=]{20,})['"]?"#),
+        SecretPattern::new("AWS Secret Key", r#"(?i)(?:aws_secret_access_key|AWS_SECRET_KEY)\s*[:=]\s*['"]?([A-Za-z0-9/+=]{40,})['\"]?"#),
         SecretPattern::new("GitHub Token", r"(?i)(?:ghp_|gho_|ghu_|ghs_|ghr_)[A-Za-z0-9_]{36,}"),
         SecretPattern::new("API Key", r#"(?i)(?:api[_-]?key|apikey|api_secret|api_secret_key)\s*[:=]\s*['"]?([A-Za-z0-9_\-]{16,})['"]?"#),
         SecretPattern::new("Bearer Token", r"(?i)bearer\s+[A-Za-z0-9_\-\.]{20,}"),

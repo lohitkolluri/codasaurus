@@ -2,7 +2,7 @@
 name = "codasaurus"
 version = "0.1.0"
 edition = "2021"
-description = "🦕 Codasaurus — munches on AI-generated bugs so you don't have to. Catches hallucinated imports, phantom deps, security holes, and over-engineered slop. Works locally, in CI, and as a GitHub bot."
+description = "🦕 Codasaurus — munches on AI-generated bugs so you don't have to. Catches hallucinated imports, phantom deps, security holes, and AI slop. Works locally, in CI, and as a GitHub bot."
 authors = ["Lohit Kolluri <lohitkolluri@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/lohitkolluri/codasaurus"
