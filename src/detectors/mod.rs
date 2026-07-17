@@ -38,6 +38,7 @@ pub struct Finding {
 
 impl Finding {
     /// Stable fingerprint for deduplication and dismissal tracking
+    #[allow(dead_code)]
     pub fn fingerprint(&self) -> String {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         use std::hash::{Hash, Hasher};
@@ -62,6 +63,7 @@ impl Findings {
         }
     }
 
+    #[allow(dead_code)]
     pub fn add(&mut self, finding: Finding) {
         self.findings.push(finding);
     }
@@ -78,6 +80,7 @@ impl Findings {
         self.findings.iter().any(|f| f.severity == "blocking")
     }
 
+    #[allow(dead_code)]
     pub fn has_warnings(&self) -> bool {
         self.findings.iter().any(|f| f.severity == "warning")
     }
@@ -140,6 +143,7 @@ pub(crate) fn extract_package_name(import: &str) -> Option<String> {
 }
 
 /// Run LLM-based review on the parsed files
+#[allow(dead_code)]
 pub async fn run_llm(parsed_files: &[ParsedFile], _config: &Config) -> Findings {
     // Collect the diff of all parsed files
     let diff: String = parsed_files

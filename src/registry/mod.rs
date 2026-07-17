@@ -11,6 +11,7 @@ mod crates_io;
 static CACHE: Lazy<Mutex<HashMap<String, (bool, Instant)>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
+#[allow(dead_code)]
 static BLOCKING_CLIENT: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(5))
@@ -41,6 +42,7 @@ pub fn check_package(registry: &str, package: &str) -> Result<Option<bool>> {
     result
 }
 
+#[allow(dead_code)]
 pub fn get_latest_version(registry: &str, package: &str) -> Result<Option<String>> {
     match registry {
         "npm" => npm::get_latest_version(package),
@@ -50,6 +52,7 @@ pub fn get_latest_version(registry: &str, package: &str) -> Result<Option<String
     }
 }
 
+#[allow(dead_code)]
 pub fn check_vulnerabilities(registry: &str, package: &str) -> Result<Vec<OsvVulnerability>> {
     let ecosystem = match registry {
         "npm" => "npm",
@@ -60,6 +63,7 @@ pub fn check_vulnerabilities(registry: &str, package: &str) -> Result<Vec<OsvVul
     check_osv(ecosystem, package)
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct OsvVulnerability {
     pub id: String,
@@ -68,6 +72,7 @@ pub struct OsvVulnerability {
     pub fixed_version: Option<String>,
 }
 
+#[allow(dead_code)]
 fn check_osv(ecosystem: &str, package: &str) -> Result<Vec<OsvVulnerability>> {
     let body = serde_json::json!({
         "package": {

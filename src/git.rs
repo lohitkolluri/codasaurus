@@ -38,6 +38,7 @@ pub fn get_diff_between(ref_a: &str, ref_b: &str) -> Result<String> {
 }
 
 /// Get diff for a specific file or path
+#[allow(dead_code)]
 pub fn get_diff_for_path(path: &str) -> Result<String> {
     let output = std::process::Command::new("git")
         .args(["diff", "--cached", "--unified=3", "--", path])
@@ -56,6 +57,7 @@ pub fn get_diff_for_path(path: &str) -> Result<String> {
 }
 
 /// Get the full content of a file from the working tree
+#[allow(dead_code)]
 pub fn get_file_content(path: &str) -> Result<String> {
     let full_path = Path::new(".").join(path);
     let content =
@@ -73,6 +75,7 @@ pub fn is_git_repo() -> bool {
 }
 
 /// Get the repository root path
+#[allow(dead_code)]
 pub fn repo_root() -> Result<String> {
     let output = std::process::Command::new("git")
         .args(["rev-parse", "--show-toplevel"])

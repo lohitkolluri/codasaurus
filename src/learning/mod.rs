@@ -1,6 +1,7 @@
 mod store;
 
 /// A rule learned from user feedback
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct LearnedRule {
     pub id: String,
@@ -13,6 +14,7 @@ pub struct LearnedRule {
 }
 
 /// Record of a dismissed finding
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DismissedFinding {
     pub fingerprint: String,

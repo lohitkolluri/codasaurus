@@ -145,6 +145,7 @@ fn find_config() -> Result<Option<PathBuf>> {
 }
 
 /// The default config file content for `codasaurus init`
+#[allow(dead_code)]
 pub fn default_config_content() -> &'static str {
     r#"# Codasaurus configuration
 # See https://github.com/lohitkolluri/codasaurus for docs

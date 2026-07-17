@@ -1,14 +1,16 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/status-alpha-yellow" alt="Status">
+  <a href="https://github.com/lohitkolluri/codasaurus/actions/workflows/ci.yml"><img src="https://github.com/lohitkolluri/codasaurus/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/status-beta-yellow" alt="Status">
   <img src="https://img.shields.io/github/license/lohitkolluri/codasaurus" alt="License">
-  <img src="https://img.shields.io/badge/rust-1.97.1-blue" alt="Rust">
+  <img src="https://img.shields.io/badge/rust-1.85+-blue" alt="Rust">
 </p>
 
 <h1 align="center">🦕 Codasaurus</h1>
 <p align="center"><b>Munches on AI-generated bugs so you don't have to.</b></p>
 <p align="center">
-  Catches hallucinated imports, phantom deps, security holes, and over-engineered slop.<br>
-  Works locally, in CI, and as a GitHub bot. Bring your own LLM key.
+  Catches hallucinated imports, phantom deps, security holes, and AI slop.<br>
+  Works locally ⚡, in CI 🤖, and as a GitHub bot (coming soon).<br>
+  Bring your own LLM key for deep review.
 </p>
 
 ---
@@ -214,22 +216,30 @@ The LLM provides context-aware analysis:
 | **PR context** | ✅ Linked issues | ❌ | ❌ | ✅ **Linked issues + related PRs** |
 | **Install** | SaaS signup | SaaS signup | `npm install` | **`cargo install`** |
 
-## GitHub Action
+## CI Integration
+
+The repo ships with a [CI workflow](.github/workflows/ci.yml) that runs format check, clippy, tests, release build, and a **self-review** — Codasaurus checks itself on every push:
 
 ```yaml
-# .github/workflows/codasaurus.yml
-name: Codasaurus
-on: [pull_request]
-jobs:
-  review:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Codasaurus Review
-        uses: lohitkolluri/codasaurus@v1
-        with:
-          mode: ci
-          diff: origin/main
+# .github/workflows/ci.yml (check, test, build, and self-review)
+codasaurus-self:
+  steps:
+    - uses: actions/checkout@v4
+    - name: Download built binary
+      uses: actions/download-artifact@v4
+      with:
+        name: codasaurus
+    - name: Make executable
+      run: chmod +x codasaurus
+    - name: Run self-review
+      run: ./codasaurus check --diff origin/main --ci
+```
+
+For your own projects, use the check command directly:
+
+```yaml
+- name: Codasaurus Review
+  run: npx codasaurus check --diff origin/main --ci
 ```
 
 ## Development

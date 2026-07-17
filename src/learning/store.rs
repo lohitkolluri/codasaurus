@@ -6,10 +6,12 @@ use std::sync::Mutex;
 use crate::detectors::Finding;
 
 /// Persistent store for feedback learning
+#[allow(dead_code)]
 pub struct LearningStore {
     conn: Mutex<Connection>,
 }
 
+#[allow(dead_code)]
 impl LearningStore {
     pub fn open() -> Result<Self> {
         let path = Self::db_path()?;

@@ -104,6 +104,7 @@ fn extract_imports(language: &str, lines: &[SourceLine]) -> Vec<Import> {
 }
 
 struct ImportPattern {
+    #[allow(dead_code)]
     name: &'static str,
     regex: regex::Regex,
 }
@@ -194,6 +195,7 @@ pub fn is_supported(path: &str) -> bool {
     supported_languages().contains(&lang.as_str())
 }
 
+#[allow(dead_code)]
 pub fn parse_files_from_diff(diff: &str) -> Result<Vec<ParsedFile>> {
     let mut files = Vec::new();
     let mut current_path = String::new();
@@ -225,6 +227,7 @@ pub fn parse_files_from_diff(diff: &str) -> Result<Vec<ParsedFile>> {
     Ok(files)
 }
 
+#[allow(dead_code)]
 fn extract_file_content(lines: &[&str]) -> Option<String> {
     let mut content = String::new();
     let mut in_hunk = false;

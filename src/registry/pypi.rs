@@ -21,6 +21,7 @@ pub fn check(package: &str) -> Result<Option<bool>> {
     }
 }
 
+#[allow(dead_code)]
 pub fn get_latest_version(package: &str) -> Result<Option<String>> {
     let url = format!("https://pypi.org/pypi/{}/json", package);
     let resp = CLIENT
