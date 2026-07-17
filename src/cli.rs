@@ -3,6 +3,7 @@ use crate::detectors::{self, Findings};
 use crate::git;
 use crate::parser;
 use anyhow::Result;
+use colored::Colorize;
 use std::path::Path;
 
 /// Run the check command with staged changes
@@ -34,7 +35,7 @@ pub async fn run_check(
                         let path_str = entry.path().to_string_lossy().to_string();
                         match parser::parse_file(&path_str, &content) {
                             Ok(parsed) => {
-                                findings.extend(detectors::run_all(&[parsed], &Config::default()));
+                                findings.findings.extend(detectors::run_all(&[parsed], &Config::default()).findings);
                             }
                             Err(_) => continue,
                         }
@@ -45,7 +46,7 @@ pub async fn run_check(
             let content = std::fs::read_to_string(p)?;
             let path_str = p.to_string_lossy().to_string();
             let parsed = parser::parse_file(&path_str, &content)?;
-            findings.extend(detectors::run_all(&[parsed], &Config::default()));
+            findings.findings.extend(detectors::run_all(&[parsed], &Config::default()).findings);
         }
     } else if *staged || (diff.is_none() && !staged) {
         // Check staged changes (default)
@@ -61,7 +62,7 @@ pub async fn run_check(
                     match parser::parse_file(file_path, &content) {
                         Ok(parsed) => {
                             findings
-                                .extend(detectors::run_all(&[parsed], &Config::default()));
+                                .findings.extend(detectors::run_all(&[parsed], &Config::default()).findings);
                         }
                         Err(_) => continue,
                     }
@@ -83,7 +84,7 @@ pub async fn run_check(
                     match parser::parse_file(file_path, &content) {
                         Ok(parsed) => {
                             findings
-                                .extend(detectors::run_all(&[parsed], &Config::default()));
+                                .findings.extend(detectors::run_all(&[parsed], &Config::default()).findings);
                         }
                         Err(_) => continue,
                     }
@@ -130,7 +131,7 @@ pub async fn run_watch(path: &str) -> Result<()> {
                             &false,
                             &false,
                             &None,
-                            &Config::default(),
+                            &crate::config::Config::default(),
                         )
                         .await
                         .unwrap_or_default();

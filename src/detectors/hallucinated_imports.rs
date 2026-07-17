@@ -97,7 +97,7 @@ fn extract_package_name(import: &str, registry: &str) -> Option<String> {
 }
 
 /// Known built-in packages for common languages
-fn is_builtin(package: &str, registry: &str) -> bool {
+pub(crate) fn is_builtin(package: &str, registry: &str) -> bool {
     match registry {
         "npm" => matches!(
             package,

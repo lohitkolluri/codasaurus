@@ -1,6 +1,6 @@
 use crate::detectors::{Finding, Findings};
 use colored::*;
-use std::io::Write;
+use colored::Color;
 
 /// Render findings to terminal or JSON
 pub fn render(findings: &Findings, json_mode: bool) -> anyhow::Result<()> {
@@ -63,9 +63,9 @@ fn render_terminal(findings: &Findings) -> anyhow::Result<()> {
 
         for finding in file_findings {
             let (symbol, severity_color) = match finding.severity.as_str() {
-                "blocking" => ("✗".to_string(), Red),
-                "warning" => ("⚠".to_string(), Yellow),
-                _ => ("ℹ".to_string(), Cyan),
+                "blocking" => ("✗".to_string(), Color::Red),
+                "warning" => ("⚠".to_string(), Color::Yellow),
+                _ => ("ℹ".to_string(), Color::Cyan),
             };
 
             let location = if finding.line > 0 {

@@ -14,7 +14,7 @@ pub struct Config {
     pub registry: RegistryConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CheckConfig {
     /// Check for imports that don't exist in the registry
     #[serde(default = "default_true")]
@@ -49,7 +49,7 @@ pub struct CheckConfig {
     pub todo_leaks: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BehaviorConfig {
     /// Severity level: "block", "warn", "info"
     #[serde(default = "default_severity")]
@@ -60,7 +60,7 @@ pub struct BehaviorConfig {
     pub strict: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RegistryConfig {
     /// Timeout for registry API calls in milliseconds
     #[serde(default = "default_timeout")]

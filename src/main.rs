@@ -5,6 +5,7 @@ mod cli;
 mod config;
 mod detectors;
 mod git;
+mod llm;
 mod output;
 mod parser;
 mod registry;

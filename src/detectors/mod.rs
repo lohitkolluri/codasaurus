@@ -108,3 +108,41 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
 
     all
 }
+
+/// Run LLM-based review on the parsed files
+pub async fn run_llm(parsed_files: &[ParsedFile], _config: &Config) -> Findings {
+    // Collect the diff of all parsed files
+    let diff: String = parsed_files
+        .iter()
+        .map(|f| format!("--- {}\n{}\n", f.path, f.raw_content))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Create LlmConfig from env
+    let Some(llm_cfg) = crate::llm::LlmConfig::from_env() else {
+        return Findings::new();
+    };
+
+    // Call crate::llm::review_diff()
+    let Ok(output) = crate::llm::review_diff(&diff, &llm_cfg).await else {
+        return Findings::new();
+    };
+
+    // Convert LlmIssue to Finding format
+    let findings: Vec<Finding> = output
+        .issues
+        .into_iter()
+        .map(|i| Finding {
+            detector: "llm".into(),
+            severity: i.severity,
+            file: i.file,
+            line: i.line,
+            column: 0,
+            message: i.description,
+            suggestion: i.suggestion,
+            evidence: None,
+        })
+        .collect();
+
+    Findings { findings }
+}

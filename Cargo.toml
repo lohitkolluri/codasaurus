@@ -7,7 +7,7 @@ authors = ["Lohit Kolluri <lohitkolluri@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/lohitkolluri/codasaurus"
 homepage = "https://github.com/lohitkolluri/codasaurus"
-keywords = ["code-review", "ai", "verification", "cli", "security"]
+keywords = ["code-review", "ai", "verification", "cli", "security", "openrouter", "codasaurus"]
 categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
