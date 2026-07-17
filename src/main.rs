@@ -35,6 +35,10 @@ enum Commands {
         #[arg(long)]
         ci: bool,
 
+        /// Enable LLM-powered deep review (requires API key)
+        #[arg(long)]
+        llm: bool,
+
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -66,12 +70,13 @@ fn main() -> Result<()> {
             staged,
             diff,
             ci,
+            llm,
             json,
             config: _,
             path,
         } => {
             let cfg = config::load()?;
-            let findings = cli::run_check(staged, diff, ci, json, path, &cfg)?;
+            let findings = cli::run_check(staged, diff, ci, llm, json, path, &cfg)?;
             output::render(&findings, *json || *ci)?;
             if findings.has_blocking() && (*ci || *staged) {
                 std::process::exit(1);

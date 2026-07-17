@@ -10,6 +10,7 @@ pub fn run_check(
     staged: &bool,
     diff: &Option<String>,
     _ci: &bool,
+    _llm: &bool,
     _json: &bool,
     path: &Option<String>,
     _config: &Config,
@@ -93,6 +94,46 @@ pub fn run_check(
         }
     }
 
+    // Run LLM review if flag is set
+    if *_llm {
+        if let Some(llm_cfg) = crate::llm::LlmConfig::from_env() {
+            let diff = if *staged {
+                git::get_staged_diff().unwrap_or_default()
+            } else if let Some(ref_a) = diff {
+                git::get_diff_between(ref_a, "HEAD").unwrap_or_default()
+            } else {
+                String::new()
+            };
+            if !diff.is_empty() {
+                let rt = match tokio::runtime::Runtime::new() {
+                    Ok(r) => r,
+                    Err(_) => return Ok(findings),
+                };
+                match rt.block_on(crate::llm::review_diff(&diff, &llm_cfg, None)) {
+                    Ok(output) => {
+                        for issue in output.issues {
+                            findings.findings.push(crate::detectors::Finding {
+                                detector: "llm-review".to_string(),
+                                severity: issue.severity,
+                                file: issue.file,
+                                line: issue.line,
+                                column: 0,
+                                message: issue.description,
+                                suggestion: issue.suggestion,
+                                evidence: None,
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("LLM review failed: {}", e);
+                    }
+                }
+            }
+        } else {
+            eprintln!("--llm flag set but no API key found. Set OPENROUTER_API_KEY or CODASAURUS_API_KEY.");
+        }
+    }
+
     Ok(findings)
 }
 
@@ -127,6 +168,7 @@ pub async fn run_watch(path: &str) -> Result<()> {
                         let findings = run_check(
                             &true,
                             &None,
+                            &false,
                             &false,
                             &false,
                             &None,
