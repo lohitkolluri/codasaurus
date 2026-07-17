@@ -6,6 +6,7 @@ mod cli;
 mod config;
 mod detectors;
 mod git;
+mod learning;
 mod llm;
 mod output;
 mod parser;

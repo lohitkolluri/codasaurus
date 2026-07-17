@@ -36,6 +36,19 @@ pub struct Finding {
     pub evidence: Option<String>,
 }
 
+impl Finding {
+    /// Stable fingerprint for deduplication and dismissal tracking
+    pub fn fingerprint(&self) -> String {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        use std::hash::{Hash, Hasher};
+        self.detector.hash(&mut hasher);
+        self.file.hash(&mut hasher);
+        self.line.hash(&mut hasher);
+        self.message.hash(&mut hasher);
+        format!("{:x}", hasher.finish())
+    }
+}
+
 /// Collection of findings
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Findings {
