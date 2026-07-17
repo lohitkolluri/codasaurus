@@ -1,6 +1,19 @@
 use crate::detectors::{Finding, Findings};
 use colored::*;
 use colored::Color;
+use once_cell::sync::Lazy;
+use syntect::easy::HighlightLines;
+use syntect::highlighting::{ThemeSet, Style};
+use syntect::parsing::SyntaxSet;
+use syntect::util::LinesWithEndings;
+
+static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(|| {
+    SyntaxSet::load_defaults_newlines()
+});
+
+static THEME_SET: Lazy<ThemeSet> = Lazy::new(|| {
+    ThemeSet::load_defaults()
+});
 
 /// Render findings to terminal or JSON
 pub fn render(findings: &Findings, json_mode: bool) -> anyhow::Result<()> {
@@ -10,6 +23,35 @@ pub fn render(findings: &Findings, json_mode: bool) -> anyhow::Result<()> {
         render_terminal(findings)?;
     }
     Ok(())
+}
+
+/// Syntax-highlight a snippet of code for terminal output.
+/// Falls back to plain text if highlighting fails.
+fn highlight_code(code: &str, file_path: &str) -> String {
+    let extension = std::path::Path::new(file_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+
+    let syntax = SYNTAX_SET
+        .find_syntax_by_extension(extension)
+        .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
+
+    let theme = &THEME_SET.themes["base16-ocean.dark"];
+
+    let mut highlighter = HighlightLines::new(syntax, theme);
+    let mut result = String::new();
+
+    for line in LinesWithEndings::from(code) {
+        if let Ok(ranges) = highlighter.highlight_line(line, &SYNTAX_SET) {
+            let escaped = syntect::util::as_24_bit_terminal_escaped(&ranges[..], true);
+            result.push_str(&escaped);
+        } else {
+            result.push_str(line);
+        }
+    }
+
+    if result.is_empty() { code.to_string() } else { result }
 }
 
 fn render_json(findings: &Findings) -> anyhow::Result<()> {
@@ -128,10 +170,11 @@ fn render_terminal(findings: &Findings) -> anyhow::Result<()> {
             // Message — wrap at terminal width
             println!("       {}", finding.message);
 
-            // Evidence / code context
+            // Evidence / code context — syntax-highlighted
             if let Some(evidence) = &finding.evidence {
                 println!();
-                println!("       {} {}", "code:".dimmed(), evidence.dimmed());
+                let highlighted = highlight_code(evidence, &finding.file);
+                println!("       {} {}", "code:".dimmed(), highlighted);
             }
 
             // Suggestion
