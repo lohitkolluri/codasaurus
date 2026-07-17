@@ -1,5 +1,6 @@
 use anyhow::Result;
-use std::collections::HashSet;
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
 
 /// A parsed source file with imports and structure info
 #[derive(Debug, Clone)]
@@ -75,11 +76,11 @@ fn detect_language(path: &str) -> String {
 
 /// Extract import statements from parsed lines using regex patterns per language
 fn extract_imports(language: &str, lines: &[SourceLine]) -> Vec<Import> {
-    let patterns = get_import_patterns(language);
+    let patterns = IMPORT_PATTERNS.get(language).map(|v| v.as_slice()).unwrap_or(&[]);
     let mut imports = Vec::new();
 
     for line in lines {
-        for pattern in &patterns {
+        for pattern in patterns {
             if let Some(caps) = pattern.regex.captures(&line.content) {
                 let import_name = caps
                     .name("pkg")
@@ -116,59 +117,66 @@ impl ImportPattern {
     }
 }
 
-fn get_import_patterns(language: &str) -> Vec<ImportPattern> {
-    match language {
-        "javascript" | "jsx" | "typescript" | "tsx" => vec![
-            // import x from 'y'
-            ImportPattern::new("esm-default", r#"(?:import|export)\s+(?:\w+\s*,?\s*)?\{\s*[\w\s,]*\}\s*from\s+['"](?P<pkg>[^'"]+)['"]"#),
-            // import 'y'
-            ImportPattern::new("esm-side-effect", r#"import\s+['"](?P<pkg>[^'"]+)['"]"#),
-            // import * as x from 'y'
-            ImportPattern::new("esm-ns", r#"import\s+\*\s+as\s+\w+\s+from\s+['"](?P<pkg>[^'"]+)['"]"#),
-            // require('y')
-            ImportPattern::new("cjs", r#"(?:const|let|var)\s+\w+\s*=\s*require\s*\(\s*['"](?P<pkg>[^'"]+)['"]"#),
-            // dynamic import('y')
-            ImportPattern::new("dynamic", r#"import\s*\(\s*['"](?P<pkg>[^'"]+)['"]"#),
-            // import x from 'y' (default import)
-            ImportPattern::new("esm-default2", r#"import\s+\w+\s+from\s+['"](?P<pkg>[^'"]+)['"]"#),
-        ],
-        "python" => vec![
-            // import x
-            ImportPattern::new("import", r"^\s*import\s+(?P<pkg>\w+)"),
-            // from x import y
-            ImportPattern::new("from-import", r"^\s*from\s+(?P<pkg>[\w.]+)\s+import"),
-        ],
-        "rust" => vec![
-            // use crate::module
-            ImportPattern::new("use", r"^\s*use\s+(?:::)?(?P<pkg>[\w:]+)"),
-            // extern crate x
-            ImportPattern::new("extern-crate", r"^\s*extern\s+crate\s+(?P<pkg>\w+)"),
-        ],
-        "go" => vec![
-            // import "pkg"
-            ImportPattern::new("import", r#"^\s*import\s+["](?P<pkg>[^"]+)["]"#),
-            // import alias "pkg"
-            ImportPattern::new("import-alias", r#"^\s*import\s+\w+\s+["](?P<pkg>[^"]+)["]"#),
-        ],
-        "java" => vec![
-            // import com.example.X
-            ImportPattern::new("import", r"^\s*import\s+(?:static\s+)?(?P<pkg>[\w.]+);"),
-        ],
-        "ruby" => vec![
-            // require 'x'
-            ImportPattern::new("require", r#"^\s*require\s+['"](?P<pkg>[^'"]+)['"]"#),
-            // require_relative 'x'
-            ImportPattern::new("require-rel", r#"^\s*require_relative\s+['"](?P<pkg>[^'"]+)['"]"#),
-            // gem 'x'
-            ImportPattern::new("gem", r#"^\s*gem\s+['"](?P<pkg>[^'"]+)['"]"#),
-        ],
-        "php" => vec![
-            // use Vendor\Package
-            ImportPattern::new("use", r"^\s*use\s+(?P<pkg>[\w\\]+);"),
-        ],
-        _ => vec![],
-    }
-}
+/// Pre-compiled import patterns, compiled once at first access.
+static IMPORT_PATTERNS: Lazy<HashMap<&'static str, Vec<ImportPattern>>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+    m.insert("javascript", vec![
+        ImportPattern::new("esm-default", r#"(?:import|export)\s+(?:\w+\s*,?\s*)?\{\s*[\w\s,]*\}\s*from\s+['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("esm-side-effect", r#"import\s+['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("esm-ns", r#"import\s+\*\s+as\s+\w+\s+from\s+['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("cjs", r#"(?:const|let|var)\s+\w+\s*=\s*require\s*\(\s*['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("dynamic", r#"import\s*\(\s*['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("esm-default2", r#"import\s+\w+\s+from\s+['"](?P<pkg>[^'"]+)['"]"#),
+    ]);
+    m.insert("jsx", vec![
+        ImportPattern::new("esm-default", r#"(?:import|export)\s+(?:\w+\s*,?\s*)?\{\s*[\w\s,]*\}\s*from\s+['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("esm-side-effect", r#"import\s+['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("esm-ns", r#"import\s+\*\s+as\s+\w+\s+from\s+['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("cjs", r#"(?:const|let|var)\s+\w+\s*=\s*require\s*\(\s*['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("dynamic", r#"import\s*\(\s*['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("esm-default2", r#"import\s+\w+\s+from\s+['"](?P<pkg>[^'"]+)['"]"#),
+    ]);
+    m.insert("typescript", vec![
+        ImportPattern::new("esm-default", r#"(?:import|export)\s+(?:\w+\s*,?\s*)?\{\s*[\w\s,]*\}\s*from\s+['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("esm-side-effect", r#"import\s+['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("esm-ns", r#"import\s+\*\s+as\s+\w+\s+from\s+['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("cjs", r#"(?:const|let|var)\s+\w+\s*=\s*require\s*\(\s*['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("dynamic", r#"import\s*\(\s*['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("esm-default2", r#"import\s+\w+\s+from\s+['"](?P<pkg>[^'"]+)['"]"#),
+    ]);
+    m.insert("tsx", vec![
+        ImportPattern::new("esm-default", r#"(?:import|export)\s+(?:\w+\s*,?\s*)?\{\s*[\w\s,]*\}\s*from\s+['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("esm-side-effect", r#"import\s+['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("esm-ns", r#"import\s+\*\s+as\s+\w+\s+from\s+['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("cjs", r#"(?:const|let|var)\s+\w+\s*=\s*require\s*\(\s*['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("dynamic", r#"import\s*\(\s*['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("esm-default2", r#"import\s+\w+\s+from\s+['"](?P<pkg>[^'"]+)['"]"#),
+    ]);
+    m.insert("python", vec![
+        ImportPattern::new("import", r"^\s*import\s+(?P<pkg>\w+)"),
+        ImportPattern::new("from-import", r"^\s*from\s+(?P<pkg>[\w.]+)\s+import"),
+    ]);
+    m.insert("rust", vec![
+        ImportPattern::new("use", r"^\s*use\s+(?:::)?(?P<pkg>[\w:]+)"),
+        ImportPattern::new("extern-crate", r"^\s*extern\s+crate\s+(?P<pkg>\w+)"),
+    ]);
+    m.insert("go", vec![
+        ImportPattern::new("import", r#"^\s*import\s+["](?P<pkg>[^"]+)["]"#),
+        ImportPattern::new("import-alias", r#"^\s*import\s+\w+\s+["](?P<pkg>[^"]+)["]"#),
+    ]);
+    m.insert("java", vec![
+        ImportPattern::new("import", r"^\s*import\s+(?:static\s+)?(?P<pkg>[\w.]+);"),
+    ]);
+    m.insert("ruby", vec![
+        ImportPattern::new("require", r#"^\s*require\s+['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("require-rel", r#"^\s*require_relative\s+['"](?P<pkg>[^'"]+)['"]"#),
+        ImportPattern::new("gem", r#"^\s*gem\s+['"](?P<pkg>[^'"]+)['"]"#),
+    ]);
+    m.insert("php", vec![
+        ImportPattern::new("use", r"^\s*use\s+(?P<pkg>[\w\\]+);"),
+    ]);
+    m
+});
 
 /// Supported languages for checking
 pub fn supported_languages() -> Vec<&'static str> {

@@ -1,4 +1,4 @@
-use crate::detectors::{Finding, Findings};
+use crate::detectors::Finding;
 use crate::parser::ParsedFile;
 
 /// Detect potential secrets and credentials in code
@@ -102,8 +102,10 @@ impl SecretPattern {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref SECRET_PATTERNS: Vec<SecretPattern> = vec![
+use once_cell::sync::Lazy;
+
+static SECRET_PATTERNS: Lazy<Vec<SecretPattern>> = Lazy::new(|| {
+    vec![
         SecretPattern::new("AWS Access Key", r#"(?i)(?:aws_access_key_id|AWS_ACCESS_KEY|AKIA[0-9A-Z]{16,}|AWS_KEY)\s*[:=]\s*['"]?([A-Za-z0-9/+=]{20,})['"]?"#),
         SecretPattern::new("AWS Secret Key", r#"(?i)(?:aws_secret_access_key|AWS_SECRET_KEY)\s*[:=]\s*['"]?([A-Za-z0-9/+=]{40,})['\"]?"#),
         SecretPattern::new("GitHub Token", r"(?i)(?:ghp_|gho_|ghu_|ghs_|ghr_)[A-Za-z0-9_]{36,}"),
@@ -114,5 +116,5 @@ lazy_static::lazy_static! {
         SecretPattern::new("JWT Token", r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"),
         SecretPattern::new("Password", r#"(?i)(?:password|passwd|pwd)\s*[:=]\s*['"]?([^'"\s]{8,})['"]?"#),
         SecretPattern::new("Connection String", r"(?i)(?:mongodb|postgresql|mysql|redis)://[^\s]{10,}"),
-    ];
-}
+    ]
+});

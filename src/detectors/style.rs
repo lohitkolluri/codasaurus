@@ -1,4 +1,4 @@
-use crate::detectors::{Finding, Findings};
+use crate::detectors::Finding;
 use crate::parser::ParsedFile;
 
 /// Detect over-engineered patterns in AI-generated code
@@ -86,11 +86,35 @@ pub fn detect_boilerplate(parsed_files: &[ParsedFile]) -> Vec<Finding> {
 }
 
 fn check_single_impl_interface(path: &str, lines: &[&str]) -> Option<Finding> {
-    let content = lines.join("\n");
-    let trait_count = content.matches("trait ").count();
-    let impl_count = content.matches("impl ").count();
+    let trait_count = lines
+        .iter()
+        .filter(|l| {
+            let t = l.trim();
+            // Must start with "trait " or "pub trait " or "pub(crate) trait " etc
+            // Cannot be inside a comment
+            if t.starts_with("//") || t.starts_with('#') {
+                return false;
+            }
+            // Look for trait declaration (not trait usage as bound)
+            t.contains("trait ") && (t.starts_with("pub") || t.starts_with("trait"))
+        })
+        .count();
 
-    // If there's 1 trait with 1 impl, it's suspicious
+    let impl_count = lines
+        .iter()
+        .filter(|l| {
+            let t = l.trim();
+            if t.starts_with("//") || t.starts_with('#') {
+                return false;
+            }
+            // Look for impl blocks
+            t.starts_with("impl ")
+                || t.starts_with("pub impl ")
+                || t.starts_with("unsafe impl ")
+                || t.starts_with("pub unsafe impl ")
+        })
+        .count();
+
     if trait_count == 1 && impl_count == 1 {
         return Some(Finding {
             detector: "over-engineering".to_string(),
@@ -112,8 +136,8 @@ fn check_single_impl_interface(path: &str, lines: &[&str]) -> Option<Finding> {
 }
 
 fn check_deep_nesting(path: &str, lines: &[&str]) -> Option<Finding> {
-    let mut max_depth = 0;
-    let mut current_depth = 0;
+    let mut max_depth = 0usize;
+    let mut current_depth = 0usize;
     let mut deepest_line = 0;
 
     for (i, line) in lines.iter().enumerate() {
@@ -122,13 +146,14 @@ fn check_deep_nesting(path: &str, lines: &[&str]) -> Option<Finding> {
             continue;
         }
 
-        // Count opening braces/brackets
-        let opens = trimmed.matches('{').count() + trimmed.matches('(').count();
-        let closes = trimmed.matches('}').count() + trimmed.matches(')').count();
+        let opens = trimmed.matches('{').count();
+        let closes = trimmed.matches('}').count();
 
+        // Calculate depth AFTER this line
         if opens > closes {
             current_depth += opens - closes;
-        } else if closes > opens {
+        } else if closes > opens && current_depth > 0 {
+            // Don't go below 0
             current_depth = current_depth.saturating_sub(closes - opens);
         }
 

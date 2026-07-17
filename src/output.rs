@@ -1,4 +1,4 @@
-use crate::detectors::{Finding, Findings};
+use crate::detectors::Findings;
 use colored::*;
 
 /// Render findings to terminal or JSON
@@ -31,13 +31,19 @@ fn render_terminal(findings: &Findings) {
     println!("  {} {} — {}", "🦕".bold(), "Codasaurus".bold(), summary_parts.join(", "));
     println!();
 
-    // Sort findings by file then line
-    let mut sorted = findings.findings.clone();
-    sorted.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
+    // Sort findings by file then line (indirect sort to avoid cloning)
+    let mut indices: Vec<usize> = (0..findings.findings.len()).collect();
+    indices.sort_by(|&a, &b| {
+        findings.findings[a]
+            .file
+            .cmp(&findings.findings[b].file)
+            .then(findings.findings[a].line.cmp(&findings.findings[b].line))
+    });
 
     let mut current_file = String::new();
 
-    for f in &sorted {
+    for &idx in &indices {
+        let f = &findings.findings[idx];
         // Print file header when file changes
         if f.file != current_file {
             if !current_file.is_empty() {

@@ -1,4 +1,4 @@
-use crate::detectors::{Finding, Findings};
+use crate::detectors::Finding;
 use crate::parser::ParsedFile;
 
 /// Detect packages used in imports but not declared in dependency files
@@ -27,7 +27,7 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
         };
 
         for import in &file.imports {
-            let package = extract_package_name(&import.name);
+            let package = crate::detectors::extract_package_name(&import.name);
 
             let package = match package {
                 Some(p) => p,
@@ -161,21 +161,4 @@ fn is_dep_file(path: &str) -> bool {
         || lower.ends_with("gemfile.lock")
 }
 
-fn extract_package_name(import: &str) -> Option<String> {
-    let trimmed = import.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
 
-    // Handle @scoped/packages
-    if trimmed.starts_with('@') {
-        let parts: Vec<&str> = trimmed.splitn(3, '/').collect();
-        if parts.len() >= 2 {
-            return Some(format!("{}/{}", parts[0], parts[1]));
-        }
-    }
-
-    // Handle: pkg/submodule
-    let parts: Vec<&str> = trimmed.splitn(2, '/').collect();
-    Some(parts[0].to_string())
-}

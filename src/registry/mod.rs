@@ -1,4 +1,5 @@
 use anyhow::Result;
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -7,8 +8,15 @@ mod npm;
 mod pypi;
 mod crates_io;
 
-static CACHE: once_cell::sync::Lazy<Mutex<HashMap<String, (bool, Instant)>>> =
-    once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
+static CACHE: Lazy<Mutex<HashMap<String, (bool, Instant)>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+static BLOCKING_CLIENT: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .expect("Failed to build HTTP client")
+});
 
 pub fn check_package(registry: &str, package: &str) -> Result<Option<bool>> {
     let cache_key = format!("{}:{}", registry, package);
@@ -67,10 +75,7 @@ fn check_osv(ecosystem: &str, package: &str) -> Result<Vec<OsvVulnerability>> {
             "ecosystem": ecosystem
         }
     });
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()?;
-    let resp = client
+    let resp = BLOCKING_CLIENT
         .post("https://api.osv.dev/v1/query")
         .json(&body)
         .send()?;

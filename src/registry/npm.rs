@@ -1,11 +1,17 @@
 use anyhow::Result;
+use once_cell::sync::Lazy;
 use std::time::Duration;
+
+static CLIENT: Lazy<reqwest::blocking::Client> = Lazy::new(|| {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+        .expect("Failed to create HTTP client")
+});
 
 pub fn check(package: &str) -> Result<Option<bool>> {
     let url = format!("https://registry.npmjs.org/{}", package);
-    let resp = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(3))
-        .build()?
+    let resp = CLIENT
         .head(&url)
         .header("Accept", "application/vnd.npm.install-v1+json")
         .send()?;
@@ -18,9 +24,7 @@ pub fn check(package: &str) -> Result<Option<bool>> {
 
 pub fn get_latest_version(package: &str) -> Result<Option<String>> {
     let url = format!("https://registry.npmjs.org/{}", package);
-    let resp = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(3))
-        .build()?
+    let resp = CLIENT
         .get(&url)
         .header("Accept", "application/vnd.npm.install-v1+json")
         .send()?;

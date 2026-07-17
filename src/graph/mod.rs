@@ -70,15 +70,30 @@ impl CodeGraph {
         }
     }
 
-    /// Find all symbols that could be affected by a change to `symbol`
+    /// Find all symbols that could be affected by a change to `symbol`, up to `max_hops` away.
     pub fn blast_radius(&self, symbol: &str, max_hops: usize) -> Vec<&SymbolNode> {
         let mut affected = Vec::new();
         if let Some(&start) = self.node_indices.get(symbol) {
-            use petgraph::visit::Bfs;
-            let mut bfs = Bfs::new(&self.graph, start);
-            while let Some(nx) = bfs.next(&self.graph) {
-                let node = &self.graph[nx];
-                affected.push(node);
+            let mut visited = std::collections::HashSet::new();
+            let mut queue = std::collections::VecDeque::new();
+            let mut depths = std::collections::HashMap::new();
+
+            visited.insert(start);
+            queue.push_back(start);
+            depths.insert(start, 0);
+
+            while let Some(nx) = queue.pop_front() {
+                let d = depths[&nx];
+                affected.push(&self.graph[nx]);
+
+                if d < max_hops {
+                    for neighbor in self.graph.neighbors(nx) {
+                        if visited.insert(neighbor) {
+                            depths.insert(neighbor, d + 1);
+                            queue.push_back(neighbor);
+                        }
+                    }
+                }
             }
         }
         affected

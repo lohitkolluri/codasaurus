@@ -1,10 +1,4 @@
-use anyhow::Result;
-use rusqlite::Connection;
-use std::path::PathBuf;
-use std::sync::Mutex;
-
 mod store;
-pub use store::LearningStore;
 
 /// A rule learned from user feedback
 #[derive(Debug, Clone)]

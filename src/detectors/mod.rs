@@ -122,6 +122,23 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
     all
 }
 
+/// Extract the package name from an import statement. Handles @scoped/packages,
+/// submodule paths, and plain package names.
+pub(crate) fn extract_package_name(import: &str) -> Option<String> {
+    let trimmed = import.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.starts_with('@') {
+        let parts: Vec<&str> = trimmed.splitn(3, '/').collect();
+        if parts.len() >= 2 {
+            return Some(format!("{}/{}", parts[0], parts[1]));
+        }
+    }
+    let parts: Vec<&str> = trimmed.splitn(2, '/').collect();
+    Some(parts[0].to_string())
+}
+
 /// Run LLM-based review on the parsed files
 pub async fn run_llm(parsed_files: &[ParsedFile], _config: &Config) -> Findings {
     // Collect the diff of all parsed files
