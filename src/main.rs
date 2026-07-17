@@ -131,8 +131,7 @@ fn main() -> Result<()> {
             let config = bot::BotConfig {
                 app_id: std::env::var("GITHUB_APP_ID")
                     .map_err(|_| anyhow::anyhow!("GITHUB_APP_ID required"))?,
-                private_key: std::env::var("GITHUB_APP_PRIVATE_KEY")
-                    .map_err(|_| anyhow::anyhow!("GITHUB_APP_PRIVATE_KEY required"))?,
+                private_key: resolve_private_key()?,
                 webhook_secret: std::env::var("GITHUB_WEBHOOK_SECRET")
                     .map_err(|_| anyhow::anyhow!("GITHUB_WEBHOOK_SECRET required"))?,
                 host: host.clone(),
@@ -147,4 +146,22 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Resolve the GitHub App private key from environment.
+/// Tries GITHUB_APP_PRIVATE_KEY first (raw PEM), then GITHUB_APP_PRIVATE_KEY_B64
+/// (base64url-encoded, no special chars — safe for PaaS .env files).
+fn resolve_private_key() -> anyhow::Result<String> {
+    if let Ok(key) = std::env::var("GITHUB_APP_PRIVATE_KEY") {
+        return Ok(key);
+    }
+    let b64 = std::env::var("GITHUB_APP_PRIVATE_KEY_B64")
+        .map_err(|_| anyhow::anyhow!(
+            "GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_B64 required"
+        ))?;
+    use base64::Engine;
+    let decoded = base64::engine::general_purpose::URL_SAFE
+        .decode(b64.as_bytes())
+        .map_err(|e| anyhow::anyhow!("Invalid base64 key: {}", e))?;
+    String::from_utf8(decoded).map_err(|e| anyhow::anyhow!("Invalid UTF-8 in decoded key: {}", e))
 }
