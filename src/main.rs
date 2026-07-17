@@ -58,8 +58,7 @@ enum Commands {
     Version,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
@@ -72,14 +71,15 @@ async fn main() -> Result<()> {
             path,
         } => {
             let cfg = config::load()?;
-            let findings = cli::run_check(staged, diff, ci, json, path, &cfg).await?;
+            let findings = cli::run_check(staged, diff, ci, json, path, &cfg)?;
             output::render(&findings, *json || *ci)?;
             if findings.has_blocking() && (*ci || *staged) {
                 std::process::exit(1);
             }
         }
         Commands::Watch { path } => {
-            cli::run_watch(path).await?;
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(cli::run_watch(path))?;
         }
         Commands::Version => {
             println!("codasaurus v{}", env!("CARGO_PKG_VERSION"));

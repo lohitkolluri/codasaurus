@@ -6,8 +6,7 @@ use anyhow::Result;
 use colored::Colorize;
 use std::path::Path;
 
-/// Run the check command with staged changes
-pub async fn run_check(
+pub fn run_check(
     staged: &bool,
     diff: &Option<String>,
     _ci: &bool,
@@ -133,7 +132,6 @@ pub async fn run_watch(path: &str) -> Result<()> {
                             &None,
                             &crate::config::Config::default(),
                         )
-                        .await
                         .unwrap_or_default();
 
                         print!("\x1B[2J\x1B[H"); // Clear screen
