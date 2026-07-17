@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod bot;
 mod cli;
 mod config;
 mod detectors;
@@ -58,6 +59,17 @@ enum Commands {
         path: String,
     },
 
+    /// Start the GitHub App bot server
+    Serve {
+        /// Port to listen on
+        #[arg(long, default_value = "3000")]
+        port: u16,
+
+        /// Host to bind to
+        #[arg(long, default_value = "0.0.0.0")]
+        host: String,
+    },
+
     /// Print version information
     Version,
 }
@@ -85,6 +97,17 @@ fn main() -> Result<()> {
         Commands::Watch { path } => {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(cli::run_watch(path))?;
+        }
+        Commands::Serve { port, host } => {
+            let config = bot::BotConfig {
+                app_id: std::env::var("GITHUB_APP_ID").map_err(|_| anyhow::anyhow!("GITHUB_APP_ID required"))?,
+                private_key: std::env::var("GITHUB_APP_PRIVATE_KEY").map_err(|_| anyhow::anyhow!("GITHUB_APP_PRIVATE_KEY required"))?,
+                webhook_secret: std::env::var("GITHUB_WEBHOOK_SECRET").map_err(|_| anyhow::anyhow!("GITHUB_WEBHOOK_SECRET required"))?,
+                host: host.clone(),
+                port: *port,
+            };
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(bot::serve(config))?;
         }
         Commands::Version => {
             println!("codasaurus v{}", env!("CARGO_PKG_VERSION"));

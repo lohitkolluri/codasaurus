@@ -53,6 +53,30 @@ walkdir = "2"
 # Terminal components (spinners, progress bars)
 clx = "2"
 
+# Web server (for GitHub App bot)
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors"] }
+tokio-util = "0.7"
+
+# Database (for feedback learning loop)
+rusqlite = { version = "0.34", features = ["bundled"] }
+
+# UUID generation
+uuid = { version = "1", features = ["v4"] }
+
+# JWT generation (for GitHub App auth)
+jsonwebtoken = "9"
+
+# Crypto
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+
+# JSONPath / querying
+serde_json_path = "0.7"
+
 # Git (using std::process::Command instead)
 
 [dev-dependencies]

@@ -185,3 +185,55 @@ pub fn is_supported(path: &str) -> bool {
     let lang = detect_language(path);
     supported_languages().contains(&lang.as_str())
 }
+
+pub fn parse_files_from_diff(diff: &str) -> Result<Vec<ParsedFile>> {
+    let mut files = Vec::new();
+    let mut current_path = String::new();
+    let mut current_lines = Vec::new();
+
+    for line in diff.lines() {
+        if let Some(path) = line.strip_prefix("+++ b/") {
+            if !current_path.is_empty() {
+                if let Some(content) = extract_file_content(&current_lines) {
+                    if let Ok(parsed) = parse_file(&current_path, &content) {
+                        files.push(parsed);
+                    }
+                }
+            }
+            current_path = path.trim().to_string();
+            current_lines.clear();
+        }
+        current_lines.push(line);
+    }
+
+    if !current_path.is_empty() {
+        if let Some(content) = extract_file_content(&current_lines) {
+            if let Ok(parsed) = parse_file(&current_path, &content) {
+                files.push(parsed);
+            }
+        }
+    }
+
+    Ok(files)
+}
+
+fn extract_file_content(lines: &[&str]) -> Option<String> {
+    let mut content = String::new();
+    let mut in_hunk = false;
+    for line in lines {
+        if line.starts_with("@@") {
+            in_hunk = true;
+            continue;
+        }
+        if in_hunk {
+            if let Some(rest) = line.strip_prefix('+') {
+                content.push_str(rest);
+                content.push('\n');
+            } else if let Some(rest) = line.strip_prefix(' ') {
+                content.push_str(rest);
+                content.push('\n');
+            }
+        }
+    }
+    if content.is_empty() { None } else { Some(content) }
+}
