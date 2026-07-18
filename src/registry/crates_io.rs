@@ -7,7 +7,10 @@ pub fn check(package: &str) -> Result<Option<bool>> {
         .context("registry HTTP client not available (failed to initialize)")?;
     let resp = client
         .get(&url)
-        .header("User-Agent", "codasaurus/0.1.0")
+        .header(
+            "User-Agent",
+            concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+        )
         .send()?;
     match resp.status().as_u16() {
         200 => Ok(Some(true)),

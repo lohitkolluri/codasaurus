@@ -12,6 +12,7 @@ pub mod learning;
 pub mod llm;
 pub mod output;
 pub mod parser;
+pub mod retry;
 pub mod registry;
 pub mod state;
 pub mod storage;

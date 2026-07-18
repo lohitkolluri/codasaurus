@@ -1,3 +1,4 @@
+use crate::retry::{is_reqwest_error_retryable, retry_blocking, RetryConfig};
 use anyhow::{Context, Result};
 
 const PR_FILES_PER_PAGE: usize = 100;
@@ -44,7 +45,7 @@ pub fn run_check_run(event_path: Option<String>) -> Result<()> {
         .connect_timeout(std::time::Duration::from_secs(10))
         .pool_max_idle_per_host(5)
         .build()
-        .expect("reqwest client config is valid");
+        .context("Failed to build reqwest HTTP client")?;
     let repo_api = format!("https://api.github.com/repos/{}", repo_full_name);
     let auth_header = format!("Bearer {}", token);
 
@@ -71,22 +72,39 @@ pub fn run_check_run(event_path: Option<String>) -> Result<()> {
     };
 
     // Create the check run in "in_progress" status
-    let check_run: serde_json::Value = client
-        .post(format!("{}/check-runs", repo_api))
-        .header("Authorization", &auth_header)
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "codasaurus/0.1.0")
-        .json(&serde_json::json!({
-            "name": "codasaurus",
-            "head_sha": head_sha,
-            "status": "in_progress",
-        }))
-        .send()
-        .context("Failed to create check run")?
-        .error_for_status()
-        .context("GitHub rejected check run creation")?
-        .json()
-        .context("Failed to parse check run creation response")?;
+    let check_run_url = format!("{}/check-runs", repo_api);
+    let check_run: serde_json::Value = retry_blocking(
+        &RetryConfig::api_default(),
+        "create_check_run",
+        &is_reqwest_error_retryable,
+        || {
+            let body = serde_json::json!({
+                "name": "codasaurus",
+                "head_sha": head_sha,
+                "status": "in_progress",
+            });
+            client
+                .post(&check_run_url)
+                .header("Authorization", &auth_header)
+                .header("Accept", "application/vnd.github+json")
+                .header(
+                    "User-Agent",
+                    concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+                )
+                .json(&body)
+                .send()
+                .context("Failed to create check run")
+                .and_then(|r| {
+                    r.error_for_status()
+                        .context("GitHub rejected check run creation")
+                })
+                .and_then(|r| {
+                    r.json::<serde_json::Value>()
+                        .context("Failed to parse check run creation response")
+                })
+                .map_err(|e| anyhow::anyhow!("{:#}", e))
+        },
+    )?;
 
     let check_run_id = check_run["id"]
         .as_i64()
@@ -130,24 +148,39 @@ pub fn run_check_run(event_path: Option<String>) -> Result<()> {
         summary.push_str(" (annotations truncated to 50 — GitHub API limit)");
     }
 
-    client
-        .patch(format!("{}/check-runs/{}", repo_api, check_run_id))
-        .header("Authorization", &auth_header)
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "codasaurus/0.1.0")
-        .json(&serde_json::json!({
-            "status": "completed",
-            "conclusion": if has_blocking { "failure" } else { "success" },
-            "output": {
-                "title": "Codasaurus Review",
-                "summary": summary,
-                "annotations": annotations,
-            }
-        }))
-        .send()
-        .context("Failed to update check run")?
-        .error_for_status()
-        .context("GitHub rejected check run update")?;
+    let update_url = format!("{}/check-runs/{}", repo_api, check_run_id);
+    retry_blocking(
+        &RetryConfig::api_default(),
+        "update_check_run",
+        &is_reqwest_error_retryable,
+        || {
+            let body = serde_json::json!({
+                "status": "completed",
+                "conclusion": if has_blocking { "failure" } else { "success" },
+                "output": {
+                    "title": "Codasaurus Review",
+                    "summary": &summary,
+                    "annotations": &annotations,
+                }
+            });
+            client
+                .patch(&update_url)
+                .header("Authorization", &auth_header)
+                .header("Accept", "application/vnd.github+json")
+                .header(
+                    "User-Agent",
+                    concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+                )
+                .json(&body)
+                .send()
+                .context("Failed to update check run")
+                .and_then(|r| {
+                    r.error_for_status()
+                        .context("GitHub rejected check run update")
+                })
+                .map_err(|e| anyhow::anyhow!("{:#}", e))
+        },
+    )?;
 
     Ok(())
 }
@@ -161,20 +194,35 @@ fn fetch_pr_files(
     let mut files = Vec::new();
 
     for page in 1..=MAX_PR_FILE_PAGES {
-        let response = client
-            .get(format!(
-                "{repo_api}/pulls/{pr_number}/files?per_page={PR_FILES_PER_PAGE}&page={page}"
-            ))
-            .header("Authorization", auth_header)
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "codasaurus/0.1.0")
-            .send()
-            .context("Failed to fetch PR files from GitHub API")?
-            .error_for_status()
-            .context("GitHub rejected PR-file request")?;
-        let page_files: Vec<serde_json::Value> = response
-            .json()
-            .context("Failed to parse PR files response as JSON")?;
+        let url = format!(
+            "{repo_api}/pulls/{pr_number}/files?per_page={PR_FILES_PER_PAGE}&page={page}"
+        );
+        let page_files: Vec<serde_json::Value> = retry_blocking(
+            &RetryConfig::api_default(),
+            "fetch_pr_files_page",
+            &is_reqwest_error_retryable,
+            || {
+                client
+                    .get(&url)
+                    .header("Authorization", auth_header)
+                    .header("Accept", "application/vnd.github+json")
+                    .header(
+                        "User-Agent",
+                        concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+                    )
+                    .send()
+                    .context("Failed to fetch PR files from GitHub API")
+                    .and_then(|r| {
+                        r.error_for_status()
+                            .context("GitHub rejected PR-file request")
+                    })
+                    .and_then(|r| {
+                        r.json::<Vec<serde_json::Value>>()
+                            .context("Failed to parse PR files response as JSON")
+                    })
+                    .map_err(|e| anyhow::anyhow!("{:#}", e))
+            },
+        )?;
         let is_last_page = page_files.len() < PR_FILES_PER_PAGE;
         files.extend(page_files);
 

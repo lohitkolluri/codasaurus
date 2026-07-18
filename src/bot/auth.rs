@@ -1,4 +1,5 @@
 use crate::bot::BotConfig;
+use crate::retry::{is_reqwest_error_retryable, retry_async, RetryConfig};
 use anyhow::{Context, Result};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -36,20 +37,34 @@ pub async fn get_installation_token(
         jsonwebtoken::encode(&jwt_header, &jwt_payload, &key).context("Failed to create JWT")?;
 
     let client = build_github_client().context("Failed to build GitHub API client")?;
+    let jwt_auth = format!("Bearer {}", jwt);
 
     let inst_id = if let Some(iid) = installation_id {
         iid
     } else {
-        let installations: Vec<serde_json::Value> = client
-            .get("https://api.github.com/app/installations")
-            .header("Authorization", format!("Bearer {}", jwt))
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "codasaurus/0.1.0")
-            .send()
-            .await
-            .context("Failed to get installations")?
-            .json()
-            .await?;
+        let installations: Vec<serde_json::Value> = retry_async(
+            &RetryConfig::api_default(),
+            "get_github_installations",
+            &is_reqwest_error_retryable,
+            || async {
+                let c = &client;
+                let a = &jwt_auth;
+                c.get("https://api.github.com/app/installations")
+                    .header("Authorization", a)
+                    .header("Accept", "application/vnd.github+json")
+                    .header(
+                        "User-Agent",
+                        concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+                    )
+                    .send()
+                    .await
+                    .context("Failed to get installations")?
+                    .json()
+                    .await
+                    .map_err(Into::into)
+            },
+        )
+        .await?;
         installations
             .first()
             .context("No installations found — install the app on a repo first")?
@@ -58,19 +73,32 @@ pub async fn get_installation_token(
             .context("Invalid installation ID")?
     };
 
-    let resp: serde_json::Value = client
-        .post(format!(
-            "https://api.github.com/app/installations/{}/access_tokens",
-            inst_id
-        ))
-        .header("Authorization", format!("Bearer {}", jwt))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "codasaurus/0.1.0")
-        .send()
-        .await
-        .context("Failed to get access token")?
-        .json()
-        .await?;
+    let resp: serde_json::Value = retry_async(
+        &RetryConfig::api_default(),
+        "get_installation_access_token",
+        &is_reqwest_error_retryable,
+        || async {
+            let c = &client;
+            let a = &jwt_auth;
+            c.post(format!(
+                "https://api.github.com/app/installations/{}/access_tokens",
+                inst_id
+            ))
+            .header("Authorization", a)
+            .header("Accept", "application/vnd.github+json")
+            .header(
+                "User-Agent",
+                concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+            )
+            .send()
+            .await
+            .context("Failed to get access token")?
+            .json()
+            .await
+            .map_err(Into::into)
+        },
+    )
+    .await?;
 
     resp["token"]
         .as_str()

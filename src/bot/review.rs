@@ -1,11 +1,11 @@
 use crate::bot::WebhookPayload;
 use crate::detectors::{self, Finding, Findings};
+use crate::retry::{is_reqwest_error_retryable, retry_async, RetryConfig};
 use crate::state::ReviewState;
 use anyhow::Result;
+use std::fmt::Write;
 use std::sync::LazyLock;
 use std::time::Duration;
-
-use std::fmt::Write;
 
 /// Max bytes for a GitHub issue comment body (API limit: 65536).
 const MAX_COMMENT_BYTES: usize = 64000;
@@ -47,17 +47,26 @@ pub async fn fetch_pull_request(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("GitHub API client not available (failed to initialize)"))?;
     let auth_header = format!("Bearer {token}");
-    client
-        .get(format!(
-            "https://api.github.com/repos/{repo_name}/pulls/{pr_number}"
-        ))
-        .headers(github_api_headers(&auth_header))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await
-        .map_err(Into::into)
+    let url = format!(
+        "https://api.github.com/repos/{repo_name}/pulls/{pr_number}"
+    );
+    retry_async(
+        &RetryConfig::api_default(),
+        "fetch_pull_request",
+        &is_reqwest_error_retryable,
+        || async {
+            client
+                .get(&url)
+                .headers(github_api_headers(&auth_header))
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await
+                .map_err(Into::into)
+        },
+    )
+    .await
 }
 
 /// Same auth/User-Agent headers reused across all GitHub API calls.
@@ -65,7 +74,8 @@ fn github_api_headers(auth_header: &str) -> reqwest::header::HeaderMap {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::AUTHORIZATION,
-        reqwest::header::HeaderValue::from_str(auth_header).unwrap(),
+        reqwest::header::HeaderValue::from_str(auth_header)
+            .expect("Invalid GitHub auth token — contains non-ASCII or control characters"),
     );
     headers.insert(
         reqwest::header::ACCEPT,
@@ -73,7 +83,10 @@ fn github_api_headers(auth_header: &str) -> reqwest::header::HeaderMap {
     );
     headers.insert(
         reqwest::header::USER_AGENT,
-        reqwest::header::HeaderValue::from_static("codasaurus/0.1.0"),
+        reqwest::header::HeaderValue::from_static(concat!(
+            "codasaurus/",
+            env!("CARGO_PKG_VERSION")
+        )),
     );
     headers
 }
@@ -99,16 +112,27 @@ async fn fetch_pr_files(
 ) -> Result<Vec<serde_json::Value>> {
     let mut all_files = Vec::new();
     for page_number in 1..=MAX_PR_FILE_PAGES {
-        let resp = client
-            .get(format!(
-                "https://api.github.com/repos/{}/pulls/{}/files?per_page={}&page={}",
-                repo_name, pr_number, PER_PAGE, page_number
-            ))
-            .headers(github_api_headers(auth_header))
-            .send()
-            .await?
-            .error_for_status()?;
-        let page: Vec<serde_json::Value> = resp.json().await?;
+        let url = format!(
+            "https://api.github.com/repos/{}/pulls/{}/files?per_page={}&page={}",
+            repo_name, pr_number, PER_PAGE, page_number
+        );
+        let page: Vec<serde_json::Value> = retry_async(
+            &RetryConfig::api_default(),
+            "fetch_pr_files_page",
+            &is_reqwest_error_retryable,
+            || async {
+                client
+                    .get(&url)
+                    .headers(github_api_headers(auth_header))
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json()
+                    .await
+                    .map_err(Into::into)
+            },
+        )
+        .await?;
         let is_last_page = page.len() < PER_PAGE;
         all_files.extend(page);
         if is_last_page || page_number == MAX_PR_FILE_PAGES {
@@ -139,36 +163,61 @@ async fn post_or_update_comment(
                 "https://api.github.com/repos/{}/issues/comments/{}",
                 repo_name, comment_id
             );
-            let resp = client
-                .patch(&update_url)
-                .header("Authorization", auth_header)
-                .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "codasaurus/0.1.0")
-                .json(&serde_json::json!({"body": body}))
-                .send()
-                .await?;
-            if resp.status().is_success() {
+            let update_ok = retry_async(
+                &RetryConfig::api_default(),
+                "update_comment",
+                &is_reqwest_error_retryable,
+                || async {
+                    client
+                        .patch(&update_url)
+                        .header("Authorization", auth_header)
+                        .header("Accept", "application/vnd.github+json")
+                        .header(
+                            "User-Agent",
+                            concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+                        )
+                        .json(&serde_json::json!({"body": body}))
+                        .send()
+                        .await
+                        .map_err(Into::into)
+                },
+            )
+            .await
+            .map(|r| r.status().is_success())
+            .unwrap_or(false);
+            if update_ok {
                 return Ok(comment_id);
             }
             eprintln!(
-                "Warning: failed to update comment {} ({}), creating new",
+                "Warning: failed to update comment {} , creating new",
                 comment_id,
-                resp.status()
             );
         }
     }
 
-    let resp: serde_json::Value = client
-        .post(&url)
-        .header("Authorization", auth_header)
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "codasaurus/0.1.0")
-        .json(&serde_json::json!({"body": body}))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let resp: serde_json::Value = retry_async(
+        &RetryConfig::api_default(),
+        "create_comment",
+        &is_reqwest_error_retryable,
+        || async {
+            client
+                .post(&url)
+                .header("Authorization", auth_header)
+                .header("Accept", "application/vnd.github+json")
+                .header(
+                    "User-Agent",
+                    concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+                )
+                .json(&serde_json::json!({"body": body}))
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await
+                .map_err(Into::into)
+        },
+    )
+    .await?;
 
     let comment_id = resp["id"].as_i64().unwrap_or(0);
     if comment_id > 0 {
@@ -212,27 +261,42 @@ async fn suggest_reviewers(
         let sem = Arc::clone(&semaphore);
 
         handles.push(tokio::spawn(async move {
-            let _permit = sem.acquire().await.unwrap_or_else(|e| {
-                eprintln!("Warning: semaphore closed: {}", e);
-                panic!("semaphore closed")
-            });
+            let _permit = match sem.acquire().await {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("Warning: semaphore closed: {}", e);
+                    return;
+                }
+            };
 
-            let commits: Vec<serde_json::Value> = match cl
-                .get(format!(
-                    "https://api.github.com/repos/{}/commits?path={}&per_page=3",
-                    repo, filename
-                ))
-                .header("Authorization", &auth)
-                .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "codasaurus/0.1.0")
-                .send()
-                .await
+            let commits_url = format!(
+                "https://api.github.com/repos/{}/commits?path={}&per_page=3",
+                repo, filename
+            );
+            let commits: Vec<serde_json::Value> = match crate::retry::retry_async(
+                &crate::retry::RetryConfig::quick(),
+                "suggest_reviewer_commits",
+                &crate::retry::is_reqwest_error_retryable,
+                || async {
+                    cl.get(&commits_url)
+                        .header("Authorization", &auth)
+                        .header("Accept", "application/vnd.github+json")
+                        .header(
+                            "User-Agent",
+                            concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+                        )
+                        .send()
+                        .await
+                        .map_err(Into::into)
+                },
+            )
+            .await
             {
                 Ok(resp) => match resp.error_for_status() {
-                    Ok(response) => response.json().await.unwrap_or_default(),
-                    Err(_) => Vec::new(),
+                    Ok(r) => r.json::<Vec<serde_json::Value>>().await.unwrap_or_default(),
+                    Err(_) => vec![],
                 },
-                Err(_) => Vec::new(),
+                Err(_) => vec![],
             };
 
             // _permit dropped here → semaphore permit returned automatically
@@ -328,27 +392,38 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
 
     // Slop detection — check PR metadata for AI-generation signals
     let pr_author = pr["user"]["login"].as_str().unwrap_or("");
-    let commit_messages: Vec<String> = {
-        let resp = client
-            .get(format!(
-                "https://api.github.com/repos/{}/pulls/{}/commits",
-                repo_name, pr_number
-            ))
-            .header("Authorization", &auth_header)
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "codasaurus/0.1.0")
-            .send()
-            .await;
-        match resp {
-            Ok(r) => match r.json::<Vec<serde_json::Value>>().await {
-                Ok(commits) => commits
-                    .iter()
-                    .filter_map(|c| c["commit"]["message"].as_str().map(String::from))
-                    .collect(),
-                Err(_) => vec![],
-            },
+    let commits_url = format!(
+        "https://api.github.com/repos/{}/pulls/{}/commits",
+        repo_name, pr_number
+    );
+    let commit_messages: Vec<String> = match retry_async(
+        &RetryConfig::api_default(),
+        "fetch_pr_commits",
+        &is_reqwest_error_retryable,
+        || async {
+            client
+                .get(&commits_url)
+                .header("Authorization", &auth_header)
+                .header("Accept", "application/vnd.github+json")
+                .header(
+                    "User-Agent",
+                    concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+                )
+                .send()
+                .await
+                .map_err(Into::into)
+        },
+    )
+    .await
+    {
+        Ok(r) => match r.json::<Vec<serde_json::Value>>().await {
+            Ok(commits) => commits
+                .iter()
+                .filter_map(|c| c["commit"]["message"].as_str().map(String::from))
+                .collect(),
             Err(_) => vec![],
-        }
+        },
+        Err(_) => vec![],
     };
     let slop_findings = crate::detectors::slop::detect_slop(
         &parsed_files_collected,
@@ -393,20 +468,33 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     if findings.is_empty() {
         let body = "## 🦕 Codasaurus Review\n\n✅ **No issues found** — auto-approved!\n\n<sub>🦕 Reviewed by [Codasaurus](https://github.com/lohitkolluri/codasaurus)</sub>";
         let review = serde_json::json!({"body": body, "event": "APPROVE"});
-        let _: serde_json::Value = client
-            .post(format!(
-                "https://api.github.com/repos/{}/pulls/{}/reviews",
-                repo_name, pr_number
-            ))
-            .header("Authorization", &auth_header)
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "codasaurus/0.1.0")
-            .json(&review)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+        let approve_url = format!(
+            "https://api.github.com/repos/{}/pulls/{}/reviews",
+            repo_name, pr_number
+        );
+        let _: serde_json::Value = retry_async(
+            &RetryConfig::api_default(),
+            "approve_review",
+            &is_reqwest_error_retryable,
+            || async {
+                client
+                    .post(&approve_url)
+                    .header("Authorization", &auth_header)
+                    .header("Accept", "application/vnd.github+json")
+                    .header(
+                        "User-Agent",
+                        concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+                    )
+                    .json(&review)
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json()
+                    .await
+                    .map_err(Into::into)
+            },
+        )
+        .await?;
         if !head_sha.is_empty() {
             if let Some(ref s) = state {
                 let _ = s.set_reviewed_sha(repo_name, pr_number, head_sha);
@@ -427,7 +515,6 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
 
     // Append suggested reviewers
     if !reviewers.is_empty() {
-        use std::fmt::Write;
         let _ = writeln!(
             body,
             "\n👥 **Suggested reviewers:** {}",
@@ -450,17 +537,30 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         "comments": review_comments,
     });
 
-    let resp = client
-        .post(format!(
-            "https://api.github.com/repos/{}/pulls/{}/reviews",
-            repo_name, pr_number
-        ))
-        .header("Authorization", &auth_header)
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "codasaurus/0.1.0")
-        .json(&review_body)
-        .send()
-        .await?;
+    let review_url = format!(
+        "https://api.github.com/repos/{}/pulls/{}/reviews",
+        repo_name, pr_number
+    );
+    let resp = retry_async(
+        &RetryConfig::api_default(),
+        "post_pr_review",
+        &is_reqwest_error_retryable,
+        || async {
+            client
+                .post(&review_url)
+                .header("Authorization", &auth_header)
+                .header("Accept", "application/vnd.github+json")
+                .header(
+                    "User-Agent",
+                    concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+                )
+                .json(&review_body)
+                .send()
+                .await
+                .map_err(Into::into)
+        },
+    )
+    .await?;
 
     // If inline review failed (e.g. line numbers don't match), fall back to a single issue comment.
     // Uses the state store to update the previous comment rather than posting a new one.
@@ -508,7 +608,6 @@ fn build_comment_body(finding: &Finding) -> String {
         "warning" => "Warning",
         _ => "Info",
     };
-    use std::fmt::Write;
     let mut body = format!(
         "**{} `{}` — {}**\n\n{}",
         icon, finding.detector, sev_label, finding.message

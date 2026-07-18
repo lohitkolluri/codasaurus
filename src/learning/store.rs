@@ -43,8 +43,11 @@ impl LearningStore {
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
-             PRAGMA cache_size = -8000;
+             PRAGMA cache_size = -64000;
+             PRAGMA mmap_size = 268435456;
+             PRAGMA temp_store = MEMORY;
              PRAGMA busy_timeout = 5000;
+             PRAGMA auto_vacuum = INCREMENTAL;
              CREATE TABLE IF NOT EXISTS dismissed_findings (
                 fingerprint TEXT PRIMARY KEY,
                 detector TEXT NOT NULL,
@@ -78,7 +81,7 @@ impl LearningStore {
                 fingerprint,
                 finding.detector,
                 finding.file,
-                finding.line,
+                finding.line as i64,
                 finding.message
             ],
         )?;
@@ -117,7 +120,7 @@ impl LearningStore {
         // Query 1: Load all dismissed fingerprints into a HashSet (single query)
         let mut dismissed_set = std::collections::HashSet::new();
         {
-            let mut stmt = conn.prepare("SELECT fingerprint FROM dismissed_findings")?;
+            let mut stmt = conn.prepare_cached("SELECT fingerprint FROM dismissed_findings")?;
             let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
             for fp in rows.flatten() {
                 dismissed_set.insert(fp);
@@ -132,8 +135,9 @@ impl LearningStore {
         }
         let mut rules: Vec<Rule> = Vec::new();
         {
-            let mut stmt =
-                conn.prepare("SELECT detector, file_pattern, message_pattern FROM learned_rules")?;
+            let mut stmt = conn.prepare_cached(
+                "SELECT detector, file_pattern, message_pattern FROM learned_rules",
+            )?;
             let rows = stmt.query_map([], |row| {
                 Ok(Rule {
                     detector: row.get(0)?,

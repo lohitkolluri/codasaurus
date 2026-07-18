@@ -1,3 +1,4 @@
+use crate::retry::{is_reqwest_error_retryable, retry_async, RetryConfig};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -297,19 +298,27 @@ RULES:
         "temperature": config.temperature
     });
 
-    let mut request = client
-        .post(&url)
-        .header("Content-Type", "application/json")
-        .json(&body);
-    if !config.api_key.is_empty() {
-        request = request.bearer_auth(&config.api_key);
-    }
-    if config.base_url.trim_end_matches('/') == default_base_url() {
-        request = request
-            .header("HTTP-Referer", "https://github.com/lohitkolluri/codasaurus")
-            .header("X-Title", "Codasaurus");
-    }
-    let resp = request.send().await?;
+    let resp = retry_async(
+        &RetryConfig::api_default(),
+        "llm_chat_completion",
+        &is_reqwest_error_retryable,
+        || async {
+            let mut request = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .json(&body);
+            if !config.api_key.is_empty() {
+                request = request.bearer_auth(&config.api_key);
+            }
+            if config.base_url.trim_end_matches('/') == default_base_url() {
+                request = request
+                    .header("HTTP-Referer", "https://github.com/lohitkolluri/codasaurus")
+                    .header("X-Title", "Codasaurus");
+            }
+            request.send().await.map_err(Into::into)
+        },
+    )
+    .await?;
 
     let status = resp.status();
     if !status.is_success() {

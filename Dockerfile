@@ -20,12 +20,17 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,target=/target,sharing=locked \
-    cargo build --release --bin codasaurus && \
-    cp /target/release/codasaurus /usr/local/bin/codasaurus
+    --mount=type=cache,target=/app/target,sharing=locked \
+    cargo build --locked --release --bin codasaurus && \
+    cp /app/target/release/codasaurus /usr/local/bin/codasaurus
 
 # Stage 4: Distroless runtime (no apt, no shell)
 FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
+
+LABEL org.opencontainers.image.source="https://github.com/lohitkolluri/codasaurus"
+LABEL org.opencontainers.image.description="Static and AI-powered code review for AI-generated changes"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.version="${CODASAURUS_VERSION:-unknown}"
 
 COPY --from=builder /usr/local/bin/codasaurus /codasaurus
 
@@ -33,5 +38,7 @@ ENV PORT=3000
 ENV CODASAURUS_DATA_DIR=/data
 EXPOSE 3000
 USER 65532:65532
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD ["/codasaurus", "health", "--port", "3000"]
 ENTRYPOINT ["/codasaurus"]
 CMD ["serve"]

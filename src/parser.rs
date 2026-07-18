@@ -157,7 +157,8 @@ fn extract_imports(language: &str, lines: &[SourceLine]) -> Vec<Import> {
                     .unwrap_or("");
 
                 if !import_name.is_empty() {
-                    let col = line.content.find(import_name).unwrap_or(0);
+                    let byte_offset = line.content.find(import_name).unwrap_or(0);
+                    let col = line.content[..byte_offset].chars().count();
                     imports.push(Import {
                         name: import_name.to_string(),
                         line: line.number,

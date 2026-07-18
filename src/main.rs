@@ -140,7 +140,9 @@ fn main() -> Result<()> {
             }
         }
         Commands::Watch { path, config } => {
-            let rt = tokio::runtime::Runtime::new()?;
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
             rt.block_on(cli::run_watch(path, config.as_deref()))?;
         }
         Commands::Serve { port, host } => {

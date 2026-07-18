@@ -22,7 +22,7 @@ serde_json = "1"
 toml = "0.8"
 
 # HTTP & Async
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "http2", "json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "gzip", "http2", "json", "rustls-tls"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
 
 # Error handling
@@ -55,7 +55,7 @@ axum = "0.8"
 tower-http = { version = "0.6", features = ["limit"] }
 
 # Database (for feedback learning loop)
-rusqlite = { version = "0.34", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 # JWT generation (for GitHub App auth)
 jsonwebtoken = "9"

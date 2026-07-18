@@ -25,6 +25,7 @@ services:
     depends_on:
       init-data:
         condition: service_completed_successfully
+    init: true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "/codasaurus", "health", "--port", "3000"]
@@ -32,11 +33,18 @@ services:
       timeout: 5s
       start_period: 15s
       retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
         limits:
+          cpus: "1.0"
           memory: 256M
         reservations:
+          cpus: "0.25"
           memory: 64M
 
 volumes:

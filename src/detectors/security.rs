@@ -99,54 +99,8 @@ fn is_in_string_context(line: &str) -> bool {
         return true;
     }
     // Line is a comment containing example/sample keywords (case-insensitive ASCII)
-    if trimmed.len() >= 7 {
-        let lower_7: [u8; 7] = [
-            trimmed
-                .as_bytes()
-                .first()
-                .copied()
-                .unwrap_or(0)
-                .to_ascii_lowercase(),
-            trimmed
-                .as_bytes()
-                .get(1)
-                .copied()
-                .unwrap_or(0)
-                .to_ascii_lowercase(),
-            trimmed
-                .as_bytes()
-                .get(2)
-                .copied()
-                .unwrap_or(0)
-                .to_ascii_lowercase(),
-            trimmed
-                .as_bytes()
-                .get(3)
-                .copied()
-                .unwrap_or(0)
-                .to_ascii_lowercase(),
-            trimmed
-                .as_bytes()
-                .get(4)
-                .copied()
-                .unwrap_or(0)
-                .to_ascii_lowercase(),
-            trimmed
-                .as_bytes()
-                .get(5)
-                .copied()
-                .unwrap_or(0)
-                .to_ascii_lowercase(),
-            trimmed
-                .as_bytes()
-                .get(6)
-                .copied()
-                .unwrap_or(0)
-                .to_ascii_lowercase(),
-        ];
-        if &lower_7 == b"example" {
-            return true;
-        }
+    if trimmed.len() >= 7 && trimmed.as_bytes()[..7].eq_ignore_ascii_case(b"example") {
+        return true;
     }
     false
 }

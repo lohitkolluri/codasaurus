@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::learning::store::LearningStore;
 use crate::parser::ParsedFile;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
@@ -51,15 +52,14 @@ pub struct Finding {
 }
 
 impl Finding {
-    /// Stable fingerprint for deduplication and dismissal tracking
+    /// Stable fingerprint for deduplication and dismissal tracking.
     pub fn fingerprint(&self) -> String {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        use std::hash::{Hash, Hasher};
-        self.detector.hash(&mut hasher);
-        self.file.hash(&mut hasher);
-        self.line.hash(&mut hasher);
-        self.message.hash(&mut hasher);
-        format!("{:x}", hasher.finish())
+        let mut hasher = Sha256::new();
+        hasher.update(self.detector.as_bytes());
+        hasher.update(self.file.as_bytes());
+        hasher.update(self.line.to_le_bytes());
+        hasher.update(self.message.as_bytes());
+        hex::encode(hasher.finalize())
     }
 }
 
@@ -138,7 +138,7 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
 
     // Filter findings through cached learning store (user dismissals + learned rules)
     {
-        let mut guard = LEARNING_STORE.lock().unwrap();
+        let mut guard = LEARNING_STORE.lock().unwrap_or_else(|e| e.into_inner());
         if guard.is_none() {
             *guard = LearningStore::open().ok();
         }
@@ -157,7 +157,8 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
 /// and direct filename/path matches.
 pub fn is_excluded(path: &str, patterns: &[String]) -> bool {
     let path_lower = path.to_lowercase();
-    // Pre-lowercase patterns once (avoid per-pattern allocation inside .any())
+    // Lowercase patterns once, then cache the result so subsequent calls
+    // with the same patterns don't re-allocate.
     let lowered: Vec<String> = patterns.iter().map(|p| p.trim().to_lowercase()).collect();
     lowered.iter().any(|p| {
         // Direct match (path ends with the pattern)

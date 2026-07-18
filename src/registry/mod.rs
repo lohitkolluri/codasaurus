@@ -1,3 +1,4 @@
+use crate::retry::{is_reqwest_error_retryable, retry_blocking, RetryConfig};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -180,17 +181,25 @@ fn check_osv(ecosystem: &str, package: &str) -> Result<Vec<OsvVulnerability>> {
     let client = CLIENT.as_ref().ok_or_else(|| {
         anyhow::anyhow!("registry HTTP client not available (failed to initialize)")
     })?;
-    let body = serde_json::json!({
-        "package": {
-            "name": package,
-            "ecosystem": ecosystem
-        }
-    });
-    let resp = client
-        .post("https://api.osv.dev/v1/query")
-        .json(&body)
-        .send()?;
-    let data: serde_json::Value = resp.json()?;
+    let data: serde_json::Value = retry_blocking(
+        &RetryConfig::api_default(),
+        "osv_query",
+        &is_reqwest_error_retryable,
+        || {
+            let b = serde_json::json!({
+                "package": {
+                    "name": package,
+                    "ecosystem": ecosystem
+                }
+            });
+            client
+                .post("https://api.osv.dev/v1/query")
+                .json(&b)
+                .send()?
+                .json::<serde_json::Value>()
+                .map_err(Into::into)
+        },
+    )?;
     let vulns = data["vulns"]
         .as_array()
         .map(|arr| {
