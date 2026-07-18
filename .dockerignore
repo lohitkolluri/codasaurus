@@ -1,0 +1,15 @@
+.git/
+.gitignore
+target/
+Dockerfile
+.dockerignore
+*.md
+docs/
+.omo/
+.github/
+assets/
+action/
+tests/
+Makefile
+docker-compose.yml
+# Cargo.lock is required for reproducible builds — do not exclude
