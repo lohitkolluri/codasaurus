@@ -1,7 +1,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use crate::detectors::Finding;
 
@@ -29,21 +29,29 @@ impl LearningStore {
         Ok(home.join("codasaurus").join("learnings.db"))
     }
 
-    fn initialize(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap_or_else(|e| {
+    fn lock(&self) -> MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap_or_else(|e| {
             eprintln!("Warning: DB connection mutex poisoned, recovering");
             e.into_inner()
-        });
+        })
+    }
+
+    fn initialize(&self) -> Result<()> {
+        let conn = self.lock();
         conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS dismissed_findings (
+            "PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA cache_size = -8000;
+             PRAGMA busy_timeout = 5000;
+             CREATE TABLE IF NOT EXISTS dismissed_findings (
                 fingerprint TEXT PRIMARY KEY,
                 detector TEXT NOT NULL,
                 file TEXT NOT NULL,
                 line INTEGER NOT NULL,
                 message TEXT NOT NULL,
                 dismissed_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            CREATE TABLE IF NOT EXISTS learned_rules (
+             );
+             CREATE TABLE IF NOT EXISTS learned_rules (
                 id TEXT PRIMARY KEY,
                 detector TEXT NOT NULL,
                 file_pattern TEXT,
@@ -51,19 +59,16 @@ impl LearningStore {
                 action TEXT NOT NULL DEFAULT 'ignore',
                 reason TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-            CREATE INDEX IF NOT EXISTS idx_dismissed_fingerprint ON dismissed_findings(fingerprint);
-            CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector);",
+             );
+             CREATE INDEX IF NOT EXISTS idx_dismissed_fingerprint ON dismissed_findings(fingerprint);
+             CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector);",
         )?;
         Ok(())
     }
 
     pub fn dismiss(&self, finding: &Finding) -> Result<()> {
         let fingerprint = finding.fingerprint();
-        let conn = self.conn.lock().unwrap_or_else(|e| {
-            eprintln!("Warning: DB connection mutex poisoned, recovering");
-            e.into_inner()
-        });
+        let conn = self.lock();
         conn.execute(
             "INSERT OR IGNORE INTO dismissed_findings (fingerprint, detector, file, line, message)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -79,10 +84,7 @@ impl LearningStore {
     }
 
     pub fn add_rule(&self, rule: &crate::learning::LearnedRule) -> Result<()> {
-        let conn = self.conn.lock().unwrap_or_else(|e| {
-            eprintln!("Warning: DB connection mutex poisoned, recovering");
-            e.into_inner()
-        });
+        let conn = self.lock();
         conn.execute(
             "INSERT OR REPLACE INTO learned_rules (id, detector, file_pattern, message_pattern, action, reason)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -96,10 +98,7 @@ impl LearningStore {
 
     #[cfg(test)]
     pub fn clear_for_test(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap_or_else(|e| {
-            eprintln!("Warning: DB connection mutex poisoned, recovering");
-            e.into_inner()
-        });
+        let conn = self.lock();
         conn.execute_batch("DELETE FROM dismissed_findings; DELETE FROM learned_rules;")?;
         Ok(())
     }
@@ -111,10 +110,7 @@ impl LearningStore {
             return Ok(Vec::new());
         }
 
-        let conn = self.conn.lock().unwrap_or_else(|e| {
-            eprintln!("Warning: DB connection mutex poisoned, recovering");
-            e.into_inner()
-        });
+        let conn = self.lock();
 
         // Query 1: Load all dismissed fingerprints into a HashSet (single query)
         let mut dismissed_set = std::collections::HashSet::new();
