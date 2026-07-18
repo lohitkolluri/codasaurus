@@ -89,7 +89,7 @@ pub async fn review_pr(token: &str, payload: &WebhookPayload) -> Result<()> {
 
     // If no findings, post a positive comment
     if review_comments.is_empty() {
-        let body = "## 🦕 Codasaurus Review\n\n✅ No issues found. Looks good!";
+        let body = "## 🦕 Codasaurus Review\n\n✅ **No issues found** — this PR looks clean!\n\n<sub>🦕 Reviewed by [Codasaurus](https://github.com/lohitkolluri/codasaurus)</sub>";
         let comment = serde_json::json!({"body": body});
         let _: serde_json::Value = client
             .post(format!(
@@ -178,24 +178,31 @@ fn build_comment_body(finding: &Finding) -> String {
         "warning" => "🟡",
         _ => "🔵",
     };
+    let sev_label = match finding.severity {
+        "blocking" => "Blocking",
+        "warning" => "Warning",
+        _ => "Info",
+    };
+    use std::fmt::Write;
     let mut body = format!(
-        "{} **{}** `{}` — {}",
-        icon, finding.detector, finding.severity, finding.message
+        "**{} `{}` — {}**\n\n{}",
+        icon, finding.detector, sev_label, finding.message
     );
     if let Some(s) = &finding.suggestion {
-        use std::fmt::Write;
-        let _ = write!(body, "\n\n> 💡 {}", s);
-    }
-    if let Some(c) = &finding.codemod {
-        use std::fmt::Write;
-        let _ = write!(body, "\n\n```\n{}\n```", c);
+        let _ = write!(body, "\n\n<details><summary>💡 Suggested fix</summary>\n\n> {}\n", s);
+        if let Some(c) = &finding.codemod {
+            let _ = write!(body, "\n```suggestion\n{}\n```", c);
+        }
+        let _ = write!(body, "\n</details>");
+    } else if let Some(c) = &finding.codemod {
+        let _ = write!(body, "\n\n<details><summary>📝 Committable suggestion</summary>\n\n```suggestion\n{}\n```\n</details>", c);
     }
     body
 }
 
 fn build_review_body(
     findings: &Findings,
-    total: usize,
+    _total: usize,
     has_blocking: bool,
     repo_name: &str,
 ) -> String {
@@ -214,39 +221,107 @@ fn build_review_body(
         "ℹ️ Info only"
     };
 
-    let mut body = format!(
-        "## 🦕 Codasaurus Review\n\n**{}** — {} issue(s): {} blocking, {} warnings, {} info\n\n---\n",
-        verdict, total, blocking, warnings, infos
+    let mut body = String::new();
+    let _ = writeln!(body, "## 🦕 Codasaurus Review");
+    let _ = writeln!(body);
+    let _ = writeln!(
+        body,
+        "**{}** | 🔴 **{} blocking** | 🟡 **{} warnings** | 🔵 **{} info**",
+        verdict, blocking, warnings, infos
     );
+    let _ = writeln!(body);
 
-    // Group findings by severity in a single pass
-    let mut blocking_items = String::new();
-    let mut warning_items = String::new();
-    let mut info_items = String::new();
+    // Group findings by file, then by severity
+    use std::collections::BTreeMap;
+    let mut by_file: BTreeMap<String, Vec<&Finding>> = BTreeMap::new();
     for f in &findings.findings {
-        let line = match f.severity {
-            "blocking" => &mut blocking_items,
-            "warning" => &mut warning_items,
-            _ => &mut info_items,
-        };
-        let _ = writeln!(line, "- `{}:{}` — {}", f.file, f.line, f.message);
+        by_file.entry(f.file.clone()).or_default().push(f);
     }
+
+    // Per-file finding tables
+    for (file_path, file_findings) in &by_file {
+        let _ = writeln!(body, "### `{}`", file_path);
+        let _ = writeln!(body);
+        let _ = writeln!(body, "| Line | Severity | Finding |");
+        let _ = writeln!(body, "| --- | --- | --- |");
+        for f in file_findings {
+            let icon = match f.severity {
+                "blocking" => "🔴",
+                "warning" => "🟡",
+                _ => "🔵",
+            };
+            let line_str = if f.line > 0 {
+                format!(":{}", f.line)
+            } else {
+                String::new()
+            };
+            let _ = writeln!(
+                body,
+                "| `{}` | {} {} | `{}` — {} |",
+                line_str.trim_start_matches(':'),
+                icon,
+                f.severity,
+                f.detector,
+                f.message
+            );
+        }
+        let _ = writeln!(body);
+    }
+
+    // Collapsible detailed breakdown by severity
+    let _ = writeln!(body, "---");
+    let _ = writeln!(body);
 
     if blocking > 0 {
-        let _ = write!(body, "\n### 🔴 Blocking\n{}", blocking_items);
-    }
-    if warnings > 0 {
-        let _ = write!(body, "\n### 🟡 Warnings\n{}", warning_items);
-    }
-    if infos > 0 {
-        let _ = write!(body, "\n### 🔵 Info\n{}", info_items);
+        let _ = writeln!(body, "<details><summary>🔴 **{} Blocking**</summary>", blocking);
+        let _ = writeln!(body);
+        for f in &findings.findings {
+            if f.severity == "blocking" {
+                let _ = writeln!(body, "- **`{}:{}`** — {}", f.file, f.line, f.message);
+                if let Some(ref s) = f.suggestion {
+                    let _ = writeln!(body, "  - > 💡 {}", s);
+                }
+            }
+        }
+        let _ = writeln!(body, "</details>");
+        let _ = writeln!(body);
     }
 
-    let _ = write!(
+    if warnings > 0 {
+        let _ = writeln!(body, "<details><summary>🟡 **{} Warnings**</summary>", warnings);
+        let _ = writeln!(body);
+        for f in &findings.findings {
+            if f.severity == "warning" {
+                let _ = writeln!(body, "- **`{}:{}`** — {}", f.file, f.line, f.message);
+                if let Some(ref s) = f.suggestion {
+                    let _ = writeln!(body, "  - > 💡 {}", s);
+                }
+            }
+        }
+        let _ = writeln!(body, "</details>");
+        let _ = writeln!(body);
+    }
+
+    if infos > 0 {
+        let _ = writeln!(body, "<details><summary>🔵 **{} Info**</summary>", infos);
+        let _ = writeln!(body);
+        for f in &findings.findings {
+            if f.severity != "blocking" && f.severity != "warning" {
+                let _ = writeln!(body, "- **`{}:{}`** — {}", f.file, f.line, f.message);
+            }
+        }
+        let _ = writeln!(body, "</details>");
+        let _ = writeln!(body);
+    }
+
+    // Footer
+    let _ = writeln!(body, "---");
+    let _ = writeln!(
         body,
-        "\n---\n_Powered by [Codasaurus](https://github.com/lohitkolluri/codasaurus) — reviewing `{}`_\n",
+        "<sub>🦕 Reviewed by [Codasaurus](https://github.com/lohitkolluri/codasaurus) — `{}`</sub>",
         repo_name
     );
+    let _ = writeln!(body);
 
     body
 }
