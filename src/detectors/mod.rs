@@ -3,6 +3,7 @@ use crate::learning::store::LearningStore;
 use crate::parser::ParsedFile;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
 
 pub mod graph;
 pub mod guidelines;
@@ -13,6 +14,9 @@ pub mod slop;
 pub mod stale_api;
 pub mod style;
 pub mod vulnerabilities;
+
+/// Cached LearningStore — opened once and reused to avoid repeated SQLite connections.
+static LEARNING_STORE: LazyLock<Mutex<Option<LearningStore>>> = LazyLock::new(|| Mutex::new(None));
 
 /// A single finding from a detector
 #[derive(Debug, Clone, Serialize)]
@@ -132,10 +136,16 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
 
     all.extend(guidelines::detect(config));
 
-    // Filter findings through the learning store (user dismissals + learned rules)
-    if let Ok(store) = LearningStore::open() {
-        if let Ok(filtered) = store.filter_findings(&all.findings) {
-            return Findings { findings: filtered };
+    // Filter findings through cached learning store (user dismissals + learned rules)
+    {
+        let mut guard = LEARNING_STORE.lock().unwrap();
+        if guard.is_none() {
+            *guard = LearningStore::open().ok();
+        }
+        if let Some(ref store) = *guard {
+            if let Ok(filtered) = store.filter_findings(&all.findings) {
+                return Findings { findings: filtered };
+            }
         }
     }
 
@@ -147,10 +157,11 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
 /// and direct filename/path matches.
 pub fn is_excluded(path: &str, patterns: &[String]) -> bool {
     let path_lower = path.to_lowercase();
-    patterns.iter().any(|p| {
-        let p = p.trim().to_lowercase();
+    // Pre-lowercase patterns once (avoid per-pattern allocation inside .any())
+    let lowered: Vec<String> = patterns.iter().map(|p| p.trim().to_lowercase()).collect();
+    lowered.iter().any(|p| {
         // Direct match (path ends with the pattern)
-        if path_lower.ends_with(&p) {
+        if path_lower.ends_with(p) {
             return true;
         }
         // Glob-style: *.lock -> ends_with .lock
@@ -165,7 +176,7 @@ pub fn is_excluded(path: &str, patterns: &[String]) -> bool {
             if path_lower.contains(&format!("/{}", dir)) {
                 return true;
             }
-            if path_lower.starts_with(&p) {
+            if path_lower.starts_with(p) {
                 return true;
             }
         }

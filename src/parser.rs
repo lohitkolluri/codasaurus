@@ -27,25 +27,93 @@ pub struct Import {
 
 pub fn parse_file(path: &str, content: &str) -> Result<ParsedFile> {
     let language = detect_language(path);
-    let all_lines: Vec<&str> = content.lines().collect();
-    let total_lines = all_lines.len();
-    let mut lines = Vec::with_capacity(total_lines);
-    for (i, l) in all_lines.into_iter().enumerate() {
-        lines.push(SourceLine {
-            number: i + 1,
-            content: l.to_string(),
-        });
+    let lines = content
+        .lines()
+        .enumerate()
+        .map(|(index, content)| SourceLine {
+            number: index + 1,
+            content: content.to_string(),
+        })
+        .collect();
+
+    Ok(parse_lines(path, language, content.to_string(), lines))
+}
+
+/// Parse a unified diff patch as the new-file side of the diff.
+///
+/// GitHub's pull-file response contains a unified diff, not source code. Passing
+/// it directly to source detectors prefixes additions with `+` and reports patch
+/// offsets as source lines. This function removes diff metadata/deletions and
+/// preserves the new-file line number from each hunk, so findings can be posted
+/// back as valid inline review comments.
+pub fn parse_unified_diff(path: &str, patch: &str) -> Result<ParsedFile> {
+    let mut lines = Vec::new();
+    let mut next_line = None;
+
+    for line in patch.lines() {
+        if line.starts_with("@@") {
+            next_line = parse_new_hunk_start(line);
+            continue;
+        }
+
+        let Some(line_number) = next_line else {
+            continue;
+        };
+
+        match line.as_bytes().first() {
+            Some(b'+') if !line.starts_with("+++") => {
+                lines.push(SourceLine {
+                    number: line_number,
+                    content: line[1..].to_string(),
+                });
+                next_line = Some(line_number + 1);
+            }
+            Some(b' ') => {
+                lines.push(SourceLine {
+                    number: line_number,
+                    content: line[1..].to_string(),
+                });
+                next_line = Some(line_number + 1);
+            }
+            Some(b'-') | Some(b'\\') => {}
+            _ => {}
+        }
     }
+
+    if lines.is_empty() {
+        return parse_file(path, patch);
+    }
+
+    let language = detect_language(path);
+    let raw_content = lines
+        .iter()
+        .map(|line| line.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(parse_lines(path, language, raw_content, lines))
+}
+
+fn parse_new_hunk_start(header: &str) -> Option<usize> {
+    let new_range = header.split_whitespace().nth(2)?;
+    new_range
+        .strip_prefix('+')?
+        .split(',')
+        .next()?
+        .parse()
+        .ok()
+}
+
+fn parse_lines(path: &str, language: String, raw_content: String, lines: Vec<SourceLine>) -> ParsedFile {
 
     let imports = extract_imports(&language, &lines);
 
-    Ok(ParsedFile {
+    ParsedFile {
         path: path.to_string(),
         language,
-        raw_content: content.to_string(),
+        raw_content,
         lines,
         imports,
-    })
+    }
 }
 
 fn detect_language(path: &str) -> String {
@@ -280,5 +348,18 @@ const express = require('express');"#;
         assert_eq!(parsed.path, "test.js");
         assert!(!parsed.imports.is_empty());
         assert!(parsed.imports.iter().any(|i| i.name == "react"));
+    }
+
+    #[test]
+    fn test_parse_unified_diff_uses_new_file_line_numbers() {
+        let patch = "@@ -8,3 +8,4 @@\n unchanged();\n-old_call();\n+import { tool } from 'package';\n+new_call();\n@@ -20,0 +22,1 @@\n+const value = tool();";
+        let parsed = parse_unified_diff("src/example.ts", patch).unwrap();
+        let import = parsed.imports.first().expect("import should be found");
+
+        assert_eq!(import.name, "package");
+        assert_eq!(import.line, 9);
+        assert!(!parsed.raw_content.contains("@@"));
+        assert!(!parsed.raw_content.contains("+import"));
+        assert!(parsed.lines.iter().any(|line| line.number == 22));
     }
 }
