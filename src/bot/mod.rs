@@ -6,6 +6,7 @@ use axum::{
     Json, Router,
 };
 use serde::Deserialize;
+use tokio::signal;
 use tower_http::limit::RequestBodyLimitLayer;
 
 mod auth;
@@ -30,8 +31,38 @@ pub async fn serve(config: BotConfig) -> Result<()> {
         .with_state(config)
         .layer(RequestBodyLimitLayer::new(1024 * 1024));
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {
+            println!("  Shutting down (Ctrl+C)...");
+        }
+        _ = terminate => {
+            println!("  Shutting down (SIGTERM)...");
+        }
+    }
 }
 
 async fn health() -> &'static str {
@@ -46,7 +77,7 @@ struct InstallationInfo {
 #[derive(Deserialize)]
 struct WebhookPayload {
     #[serde(rename = "action")]
-    _action: String,
+    action: String,
     #[serde(rename = "pull_request")]
     pull_request: Option<serde_json::Value>,
     #[serde(rename = "repository")]
@@ -91,7 +122,7 @@ async fn handle_webhook(
                 match token {
                     Ok(t) => {
                         let wrapped = WebhookPayload {
-                            _action: String::new(),
+                            action: String::new(),
                             pull_request: Some(pr),
                             repo: None,
                             installation: None,
@@ -106,7 +137,7 @@ async fn handle_webhook(
                 }
             });
         }
-    } else if event == "issue_comment" && payload._action == "created" {
+    } else if event == "issue_comment" && payload.action == "created" {
         let comment_body = payload
             .comment
             .as_ref()
@@ -180,7 +211,7 @@ async fn handle_webhook(
                     };
 
                     let wrapped = WebhookPayload {
-                        _action: String::new(),
+                        action: String::new(),
                         pull_request: Some(pr_data),
                         repo: None,
                         installation: None,

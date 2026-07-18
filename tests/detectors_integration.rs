@@ -20,6 +20,7 @@ fn all_checks_config() -> Config {
             stale_api: true,
             todo_leaks: true,
             guidelines: true,
+            exclude_patterns: vec![],
         },
         ..Config::default()
     }
