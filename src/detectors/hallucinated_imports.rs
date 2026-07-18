@@ -6,6 +6,7 @@ use std::collections::HashSet;
 
 pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     let mut findings = Vec::new();
+    let mut warned_registries = std::collections::HashSet::new();
 
     for file in parsed_files {
         let registry_name = match file.language.as_str() {
@@ -61,8 +62,33 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                         codemod,
                     });
                 }
-                Ok(None) => {} // couldn't check (network error, etc.)
-                Err(_) => {}   // error during check
+                Ok(None) | Err(_) => {
+                    if warned_registries.insert(registry_name) {
+                        findings.push(Finding {
+                            detector: "hallucinated-imports".to_string(),
+                            severity: "info",
+                            file: file.path.clone(),
+                            line: import.line,
+                            column: import.column,
+                            message: format!(
+                                "Package `{}` check skipped — registry lookup failed for {}.",
+                                package, registry_name
+                            ),
+                            suggestion: Some(format!(
+                                "Could not verify `{}` on {}. Run `{} {}` manually to confirm.",
+                                package, registry_name,
+                                match registry_name {
+                                    "npm" => "npm view",
+                                    "pypi" => "pip install --dry-run",
+                                    _ => "check",
+                                },
+                                package
+                            )),
+                            evidence: None,
+                            codemod: None,
+                        });
+                    }
+                }
             }
         }
     }

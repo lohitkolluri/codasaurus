@@ -33,30 +33,51 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                 continue;
             }
 
-            if let Ok(vulns) = registry::check_vulnerabilities(registry_name, &package) {
-                for vuln in &vulns {
-                    let severity = match vuln.severity.as_str() {
-                        s if s.eq_ignore_ascii_case("critical") || s.eq_ignore_ascii_case("high") => "blocking",
-                        s if s.eq_ignore_ascii_case("moderate") || s.eq_ignore_ascii_case("medium") => "warning",
-                        _ => "info",
-                    };
-                    let fixed = vuln
-                        .fixed_version
-                        .as_ref()
-                        .map(|v| format!(" Upgrade to {}.", v))
-                        .unwrap_or_default();
+            match registry::check_vulnerabilities(registry_name, &package) {
+                Ok(vulns) => {
+                    for vuln in &vulns {
+                        let severity = match vuln.severity.as_str() {
+                            s if s.eq_ignore_ascii_case("critical") || s.eq_ignore_ascii_case("high") => "blocking",
+                            s if s.eq_ignore_ascii_case("moderate") || s.eq_ignore_ascii_case("medium") => "warning",
+                            _ => "info",
+                        };
+                        let fixed = vuln
+                            .fixed_version
+                            .as_ref()
+                            .map(|v| format!(" Upgrade to {}.", v))
+                            .unwrap_or_default();
+                        findings.push(Finding {
+                            detector: "vulnerabilities".to_string(),
+                            severity,
+                            file: file.path.clone(),
+                            line: import.line,
+                            column: import.column,
+                            message: format!("{}: {}{}", vuln.id, vuln.summary, fixed),
+                            suggestion: Some(format!(
+                                "Update package `{}` to the latest version to fix {}.",
+                                package, vuln.id
+                            )),
+                            evidence: Some(format!("{}: {}", vuln.id, vuln.summary)),
+                            codemod: None,
+                        });
+                    }
+                }
+                Err(e) => {
                     findings.push(Finding {
                         detector: "vulnerabilities".to_string(),
-                        severity,
+                        severity: "info",
                         file: file.path.clone(),
                         line: import.line,
                         column: import.column,
-                        message: format!("{}: {}{}", vuln.id, vuln.summary, fixed),
+                        message: format!(
+                            "Could not check vulnerabilities for `{}` — OSV API error: {}",
+                            package, e
+                        ),
                         suggestion: Some(format!(
-                            "Update package `{}` to the latest version to fix {}.",
-                            package, vuln.id
+                            "Run `cargo audit` or `npm audit` manually to check `{}` for known vulnerabilities.",
+                            package
                         )),
-                        evidence: Some(format!("{}: {}", vuln.id, vuln.summary)),
+                        evidence: None,
                         codemod: None,
                     });
                 }
