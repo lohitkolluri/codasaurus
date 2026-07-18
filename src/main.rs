@@ -72,6 +72,17 @@ enum Commands {
         host: String,
     },
 
+    /// Run as a GitHub Action (reads GITHUB_EVENT_PATH and posts Check Run annotations)
+    CheckRun {
+        /// Path to the GitHub event payload (defaults to GITHUB_EVENT_PATH env var)
+        #[arg(long, env = "GITHUB_EVENT_PATH")]
+        event_path: Option<String>,
+
+        /// Path to config file
+        #[arg(long)]
+        config: Option<String>,
+    },
+
     /// Print version information
     Version,
 }
@@ -139,6 +150,10 @@ fn main() -> Result<()> {
             };
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(bot::serve(config))?;
+        }
+        Commands::CheckRun { event_path, config } => {
+            let _cfg = config::load(config.as_deref())?;
+            codasaurus::action::run_check_run(event_path.clone())?;
         }
         Commands::Version => {
             println!("codasaurus v{}", env!("CARGO_PKG_VERSION"));

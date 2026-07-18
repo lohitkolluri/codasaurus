@@ -1,12 +1,23 @@
+version: '3.8'
 services:
-  codasaurus-bot:
+  codasaurus:
     build: .
     ports:
       - "3000:3000"
     environment:
-      GITHUB_APP_ID: ""
-      GITHUB_APP_PRIVATE_KEY: ""
-      GITHUB_WEBHOOK_SECRET: ""
-      OPENROUTER_API_KEY: ""
-      ENVIRONMENT: "dev"
+      - GITHUB_APP_ID=${GITHUB_APP_ID}
+      - GITHUB_APP_PRIVATE_KEY=${GITHUB_APP_PRIVATE_KEY}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - PORT=3000
+    volumes:
+      - codasaurus-data:/data/codasaurus
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  codasaurus-data:

@@ -9,6 +9,7 @@ pub mod guidelines;
 pub mod hallucinated_imports;
 pub mod phantom_deps;
 pub mod security;
+pub mod slop;
 pub mod stale_api;
 pub mod style;
 pub mod vulnerabilities;
@@ -139,6 +140,37 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
     }
 
     all
+}
+
+/// Check if a file path matches any of the exclusion patterns.
+/// Supports glob-style wildcards (`*.lock`), directory prefixes (`dist/`),
+/// and direct filename/path matches.
+pub fn is_excluded(path: &str, patterns: &[String]) -> bool {
+    let path_lower = path.to_lowercase();
+    patterns.iter().any(|p| {
+        let p = p.trim().to_lowercase();
+        // Direct match (path ends with the pattern)
+        if path_lower.ends_with(&p) {
+            return true;
+        }
+        // Glob-style: *.lock -> ends_with .lock
+        if let Some(ext) = p.strip_prefix('*') {
+            if path_lower.ends_with(ext) {
+                return true;
+            }
+        }
+        // Directory prefix: dist/ -> contains /dist/ or starts with dist/
+        if p.ends_with('/') {
+            let dir = &p[..p.len() - 1];
+            if path_lower.contains(&format!("/{}", dir)) {
+                return true;
+            }
+            if path_lower.starts_with(&p) {
+                return true;
+            }
+        }
+        false
+    })
 }
 
 /// Extract the package name from an import statement. Handles @scoped/packages,

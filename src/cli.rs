@@ -214,6 +214,9 @@ fn process_file(file_path: &str, findings: &mut Findings, config: &Config) {
     if !parser::is_supported(file_path) {
         return;
     }
+    if detectors::is_excluded(file_path, &config.checks.exclude_patterns) {
+        return;
+    }
     match std::fs::read_to_string(file_path) {
         Ok(content) => match parser::parse_file(file_path, &content) {
             Ok(parsed) => {

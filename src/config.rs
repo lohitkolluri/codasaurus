@@ -18,6 +18,9 @@ pub struct Config {
 
     #[serde(default)]
     pub tui: TuiConfig,
+
+    #[serde(default)]
+    pub pre_merge: PreMergeConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -57,6 +60,10 @@ pub struct CheckConfig {
     /// Validate PR/changes against repo contribution guidelines
     #[serde(default = "default_true")]
     pub guidelines: bool,
+
+    /// Glob patterns for files/directories to skip during scanning
+    #[serde(default = "default_exclude_patterns")]
+    pub exclude_patterns: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -99,6 +106,26 @@ pub struct TuiConfig {
     pub editor: Option<String>,
 }
 
+/// Pre-merge check configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PreMergeConfig {
+    /// Require PR description to be non-empty
+    #[serde(default)]
+    pub require_description: bool,
+    /// Require conventional commit title format (type: description)
+    #[serde(default)]
+    pub require_title_convention: bool,
+    /// Maximum number of blocking issues allowed (0 = none allowed)
+    #[serde(default = "default_zero")]
+    pub max_blocking: usize,
+    /// Maximum number of warnings allowed
+    #[serde(default = "default_ten")]
+    pub max_warnings: usize,
+}
+
+fn default_zero() -> usize { 0 }
+fn default_ten() -> usize { 10 }
+
 fn default_true() -> bool {
     true
 }
@@ -119,6 +146,26 @@ fn default_cache_ttl() -> u64 {
     3600
 }
 
+fn default_exclude_patterns() -> Vec<String> {
+    vec![
+        "*.lock".into(),
+        "package-lock.json".into(),
+        "yarn.lock".into(),
+        "Cargo.lock".into(),
+        "go.sum".into(),
+        "*.min.js".into(),
+        "*.min.css".into(),
+        "*.map".into(),
+        "dist/".into(),
+        "build/".into(),
+        ".git/".into(),
+        "node_modules/".into(),
+        "target/".into(),
+        ".next/".into(),
+        ".nuxt/".into(),
+    ]
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -132,6 +179,7 @@ impl Default for Config {
                 stale_api: false,
                 todo_leaks: true,
                 guidelines: true,
+                exclude_patterns: default_exclude_patterns(),
             },
             behavior: BehaviorConfig {
                 default_severity: "warn".to_string(),
@@ -143,6 +191,7 @@ impl Default for Config {
             },
             guidelines: GuidelinesConfig::default(),
             tui: TuiConfig::default(),
+            pre_merge: PreMergeConfig::default(),
         }
     }
 }
@@ -152,7 +201,10 @@ impl Default for Config {
 /// Pass `Some("/path/to/config.toml")` to load from an explicit path, or
 /// `None` to search for `.codasaurus.toml` in current/parent directories.
 pub fn load(path: Option<&str>) -> Result<Config> {
-    let config_path = match path {
+    // Support CODASAURUS_CONFIG env var as override when no explicit path given
+    let env_path = std::env::var("CODASAURUS_CONFIG").ok();
+    let resolved = path.or_else(|| env_path.as_deref()).filter(|s| !s.is_empty());
+    let config_path = match resolved {
         Some(p) => {
             let pb = PathBuf::from(p);
             if pb.exists() {
