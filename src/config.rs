@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -233,19 +234,38 @@ pub fn load(path: Option<&str>) -> Result<Config> {
     Ok(config)
 }
 
-fn find_config() -> Result<Option<PathBuf>> {
-    let cwd = std::env::current_dir()?;
-    let mut current = Some(cwd.as_path());
+static CONFIG_PATH_CACHE: OnceLock<std::sync::Mutex<Option<PathBuf>>> = OnceLock::new();
 
-    while let Some(dir) = current {
-        let candidate = dir.join(".codasaurus.toml");
-        if candidate.exists() {
-            return Ok(Some(candidate));
+fn find_config() -> Result<Option<PathBuf>> {
+    let cache = CONFIG_PATH_CACHE.get_or_init(|| std::sync::Mutex::new(None));
+    if let Ok(guard) = cache.lock() {
+        if let Some(ref path) = *guard {
+            if path.exists() {
+                return Ok(Some(path.clone()));
+            }
         }
-        current = dir.parent();
     }
 
-    Ok(None)
+    let cwd = std::env::current_dir()?;
+    let mut current = Some(cwd.as_path());
+    let resolved = loop {
+        match current {
+            Some(dir) => {
+                let candidate = dir.join(".codasaurus.toml");
+                if candidate.exists() {
+                    break Some(candidate);
+                }
+                current = dir.parent();
+            }
+            None => break None,
+        }
+    };
+
+    if let Ok(mut guard) = cache.lock() {
+        *guard = resolved.clone();
+    }
+
+    Ok(resolved)
 }
 
 

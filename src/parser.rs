@@ -96,6 +96,7 @@ fn extract_imports(language: &str, lines: &[SourceLine]) -> Vec<Import> {
                         line: line.number,
                         column: col,
                     });
+                    break; // one import per line, skip remaining patterns
                 }
             }
         }
