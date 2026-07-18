@@ -203,7 +203,7 @@ impl Default for Config {
 pub fn load(path: Option<&str>) -> Result<Config> {
     // Support CODASAURUS_CONFIG env var as override when no explicit path given
     let env_path = std::env::var("CODASAURUS_CONFIG").ok();
-    let resolved = path.or_else(|| env_path.as_deref()).filter(|s| !s.is_empty());
+    let resolved = path.or(env_path.as_deref()).filter(|s| !s.is_empty());
     let config_path = match resolved {
         Some(p) => {
             let pb = PathBuf::from(p);

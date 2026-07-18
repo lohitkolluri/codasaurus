@@ -1,23 +1,32 @@
-version: '3.8'
 services:
   codasaurus:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "3000:3000"
     environment:
-      - GITHUB_APP_ID=${GITHUB_APP_ID}
-      - GITHUB_APP_PRIVATE_KEY=${GITHUB_APP_PRIVATE_KEY}
-      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}
+      - GITHUB_APP_ID=${GITHUB_APP_ID:?error}
+      # Use base64-encoded key to avoid PEM newline issues in .env files:
+      - GITHUB_APP_PRIVATE_KEY_B64=${GITHUB_APP_PRIVATE_KEY_B64:?error}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:?error}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - PORT=3000
     volumes:
       - codasaurus-data:/data/codasaurus
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD", "/codasaurus", "serve", "--health"]
       interval: 30s
       timeout: 3s
+      start_period: 10s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
 
 volumes:
   codasaurus-data:

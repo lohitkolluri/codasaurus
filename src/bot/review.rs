@@ -3,8 +3,9 @@ use crate::detectors::{self, Finding, Findings};
 use crate::state::ReviewState;
 use anyhow::Result;
 
+use std::fmt::Write;
+
 /// Post or update an issue comment using state store for idempotency.
-/// If a stored comment_id exists, PATCH it; otherwise POST and store the new ID.
 async fn post_or_update_comment(
     client: &reqwest::Client,
     auth_header: &str,
@@ -67,7 +68,7 @@ async fn post_or_update_comment(
 }
 
 /// Suggest reviewers based on git history for changed files.
-/// Calls GitHub API to find recent authors for each file.
+/// Fires parallel API calls (capped via semaphore) to find recent authors.
 async fn suggest_reviewers(
     client: &reqwest::Client,
     auth_header: &str,
@@ -76,38 +77,69 @@ async fn suggest_reviewers(
     pr_author: &str,
 ) -> Vec<String> {
     use std::collections::HashMap;
-    let mut author_counts: HashMap<String, usize> = HashMap::new();
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
+    let author_counts = Arc::new(std::sync::Mutex::new(HashMap::<String, usize>::new()));
+    let semaphore = Arc::new(AtomicUsize::new(10)); // max 10 concurrent requests
+
+    let mut handles = Vec::with_capacity(files.len());
     for file in files {
-        let filename = file["filename"].as_str().unwrap_or("");
-        if filename.is_empty() {
-            continue;
-        }
+        let filename = match file["filename"].as_str() {
+            Some(f) if !f.is_empty() => f.to_string(),
+            _ => continue,
+        };
+        let cl = client.clone();
+        let auth = auth_header.to_string();
+        let repo = repo_name.to_string();
+        let author = pr_author.to_string();
+        let counts = Arc::clone(&author_counts);
+        let sem = Arc::clone(&semaphore);
 
-        if let Ok(resp) = client
-            .get(format!(
-                "https://api.github.com/repos/{}/commits?path={}&per_page=3",
-                repo_name, filename
-            ))
-            .header("Authorization", auth_header)
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "codasaurus/0.1.0")
-            .send()
-            .await
-        {
-            if let Ok(commits) = resp.json::<Vec<serde_json::Value>>().await {
-                for commit in commits {
-                    if let Some(author) = commit["author"]["login"].as_str() {
-                        if author != pr_author {
-                            *author_counts.entry(author.to_string()).or_insert(0) += 1;
+        handles.push(tokio::spawn(async move {
+            // Throttle concurrent requests
+            while sem.fetch_sub(1, Ordering::AcqRel) == 0 {
+                sem.fetch_add(1, Ordering::Release);
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+
+            let commits: Vec<serde_json::Value> = match cl
+                .get(format!(
+                    "https://api.github.com/repos/{}/commits?path={}&per_page=3",
+                    repo, filename
+                ))
+                .header("Authorization", &auth)
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "codasaurus/0.1.0")
+                .send()
+                .await
+            {
+                Ok(resp) => resp.json().await.unwrap_or_default(),
+                Err(_) => Vec::new(),
+            };
+
+            sem.fetch_add(1, Ordering::Release);
+
+            if !commits.is_empty() {
+                let mut local = counts.lock().unwrap();
+                for commit in &commits {
+                    if let Some(login) = commit["author"]["login"].as_str() {
+                        if login != author {
+                            *local.entry(login.to_string()).or_insert(0) += 1;
                         }
                     }
                 }
             }
-        }
+        }));
     }
 
-    let mut reviewers: Vec<(String, usize)> = author_counts.into_iter().collect();
+    // Wait for all fetches to complete
+    for h in handles {
+        let _ = h.await;
+    }
+
+    let counts = author_counts.lock().unwrap();
+    let mut reviewers: Vec<(String, usize)> = counts.clone().into_iter().collect();
     reviewers.sort_by_key(|k| std::cmp::Reverse(k.1));
     reviewers.truncate(5);
     reviewers.into_iter().map(|(name, _)| name).collect()
@@ -178,7 +210,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
             };
             if let Some(p) = parsed {
                 findings
-                    .extend(detectors::run_all(std::slice::from_ref(&p), &crate::config::Config::default()).findings);
+                    .extend(detectors::run_all(std::slice::from_ref(&p), &config).findings);
                 parsed_files_collected.push(p);
             }
         }
@@ -343,6 +375,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
             &llm_cfg,
             &pr_title,
             &pr_body,
+            &state,
         )
         .await
         {
@@ -497,18 +530,16 @@ fn build_review_body(
     pr_body: &str,
     config: &crate::config::Config,
 ) -> String {
-    use std::fmt::Write;
+    use std::collections::BTreeMap;
 
     let counts = findings.count_by_severity();
     let blocking = counts.get("blocking").copied().unwrap_or(0);
     let warnings = counts.get("warning").copied().unwrap_or(0);
     let infos = counts.get("info").copied().unwrap_or(0);
 
-    // Calculate confidence score (0-100)
     let blocking_weight = (blocking * 15) as i32;
     let warning_weight = (warnings * 5) as i32;
-    let info_weight = infos as i32;
-    let deduction = blocking_weight + warning_weight + info_weight;
+    let deduction = blocking_weight + warning_weight + (infos as i32);
     let confidence = (100i32 - deduction.min(95)).max(5) as u32;
 
     let score_emoji = match confidence {
@@ -525,7 +556,7 @@ fn build_review_body(
         "ℹ️ Info only"
     };
 
-    let mut body = String::new();
+    let mut body = String::with_capacity(2048);
     let _ = writeln!(body, "## 🦕 Codasaurus Review");
     let _ = writeln!(body);
     let _ = writeln!(
@@ -536,11 +567,18 @@ fn build_review_body(
     let _ = writeln!(body, "**Review confidence:** {} {}%", score_emoji, confidence);
     let _ = writeln!(body);
 
-    // Group findings by file, then by severity
-    use std::collections::BTreeMap;
+    // Single pass: group findings by file AND build severity buckets
     let mut by_file: BTreeMap<String, Vec<&Finding>> = BTreeMap::new();
+    let mut blocking_findings: Vec<&Finding> = Vec::new();
+    let mut warning_findings: Vec<&Finding> = Vec::new();
+    let mut info_findings: Vec<&Finding> = Vec::new();
     for f in &findings.findings {
         by_file.entry(f.file.clone()).or_default().push(f);
+        match f.severity {
+            "blocking" => blocking_findings.push(f),
+            "warning" => warning_findings.push(f),
+            _ => info_findings.push(f),
+        }
     }
 
     // Per-file finding tables
@@ -573,47 +611,41 @@ fn build_review_body(
         let _ = writeln!(body);
     }
 
-    // Collapsible detailed breakdown by severity
+    // Collapsible detailed breakdown by severity — uses pre-bucketed Vecs (0 additional iterations)
     let _ = writeln!(body, "---");
     let _ = writeln!(body);
 
-    if blocking > 0 {
+    if !blocking_findings.is_empty() {
         let _ = writeln!(body, "<details><summary>🔴 **{} Blocking**</summary>", blocking);
         let _ = writeln!(body);
-        for f in &findings.findings {
-            if f.severity == "blocking" {
-                let _ = writeln!(body, "- **`{}:{}`** — {}", f.file, f.line, f.message);
-                if let Some(ref s) = f.suggestion {
-                    let _ = writeln!(body, "  - > 💡 {}", s);
-                }
+        for f in &blocking_findings {
+            let _ = writeln!(body, "- **`{}:{}`** — {}", f.file, f.line, f.message);
+            if let Some(ref s) = f.suggestion {
+                let _ = writeln!(body, "  - > 💡 {}", s);
             }
         }
         let _ = writeln!(body, "</details>");
         let _ = writeln!(body);
     }
 
-    if warnings > 0 {
+    if !warning_findings.is_empty() {
         let _ = writeln!(body, "<details><summary>🟡 **{} Warnings**</summary>", warnings);
         let _ = writeln!(body);
-        for f in &findings.findings {
-            if f.severity == "warning" {
-                let _ = writeln!(body, "- **`{}:{}`** — {}", f.file, f.line, f.message);
-                if let Some(ref s) = f.suggestion {
-                    let _ = writeln!(body, "  - > 💡 {}", s);
-                }
+        for f in &warning_findings {
+            let _ = writeln!(body, "- **`{}:{}`** — {}", f.file, f.line, f.message);
+            if let Some(ref s) = f.suggestion {
+                let _ = writeln!(body, "  - > 💡 {}", s);
             }
         }
         let _ = writeln!(body, "</details>");
         let _ = writeln!(body);
     }
 
-    if infos > 0 {
+    if !info_findings.is_empty() {
         let _ = writeln!(body, "<details><summary>🔵 **{} Info**</summary>", infos);
         let _ = writeln!(body);
-        for f in &findings.findings {
-            if f.severity != "blocking" && f.severity != "warning" {
-                let _ = writeln!(body, "- **`{}:{}`** — {}", f.file, f.line, f.message);
-            }
+        for f in &info_findings {
+            let _ = writeln!(body, "- **`{}:{}`** — {}", f.file, f.line, f.message);
         }
         let _ = writeln!(body, "</details>");
         let _ = writeln!(body);
@@ -632,7 +664,6 @@ fn build_review_body(
         let _ = writeln!(body);
     }
 
-    // Footer
     let _ = writeln!(body, "---");
     let _ = writeln!(
         body,
@@ -644,7 +675,6 @@ fn build_review_body(
     body
 }
 
-/// Generate and post an LLM-powered PR summary as a comment
 #[allow(clippy::too_many_arguments)]
 async fn generate_and_post_summary(
     client: &reqwest::Client,
@@ -655,11 +685,10 @@ async fn generate_and_post_summary(
     llm_cfg: &crate::llm::LlmConfig,
     pr_title: &str,
     pr_body: &str,
+    state: &Option<ReviewState>,
 ) -> Result<()> {
-    // Build a summary from the findings
     let mut findings_text = String::new();
     for f in &findings.findings {
-        use std::fmt::Write;
         let _ = writeln!(findings_text, "- {}: {} (line {})", f.severity, f.message, f.line);
     }
 
@@ -687,20 +716,8 @@ Keep it under 200 words and professional in tone."#,
         output.summary.as_deref().unwrap_or(&output.verdict)
     );
 
-    let comment = serde_json::json!({"body": summary_body});
-    let _: serde_json::Value = client
-        .post(format!(
-            "https://api.github.com/repos/{}/issues/{}/comments",
-            repo_name, pr_number
-        ))
-        .header("Authorization", auth_header)
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "codasaurus/0.1.0")
-        .json(&comment)
-        .send()
-        .await?
-        .json()
-        .await?;
+    // Use state store for comment editing to prevent duplicates
+    post_or_update_comment(client, auth_header, repo_name, pr_number, &summary_body, state).await?;
 
     Ok(())
 }

@@ -3,6 +3,20 @@
 
 use crate::detectors::Finding;
 use crate::parser::ParsedFile;
+use std::sync::LazyLock;
+
+static GENERIC_TITLE_WORDS: LazyLock<aho_corasick::AhoCorasick> = LazyLock::new(|| {
+    aho_corasick::AhoCorasick::new([
+        "fix some issues",
+        "various changes",
+        "improve code",
+        "update",
+        "changes",
+        "fix",
+        "wip",
+    ])
+    .expect("valid Aho-Corasick patterns")
+});
 
 /// Analyze file content for AI-generation signals.
 /// Returns findings if the PR appears AI-generated.
@@ -20,18 +34,7 @@ pub fn detect_slop(
     if pr_title.len() < 10 {
         score += 2;
         reasons.push("Very short or missing PR title");
-    } else if [
-        "fix some issues",
-        "various changes",
-        "improve code",
-        "update",
-        "changes",
-        "fix",
-        "wip",
-    ]
-    .iter()
-    .any(|k| title_lower.contains(k))
-    {
+    } else if GENERIC_TITLE_WORDS.is_match(&title_lower) {
         score += 3;
         reasons.push("Generic PR title typical of AI output");
     }

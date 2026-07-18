@@ -125,9 +125,17 @@ async fn handle_webhook(
             if is_pr {
                 let cfg = config.clone();
                 let inst_id = payload.installation.as_ref().map(|i| i.id);
-                let repo = payload.repo.clone().unwrap_or_default();
-                let issue = payload.issue.clone().unwrap_or_default();
-                let pr_number = issue["number"].as_i64().unwrap_or(0);
+                let pr_number = payload
+                    .issue
+                    .as_ref()
+                    .and_then(|i| i["number"].as_i64())
+                    .unwrap_or(0);
+                let repo_full_name = payload
+                    .repo
+                    .as_ref()
+                    .and_then(|r| r["full_name"].as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
 
                 tokio::spawn(async move {
                     let token = match auth::get_installation_token(&cfg, inst_id).await {
@@ -138,7 +146,7 @@ async fn handle_webhook(
                         }
                     };
 
-                    let repo_name = repo["full_name"].as_str().unwrap_or("unknown");
+                    let repo_name = &repo_full_name;
                     let client = reqwest::Client::new();
                     let auth_header = format!("Bearer {}", token);
 
