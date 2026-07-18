@@ -85,6 +85,17 @@ enum Commands {
 
     /// Print version information
     Version,
+
+    /// Health check for Docker (checks HTTP /health endpoint)
+    Health {
+        /// Port to check
+        #[arg(long, default_value = "3000")]
+        port: u16,
+
+        /// Host to check
+        #[arg(long, default_value = "localhost")]
+        host: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -157,6 +168,28 @@ fn main() -> Result<()> {
         }
         Commands::Version => {
             println!("codasaurus v{}", env!("CARGO_PKG_VERSION"));
+        }
+        Commands::Health { port, host } => {
+            let url = format!("http://{}:{}/health", host, port);
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .connect_timeout(std::time::Duration::from_secs(3))
+                .build()
+                .expect("reqwest client config is valid");
+            match client.get(&url).send() {
+                Ok(resp) if resp.status().is_success() => {
+                    println!("Health check passed: {} {}", url, resp.status());
+                    std::process::exit(0);
+                }
+                Ok(resp) => {
+                    eprintln!("Health check failed: {} {}", url, resp.status());
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Health check error: {} — {}", url, e);
+                    std::process::exit(1);
+                }
+            }
         }
     }
 

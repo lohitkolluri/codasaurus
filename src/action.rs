@@ -36,7 +36,12 @@ pub fn run_check_run(event_path: Option<String>) -> Result<()> {
         .as_i64()
         .context("Could not determine PR number from pull_request payload")?;
 
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .pool_max_idle_per_host(5)
+        .build()
+        .expect("reqwest client config is valid");
     let repo_api = format!("https://api.github.com/repos/{}", repo_full_name);
     let auth_header = format!("Bearer {}", token);
 

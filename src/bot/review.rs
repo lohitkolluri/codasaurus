@@ -2,8 +2,114 @@ use crate::bot::WebhookPayload;
 use crate::detectors::{self, Finding, Findings};
 use crate::state::ReviewState;
 use anyhow::Result;
+use std::sync::LazyLock;
+use std::time::Duration;
 
 use std::fmt::Write;
+
+/// Max bytes for a GitHub issue comment body (API limit: 65536).
+const MAX_COMMENT_BYTES: usize = 64000;
+
+/// GitHub API max results per page for PR files.
+const PER_PAGE: usize = 100;
+
+/// Build a production-configured GitHub API client with timeouts and pooling.
+static GITHUB_CLIENT: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
+    match reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .connect_timeout(Duration::from_secs(10))
+        .pool_max_idle_per_host(10)
+        .pool_idle_timeout(Duration::from_secs(180))
+        .tcp_nodelay(true)
+        .build()
+    {
+        Ok(client) => Some(client),
+        Err(e) => {
+            eprintln!("Warning: failed to build GitHub API client: {}", e);
+            None
+        }
+    }
+});
+
+/// Same auth/User-Agent headers reused across all GitHub API calls.
+fn github_api_headers(auth_header: &str) -> reqwest::header::HeaderMap {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::AUTHORIZATION,
+        reqwest::header::HeaderValue::from_str(auth_header).unwrap(),
+    );
+    headers.insert(
+        reqwest::header::ACCEPT,
+        reqwest::header::HeaderValue::from_static("application/vnd.github+json"),
+    );
+    headers.insert(
+        reqwest::header::USER_AGENT,
+        reqwest::header::HeaderValue::from_static("codasaurus/0.1.0"),
+    );
+    headers
+}
+
+/// Truncate a string to fit within `max_bytes` at a UTF-8 boundary.
+fn truncate_utf8(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut idx = max_bytes;
+    while !s.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    &s[..idx]
+}
+
+/// Fetch all changed files for a PR, handling pagination via the Link header.
+async fn fetch_pr_files(
+    client: &reqwest::Client,
+    repo_name: &str,
+    pr_number: i64,
+    auth_header: &str,
+) -> Result<Vec<serde_json::Value>> {
+    let mut all_files = Vec::new();
+    let mut url = Some(format!(
+        "https://api.github.com/repos/{}/pulls/{}/files?per_page={}",
+        repo_name, pr_number, PER_PAGE
+    ));
+
+    while let Some(current_url) = url.take() {
+        let resp = client
+            .get(&current_url)
+            .headers(github_api_headers(auth_header))
+            .send()
+            .await?;
+
+        // Extract Link header before consuming resp
+        let next_url = resp
+            .headers()
+            .get(reqwest::header::LINK)
+            .and_then(|v| v.to_str().ok())
+            .and_then(parse_next_url);
+
+        let page: Vec<serde_json::Value> = resp.json().await?;
+        all_files.extend(page);
+
+        url = next_url;
+    }
+
+    Ok(all_files)
+}
+
+/// Extract the `rel="next"` URL from a GitHub Link header.
+fn parse_next_url(link_header: &str) -> Option<String> {
+    for part in link_header.split(',') {
+        if part.contains(r#"rel="next""#) {
+            if let Some(start) = part.find('<') {
+                if let Some(end) = part.find('>') {
+                    return Some(part[start + 1..end].to_string());
+                }
+            }
+        }
+    }
+    None
+}
 
 /// Post or update an issue comment using state store for idempotency.
 async fn post_or_update_comment(
@@ -77,11 +183,11 @@ async fn suggest_reviewers(
     pr_author: &str,
 ) -> Vec<String> {
     use std::collections::HashMap;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use tokio::sync::Semaphore;
 
     let author_counts = Arc::new(std::sync::Mutex::new(HashMap::<String, usize>::new()));
-    let semaphore = Arc::new(AtomicUsize::new(10)); // max 10 concurrent requests
+    let semaphore = Arc::new(Semaphore::new(10)); // max 10 concurrent requests
 
     let mut handles = Vec::with_capacity(files.len());
     for file in files {
@@ -97,11 +203,10 @@ async fn suggest_reviewers(
         let sem = Arc::clone(&semaphore);
 
         handles.push(tokio::spawn(async move {
-            // Throttle concurrent requests
-            while sem.fetch_sub(1, Ordering::AcqRel) == 0 {
-                sem.fetch_add(1, Ordering::Release);
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            }
+            let _permit = sem.acquire().await.unwrap_or_else(|e| {
+                eprintln!("Warning: semaphore closed: {}", e);
+                panic!("semaphore closed")
+            });
 
             let commits: Vec<serde_json::Value> = match cl
                 .get(format!(
@@ -118,7 +223,7 @@ async fn suggest_reviewers(
                 Err(_) => Vec::new(),
             };
 
-            sem.fetch_add(1, Ordering::Release);
+            // _permit dropped here → semaphore permit returned automatically
 
             if !commits.is_empty() {
                 let mut local = counts.lock().unwrap();
@@ -168,32 +273,19 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
 
     let config = crate::config::load(None).unwrap_or_default();
 
-    let client = reqwest::Client::new();
+    let client = GITHUB_CLIENT.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("GitHub API client not available (failed to initialize)")
+    })?;
     let auth_header = format!("Bearer {}", token);
 
-    let files_text: String = client
-        .get(format!(
-            "https://api.github.com/repos/{}/pulls/{}/files",
-            repo_name, pr_number
-        ))
-        .header("Authorization", &auth_header)
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "codasaurus/0.1.0")
-        .send()
-        .await?
-        .text()
-        .await?;
-
-    let files: Vec<serde_json::Value> = match serde_json::from_str(&files_text) {
-        Ok(f) => f,
+    let files = match fetch_pr_files(client, repo_name, pr_number, &auth_header).await {
+        Ok(f) if !f.is_empty() => f,
+        Ok(_) => return Ok(()),
         Err(e) => {
-            eprintln!("Warning: failed to parse PR files response: {}", e);
+            eprintln!("Warning: failed to fetch PR files: {}", e);
             return Ok(());
         }
     };
-    if files.is_empty() {
-        return Ok(());
-    }
 
     let mut findings = Findings::new();
     let mut parsed_files_collected: Vec<crate::parser::ParsedFile> = Vec::new();
@@ -255,7 +347,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     );
     findings.findings.extend(slop_findings);
 
-    let reviewers = suggest_reviewers(&client, &auth_header, repo_name, &files, pr_author).await;
+    let reviewers = suggest_reviewers(client, &auth_header, repo_name, &files, pr_author).await;
 
     let mut review_comments: Vec<serde_json::Value> = Vec::new();
     let mut has_blocking = false;
@@ -332,6 +424,9 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         let _ = writeln!(body);
     }
 
+    // Truncate body to fit within GitHub's 64K comment limit
+    body = truncate_utf8(&body, MAX_COMMENT_BYTES).to_string();
+
     // Try to create a review with inline comments; fall back to single comment
     let review_body = serde_json::json!({
         "body": body,
@@ -354,7 +449,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     // If inline review failed (e.g. line numbers don't match), fall back to a single issue comment.
     // Uses the state store to update the previous comment rather than posting a new one.
     if !resp.status().is_success() {
-        post_or_update_comment(&client, &auth_header, repo_name, pr_number, &body, &state).await?;
+        post_or_update_comment(client, &auth_header, repo_name, pr_number, &body, &state).await?;
     }
 
     // Record the reviewed commit SHA for incremental review
@@ -367,7 +462,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     // Generate and post LLM summary if API key is available
     if let Some(llm_cfg) = crate::llm::LlmConfig::from_env() {
         if let Err(e) = generate_and_post_summary(
-            &client,
+            client,
             &auth_header,
             repo_name,
             pr_number,

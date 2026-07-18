@@ -1,6 +1,17 @@
 use crate::bot::BotConfig;
 use anyhow::{Context, Result};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+/// Build a production-configured HTTP client with timeouts and connection pooling.
+fn build_github_client() -> anyhow::Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(10))
+        .pool_max_idle_per_host(5)
+        .pool_idle_timeout(Duration::from_secs(90))
+        .tcp_nodelay(true)
+        .build()?)
+}
 
 pub async fn get_installation_token(config: &BotConfig, installation_id: Option<i64>) -> Result<String> {
     let now = SystemTime::now()
@@ -21,12 +32,11 @@ pub async fn get_installation_token(config: &BotConfig, installation_id: Option<
     let jwt =
         jsonwebtoken::encode(&jwt_header, &jwt_payload, &key).context("Failed to create JWT")?;
 
-    let client = reqwest::Client::new();
+    let client = build_github_client().context("Failed to build GitHub API client")?;
 
     let inst_id = if let Some(iid) = installation_id {
         iid
     } else {
-        // Fallback: fetch first installation
         let installations: Vec<serde_json::Value> = client
             .get("https://api.github.com/app/installations")
             .header("Authorization", format!("Bearer {}", jwt))

@@ -20,12 +20,18 @@ static CACHE: LazyLock<RwLock<HashMap<String, (bool, Instant)>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
 /// Shared HTTP client used by all registry lookups (npm, PyPI, crates.io, OSV).
-static CLIENT: LazyLock<reqwest::blocking::Client> = LazyLock::new(|| {
-    reqwest::blocking::Client::builder()
+static CLIENT: LazyLock<Option<reqwest::blocking::Client>> = LazyLock::new(|| {
+    match reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(5))
         .pool_max_idle_per_host(5)
         .build()
-        .expect("Failed to build registry HTTP client. Check TLS/network configuration.")
+    {
+        Ok(client) => Some(client),
+        Err(e) => {
+            eprintln!("Warning: failed to build registry HTTP client: {}", e);
+            None
+        }
+    }
 });
 
 pub fn set_cache_ttl(secs: u64) {
@@ -174,13 +180,16 @@ pub struct OsvVulnerability {
 }
 
 fn check_osv(ecosystem: &str, package: &str) -> Result<Vec<OsvVulnerability>> {
+    let client = CLIENT.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("registry HTTP client not available (failed to initialize)")
+    })?;
     let body = serde_json::json!({
         "package": {
             "name": package,
             "ecosystem": ecosystem
         }
     });
-    let resp = CLIENT
+    let resp = client
         .post("https://api.osv.dev/v1/query")
         .json(&body)
         .send()?;

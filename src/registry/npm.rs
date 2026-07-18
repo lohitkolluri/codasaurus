@@ -1,8 +1,10 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 pub fn check(package: &str) -> Result<Option<bool>> {
     let url = format!("https://registry.npmjs.org/{}", package);
-    let resp = super::CLIENT
+    let client = super::CLIENT.as_ref()
+        .context("registry HTTP client not available (failed to initialize)")?;
+    let resp = client
         .head(&url)
         .header("Accept", "application/vnd.npm.install-v1+json")
         .send()?;
