@@ -2,8 +2,8 @@ use crate::config::Config;
 use crate::detectors::Finding;
 use crate::graph::CodeGraph;
 use crate::parser::ParsedFile;
-use std::sync::LazyLock;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use std::sync::Mutex;
 
 /// Global mutable code graph populated during parsing.
@@ -156,5 +156,3 @@ pub fn detect(parsed_files: &[ParsedFile], _config: &Config) -> Vec<Finding> {
 
     findings
 }
-
-

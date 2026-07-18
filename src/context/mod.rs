@@ -342,7 +342,9 @@ pub fn build_repo_context(root: &str, guidelines_override: Option<&str>) -> Opti
                     "package.json" => crate::dep_parser::extract_npm_deps(&content),
                     "requirements.txt" => crate::dep_parser::extract_requirements_deps(&content),
                     "pyproject.toml" => crate::dep_parser::extract_pyproject_deps(&content),
-                    "setup.py" | "setup.cfg" => crate::dep_parser::extract_requirements_deps(&content),
+                    "setup.py" | "setup.cfg" => {
+                        crate::dep_parser::extract_requirements_deps(&content)
+                    }
                     "cargo.toml" => crate::dep_parser::extract_cargo_deps(&content),
                     "go.mod" => crate::dep_parser::extract_go_mod_deps(&content),
                     _ => Vec::new(),
@@ -487,8 +489,6 @@ mod tests {
         assert!(langs.contains(&"Rust"));
         assert!(langs.contains(&"TypeScript"));
     }
-
-
 
     #[test]
     fn test_build_repo_context_bad_path() {

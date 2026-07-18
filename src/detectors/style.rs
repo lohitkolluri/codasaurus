@@ -181,9 +181,10 @@ fn check_unnecessary_factory(path: &str, content: &str) -> Option<Finding> {
     }
 
     // Count types/structs/classes that could be created directly
-    let total_types = content.lines().filter(|line| {
-        line.contains("struct ") || line.contains("class ")
-    }).count();
+    let total_types = content
+        .lines()
+        .filter(|line| line.contains("struct ") || line.contains("class "))
+        .count();
 
     // Factory with very few types is over-engineering
     if total_types <= 3 && has_factory {
@@ -373,8 +374,10 @@ fn count_comment_lines(lines: &[&str]) -> usize {
 
 fn check_boilerplate_getters_setters(path: &str, content: &str) -> Option<Finding> {
     let (getter_count, setter_count) = content.lines().fold((0, 0), |(g, s), line| {
-        (g + if line.contains("get_") { 1 } else { 0 },
-         s + if line.contains("set_") { 1 } else { 0 })
+        (
+            g + if line.contains("get_") { 1 } else { 0 },
+            s + if line.contains("set_") { 1 } else { 0 },
+        )
     });
 
     if getter_count > 5 || setter_count > 5 {

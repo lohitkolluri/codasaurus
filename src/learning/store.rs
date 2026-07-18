@@ -12,7 +12,10 @@ pub struct LearningStore {
 
 impl LearningStore {
     pub fn open() -> Result<Self> {
-        let path = Self::db_path()?;
+        Self::open_at(Self::db_path()?)
+    }
+
+    fn open_at(path: PathBuf) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -25,8 +28,7 @@ impl LearningStore {
     }
 
     fn db_path() -> Result<PathBuf> {
-        let home = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-        Ok(home.join("codasaurus").join("learnings.db"))
+        Ok(crate::storage::data_dir().join("learnings.db"))
     }
 
     fn lock(&self) -> MutexGuard<'_, Connection> {
@@ -183,14 +185,15 @@ mod tests {
 
     #[test]
     fn test_learning_store_open() {
-        let store = LearningStore::open();
+        let dir = tempfile::tempdir().unwrap();
+        let store = LearningStore::open_at(dir.path().join("learnings.db"));
         assert!(store.is_ok(), "learning store should open");
     }
 
     #[test]
     fn test_dismiss_and_filter() {
-        let store = LearningStore::open().unwrap();
-        store.clear_for_test().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let store = LearningStore::open_at(dir.path().join("learnings.db")).unwrap();
 
         let finding = Finding {
             detector: "test-detector".to_string(),

@@ -92,7 +92,10 @@ fn build_dep_map(files: &[ParsedFile]) -> std::collections::HashMap<String, Vec<
         if path.ends_with("package.json") {
             let pkgs = crate::dep_parser::extract_npm_deps(&file.raw_content);
             map.entry("npm".to_string()).or_default().extend(pkgs);
-        } else if path.ends_with("requirements.txt") || path.ends_with("setup.py") || path.ends_with("setup.cfg") {
+        } else if path.ends_with("requirements.txt")
+            || path.ends_with("setup.py")
+            || path.ends_with("setup.cfg")
+        {
             let pkgs = crate::dep_parser::extract_requirements_deps(&file.raw_content);
             map.entry("pypi".to_string()).or_default().extend(pkgs);
         } else if path.ends_with("pyproject.toml") {

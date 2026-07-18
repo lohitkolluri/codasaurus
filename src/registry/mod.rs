@@ -1,6 +1,6 @@
 use anyhow::Result;
-use std::sync::LazyLock;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant};
 
@@ -71,25 +71,35 @@ pub fn check_package(registry: &str, package: &str) -> Result<Option<bool>> {
         });
         cache.insert(cache_key, (*exists, Instant::now()));
 
-        // Evict expired entries if cache exceeds max size
         if cache.len() > CACHE_MAX_SIZE {
-            let ttl = Duration::from_secs(get_cache_ttl());
-            let now = Instant::now();
-            cache.retain(|_, &mut (_, time)| now.duration_since(time) < ttl);
-            // If still too large after evicting expired entries, remove oldest
-            while cache.len() > CACHE_MAX_SIZE / 2 {
-                if let Some(oldest_key) = cache.iter()
-                    .min_by_key(|(_, &(_, time))| time)
-                    .map(|(k, _)| k.clone())
-                {
-                    cache.remove(&oldest_key);
-                } else {
-                    break;
-                }
-            }
+            evict_cache(&mut cache);
         }
     }
     result
+}
+
+/// Evict expired entries, then trim to half capacity in O(n log n).
+///
+/// The previous implementation repeatedly searched the whole map for its oldest
+/// key, making a full trim quadratic and very expensive under cache pressure.
+fn evict_cache(cache: &mut HashMap<String, (bool, Instant)>) {
+    let ttl = Duration::from_secs(get_cache_ttl());
+    let now = Instant::now();
+    cache.retain(|_, &mut (_, time)| now.duration_since(time) < ttl);
+
+    let target_len = CACHE_MAX_SIZE / 2;
+    if cache.len() <= target_len {
+        return;
+    }
+
+    let mut entries: Vec<(String, Instant)> = cache
+        .iter()
+        .map(|(key, &(_, timestamp))| (key.clone(), timestamp))
+        .collect();
+    entries.sort_unstable_by_key(|(_, timestamp)| *timestamp);
+    for (key, _) in entries.into_iter().take(cache.len() - target_len) {
+        cache.remove(&key);
+    }
 }
 
 #[cfg(test)]
@@ -118,20 +128,7 @@ mod tests {
             cache.insert(key, (true, Instant::now()));
         }
 
-        // Apply the same eviction logic as check_package uses
-        let ttl = Duration::from_secs(get_cache_ttl());
-        let now = Instant::now();
-        cache.retain(|_, &mut (_, time)| now.duration_since(time) < ttl);
-        while cache.len() > CACHE_MAX_SIZE / 2 {
-            if let Some(oldest_key) = cache.iter()
-                .min_by_key(|(_, &(_, time))| time)
-                .map(|(k, _)| k.clone())
-            {
-                cache.remove(&oldest_key);
-            } else {
-                break;
-            }
-        }
+        evict_cache(&mut cache);
         drop(cache);
 
         // Verify cache is bounded

@@ -12,6 +12,12 @@ const MAX_COMMENT_BYTES: usize = 64000;
 
 /// GitHub API max results per page for PR files.
 const PER_PAGE: usize = 100;
+/// GitHub exposes at most 3,000 PR files (30 pages of 100).
+const MAX_PR_FILE_PAGES: usize = 30;
+/// Bound reviewer discovery to avoid exhausting an installation's API quota on a large PR.
+const MAX_REVIEWER_FILES: usize = 50;
+/// Keep review creation within GitHub's inline-comment payload limit.
+const MAX_INLINE_COMMENTS: usize = 300;
 
 /// Build a production-configured GitHub API client with timeouts and pooling.
 static GITHUB_CLIENT: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
@@ -30,6 +36,29 @@ static GITHUB_CLIENT: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
         }
     }
 });
+
+/// Fetch the complete PR object for a comment-triggered review.
+pub async fn fetch_pull_request(
+    token: &str,
+    repo_name: &str,
+    pr_number: i64,
+) -> Result<serde_json::Value> {
+    let client = GITHUB_CLIENT
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("GitHub API client not available (failed to initialize)"))?;
+    let auth_header = format!("Bearer {token}");
+    client
+        .get(format!(
+            "https://api.github.com/repos/{repo_name}/pulls/{pr_number}"
+        ))
+        .headers(github_api_headers(&auth_header))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await
+        .map_err(Into::into)
+}
 
 /// Same auth/User-Agent headers reused across all GitHub API calls.
 fn github_api_headers(auth_header: &str) -> reqwest::header::HeaderMap {
@@ -61,7 +90,7 @@ fn truncate_utf8(s: &str, max_bytes: usize) -> &str {
     &s[..idx]
 }
 
-/// Fetch all changed files for a PR, handling pagination via the Link header.
+/// Fetch all changed files for a PR. GitHub caps this endpoint at 3,000 files.
 async fn fetch_pr_files(
     client: &reqwest::Client,
     repo_name: &str,
@@ -69,46 +98,25 @@ async fn fetch_pr_files(
     auth_header: &str,
 ) -> Result<Vec<serde_json::Value>> {
     let mut all_files = Vec::new();
-    let mut url = Some(format!(
-        "https://api.github.com/repos/{}/pulls/{}/files?per_page={}",
-        repo_name, pr_number, PER_PAGE
-    ));
-
-    while let Some(current_url) = url.take() {
+    for page_number in 1..=MAX_PR_FILE_PAGES {
         let resp = client
-            .get(&current_url)
+            .get(format!(
+                "https://api.github.com/repos/{}/pulls/{}/files?per_page={}&page={}",
+                repo_name, pr_number, PER_PAGE, page_number
+            ))
             .headers(github_api_headers(auth_header))
             .send()
-            .await?;
-
-        // Extract Link header before consuming resp
-        let next_url = resp
-            .headers()
-            .get(reqwest::header::LINK)
-            .and_then(|v| v.to_str().ok())
-            .and_then(parse_next_url);
-
+            .await?
+            .error_for_status()?;
         let page: Vec<serde_json::Value> = resp.json().await?;
+        let is_last_page = page.len() < PER_PAGE;
         all_files.extend(page);
-
-        url = next_url;
-    }
-
-    Ok(all_files)
-}
-
-/// Extract the `rel="next"` URL from a GitHub Link header.
-fn parse_next_url(link_header: &str) -> Option<String> {
-    for part in link_header.split(',') {
-        if part.contains(r#"rel="next""#) {
-            if let Some(start) = part.find('<') {
-                if let Some(end) = part.find('>') {
-                    return Some(part[start + 1..end].to_string());
-                }
-            }
+        if is_last_page || page_number == MAX_PR_FILE_PAGES {
+            return Ok(all_files);
         }
     }
-    None
+
+    unreachable!("the bounded page loop always returns")
 }
 
 /// Post or update an issue comment using state store for idempotency.
@@ -158,6 +166,7 @@ async fn post_or_update_comment(
         .json(&serde_json::json!({"body": body}))
         .send()
         .await?
+        .error_for_status()?
         .json()
         .await?;
 
@@ -189,8 +198,8 @@ async fn suggest_reviewers(
     let author_counts = Arc::new(std::sync::Mutex::new(HashMap::<String, usize>::new()));
     let semaphore = Arc::new(Semaphore::new(10)); // max 10 concurrent requests
 
-    let mut handles = Vec::with_capacity(files.len());
-    for file in files {
+    let mut handles = Vec::with_capacity(files.len().min(MAX_REVIEWER_FILES));
+    for file in files.iter().take(MAX_REVIEWER_FILES) {
         let filename = match file["filename"].as_str() {
             Some(f) if !f.is_empty() => f.to_string(),
             _ => continue,
@@ -219,7 +228,10 @@ async fn suggest_reviewers(
                 .send()
                 .await
             {
-                Ok(resp) => resp.json().await.unwrap_or_default(),
+                Ok(resp) => match resp.error_for_status() {
+                    Ok(response) => response.json().await.unwrap_or_default(),
+                    Err(_) => Vec::new(),
+                },
                 Err(_) => Vec::new(),
             };
 
@@ -273,9 +285,9 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
 
     let config = crate::config::load(None).unwrap_or_default();
 
-    let client = GITHUB_CLIENT.as_ref().ok_or_else(|| {
-        anyhow::anyhow!("GitHub API client not available (failed to initialize)")
-    })?;
+    let client = GITHUB_CLIENT
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("GitHub API client not available (failed to initialize)"))?;
     let auth_header = format!("Bearer {}", token);
 
     let files = match fetch_pr_files(client, repo_name, pr_number, &auth_header).await {
@@ -287,13 +299,12 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         }
     };
 
-    let mut findings = Findings::new();
     let mut parsed_files_collected: Vec<crate::parser::ParsedFile> = Vec::new();
     for file in &files {
         let filename = file["filename"].as_str().unwrap_or("unknown");
         let patch = file["patch"].as_str().unwrap_or("");
         if !patch.is_empty() && patch.len() < 100_000 {
-            let parsed = match crate::parser::parse_file(filename, patch) {
+            let parsed = match crate::parser::parse_unified_diff(filename, patch) {
                 Ok(p) => Some(p),
                 Err(e) => {
                     eprintln!("Warning: failed to parse file {}: {}", filename, e);
@@ -301,19 +312,19 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
                 }
             };
             if let Some(p) = parsed {
-                findings
-                    .extend(detectors::run_all(std::slice::from_ref(&p), &config).findings);
                 parsed_files_collected.push(p);
             }
         }
     }
 
-    // Filter findings through the learning store (user dismissals)
-    if let Ok(store) = crate::learning::store::LearningStore::open() {
-        if let Ok(filtered) = store.filter_findings(&findings.findings) {
-            findings.findings = filtered;
-        }
-    }
+    // Run cross-file detectors once. This lets dependency checks see manifest
+    // files and prevents repository-level guideline findings from repeating for
+    // every changed file.
+    let mut findings = if parsed_files_collected.is_empty() {
+        Findings::new()
+    } else {
+        detectors::run_all(&parsed_files_collected, &config)
+    };
 
     // Slop detection — check PR metadata for AI-generation signals
     let pr_author = pr["user"]["login"].as_str().unwrap_or("");
@@ -359,7 +370,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
             has_blocking = true;
         }
 
-        // Map finding line number to the PR diff position
+        // `parse_unified_diff` maps findings to the new-file line number expected by GitHub.
         if f.line > 0 {
             let comment_body = build_comment_body(f);
             let side = "RIGHT"; // always comment on the new code
@@ -370,12 +381,16 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
                 "side": side,
                 "body": comment_body,
             });
-            review_comments.push(comment);
+            if review_comments.len() < MAX_INLINE_COMMENTS {
+                review_comments.push(comment);
+            }
         }
     }
 
-    // If no findings, auto-approve via the PR reviews API
-    if review_comments.is_empty() {
+    // Only approve when there are genuinely no findings. Some valid findings are
+    // repository-level and have no source line, so an empty inline-comment list
+    // must never be treated as a clean review.
+    if findings.is_empty() {
         let body = "## 🦕 Codasaurus Review\n\n✅ **No issues found** — auto-approved!\n\n<sub>🦕 Reviewed by [Codasaurus](https://github.com/lohitkolluri/codasaurus)</sub>";
         let review = serde_json::json!({"body": body, "event": "APPROVE"});
         let _: serde_json::Value = client
@@ -389,6 +404,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
             .json(&review)
             .send()
             .await?
+            .error_for_status()?
             .json()
             .await?;
         if !head_sha.is_empty() {
@@ -498,7 +514,11 @@ fn build_comment_body(finding: &Finding) -> String {
         icon, finding.detector, sev_label, finding.message
     );
     if let Some(s) = &finding.suggestion {
-        let _ = write!(body, "\n\n<details><summary>💡 Suggested fix</summary>\n\n> {}\n", s);
+        let _ = write!(
+            body,
+            "\n\n<details><summary>💡 Suggested fix</summary>\n\n> {}\n",
+            s
+        );
         if let Some(c) = &finding.codemod {
             let _ = write!(body, "\n```suggestion\n{}\n```", c);
         }
@@ -581,7 +601,10 @@ fn evaluate_pre_merge_checks(
         results.push(CheckResult {
             name: "Blocking Issues",
             status: CheckStatus::Fail,
-            details: format!("{} blocking issues (max allowed: {})", blocking, max_blocking),
+            details: format!(
+                "{} blocking issues (max allowed: {})",
+                blocking, max_blocking
+            ),
         });
     } else if blocking > 0 {
         results.push(CheckResult {
@@ -659,7 +682,11 @@ fn build_review_body(
         "**{}** | 🔴 **{} blocking** | 🟡 **{} warnings** | 🔵 **{} info**",
         verdict, blocking, warnings, infos
     );
-    let _ = writeln!(body, "**Review confidence:** {} {}%", score_emoji, confidence);
+    let _ = writeln!(
+        body,
+        "**Review confidence:** {} {}%",
+        score_emoji, confidence
+    );
     let _ = writeln!(body);
 
     // Single pass: group findings by file AND build severity buckets
@@ -711,7 +738,11 @@ fn build_review_body(
     let _ = writeln!(body);
 
     if !blocking_findings.is_empty() {
-        let _ = writeln!(body, "<details><summary>🔴 **{} Blocking**</summary>", blocking);
+        let _ = writeln!(
+            body,
+            "<details><summary>🔴 **{} Blocking**</summary>",
+            blocking
+        );
         let _ = writeln!(body);
         for f in &blocking_findings {
             let _ = writeln!(body, "- **`{}:{}`** — {}", f.file, f.line, f.message);
@@ -724,7 +755,11 @@ fn build_review_body(
     }
 
     if !warning_findings.is_empty() {
-        let _ = writeln!(body, "<details><summary>🟡 **{} Warnings**</summary>", warnings);
+        let _ = writeln!(
+            body,
+            "<details><summary>🟡 **{} Warnings**</summary>",
+            warnings
+        );
         let _ = writeln!(body);
         for f in &warning_findings {
             let _ = writeln!(body, "- **`{}:{}`** — {}", f.file, f.line, f.message);
@@ -754,7 +789,11 @@ fn build_review_body(
         let _ = writeln!(body, "| Check | Status | Details |");
         let _ = writeln!(body, "| --- | --- | --- |");
         for check in &checks {
-            let _ = writeln!(body, "| {} | {} | {} |", check.name, check.status, check.details);
+            let _ = writeln!(
+                body,
+                "| {} | {} | {} |",
+                check.name, check.status, check.details
+            );
         }
         let _ = writeln!(body);
     }
@@ -784,7 +823,11 @@ async fn generate_and_post_summary(
 ) -> Result<()> {
     let mut findings_text = String::new();
     for f in &findings.findings {
-        let _ = writeln!(findings_text, "- {}: {} (line {})", f.severity, f.message, f.line);
+        let _ = writeln!(
+            findings_text,
+            "- {}: {} (line {})",
+            f.severity, f.message, f.line
+        );
     }
 
     let prompt = format!(
@@ -812,7 +855,15 @@ Keep it under 200 words and professional in tone."#,
     );
 
     // Use state store for comment editing to prevent duplicates
-    post_or_update_comment(client, auth_header, repo_name, pr_number, &summary_body, state).await?;
+    post_or_update_comment(
+        client,
+        auth_header,
+        repo_name,
+        pr_number,
+        &summary_body,
+        state,
+    )
+    .await?;
 
     Ok(())
 }

@@ -5,8 +5,8 @@ use crate::context::guidelines::{find_guidelines, GuidelineFile};
 use crate::context::rules::ExtractedRule;
 use crate::detectors::Finding;
 use crate::git;
-use std::sync::LazyLock;
 use regex::Regex;
+use std::sync::LazyLock;
 
 static CONVENTIONAL_COMMIT_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(\(.+\))?!?: .+")

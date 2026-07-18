@@ -181,6 +181,11 @@ export CODASAURUS_MODEL="qwen/qwen3-coder:free"                     # Default (f
 export CODASAURUS_MODEL="meta-llama/llama-3.3-70b-instruct:free"    # Strong free model
 export CODASAURUS_MODEL="anthropic/claude-sonnet-4.6"               # Paid
 
+# Or use a self-hosted OpenAI-compatible server — no API key is required
+# when the server does not require authentication.
+export CODASAURUS_BASE_URL="http://localhost:11434/v1"              # Ollama / vLLM / LocalAI
+export CODASAURUS_MODEL="qwen2.5-coder:7b"
+
 # Run with LLM review
 codasaurus check --staged --llm
 ```

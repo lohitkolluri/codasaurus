@@ -13,7 +13,28 @@ static TODO_RE: LazyLock<AhoCorasick> = LazyLock::new(|| {
 static SECRET_PRE_CHECK: LazyLock<AhoCorasick> = LazyLock::new(|| {
     AhoCorasick::builder()
         .ascii_case_insensitive(true)
-        .build(["key", "token", "secret", "password", "bearer", "aws_", "ghp_", "gho_", "ghs_", "-----begin", "eyj", "mongodb", "postgresql", "mysql", "redis://", "api_key", "apikey", "passwd", "pwd", "xoxb"])
+        .build([
+            "key",
+            "token",
+            "secret",
+            "password",
+            "bearer",
+            "aws_",
+            "ghp_",
+            "gho_",
+            "ghs_",
+            "-----begin",
+            "eyj",
+            "mongodb",
+            "postgresql",
+            "mysql",
+            "redis://",
+            "api_key",
+            "apikey",
+            "passwd",
+            "pwd",
+            "xoxb",
+        ])
         .expect("valid secret pre-check patterns")
 });
 
@@ -140,7 +161,10 @@ pub fn detect_todos(parsed_files: &[ParsedFile]) -> Vec<Finding> {
             if TODO_RE.is_match(trimmed) {
                 // Skip markdown heading references to TODO
                 if trimmed.starts_with("##")
-                    && trimmed.as_bytes().windows(4).any(|w| w.eq_ignore_ascii_case(b"todo"))
+                    && trimmed
+                        .as_bytes()
+                        .windows(4)
+                        .any(|w| w.eq_ignore_ascii_case(b"todo"))
                 {
                     continue;
                 }
@@ -179,8 +203,12 @@ fn mask_value(value: &str) -> String {
         return "***".to_string();
     }
     let prefix = &value[..value.char_indices().nth(4).map(|(i, _)| i).unwrap_or(len)];
-    let suffix =
-        &value[value.char_indices().rev().nth(3).map(|(i, _)| i).unwrap_or(0)..];
+    let suffix = &value[value
+        .char_indices()
+        .rev()
+        .nth(3)
+        .map(|(i, _)| i)
+        .unwrap_or(0)..];
     format!("{}...{}", prefix, suffix)
 }
 

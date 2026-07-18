@@ -48,7 +48,12 @@ pub fn extract_pyproject_deps(content: &str) -> Vec<String> {
             if let Some(deps) = project.get("dependencies").and_then(|d| d.as_array()) {
                 for dep in deps {
                     if let Some(s) = dep.as_str() {
-                        let pkg = s.split(DEP_CHARS).next().unwrap_or("").trim().to_lowercase();
+                        let pkg = s
+                            .split(DEP_CHARS)
+                            .next()
+                            .unwrap_or("")
+                            .trim()
+                            .to_lowercase();
                         if !pkg.is_empty() {
                             pkgs.push(pkg);
                         }

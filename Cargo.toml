@@ -22,8 +22,8 @@ serde_json = "1"
 toml = "0.8"
 
 # HTTP & Async
-reqwest = { version = "0.12", features = ["json", "blocking"] }
-tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "http2", "json", "rustls-tls"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
 
 # Error handling
 anyhow = "1"
@@ -50,12 +50,9 @@ notify = "7"
 # Directory traversal
 walkdir = "2"
 
-# Terminal components (spinners, progress bars)
-clx = "2"
-
 # Web server (for GitHub App bot)
 axum = "0.8"
-tower-http = { version = "0.6", features = ["cors", "limit"] }
+tower-http = { version = "0.6", features = ["limit"] }
 
 # Database (for feedback learning loop)
 rusqlite = { version = "0.34", features = ["bundled"] }

@@ -107,7 +107,12 @@ async fn handle_webhook(
         .unwrap_or("");
     let payload: WebhookPayload =
         serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
-    if event == "pull_request" {
+    if event == "pull_request"
+        && matches!(
+            payload.action.as_str(),
+            "opened" | "reopened" | "synchronize" | "ready_for_review"
+        )
+    {
         if let Some(pr) = payload.pull_request {
             let cfg = config.clone();
             let inst_id = payload.installation.as_ref().map(|i| i.id);
@@ -177,38 +182,21 @@ async fn handle_webhook(
                         }
                     };
 
+                    if pr_number <= 0 || repo_full_name == "unknown" {
+                        eprintln!(
+                            "  Ignoring review command without a valid repository and PR number"
+                        );
+                        return;
+                    }
                     let repo_name = &repo_full_name;
-                    let client = reqwest::Client::new();
-                    let auth_header = format!("Bearer {}", token);
-
-                    // Fetch the full PR data from GitHub API
-                    let pr_response = client
-                        .get(format!(
-                            "https://api.github.com/repos/{}/pulls/{}",
-                            repo_name, pr_number
-                        ))
-                        .header("Authorization", &auth_header)
-                        .header("Accept", "application/vnd.github+json")
-                        .header("User-Agent", "codasaurus/0.1.0")
-                        .send()
-                        .await;
-
-                    let pr_data = match pr_response {
-                        Ok(resp) => match resp.json::<serde_json::Value>().await {
+                    let pr_data =
+                        match review::fetch_pull_request(&token, repo_name, pr_number).await {
                             Ok(data) => data,
                             Err(e) => {
-                                eprintln!(
-                                    "  Failed to parse PR #{} response: {}",
-                                    pr_number, e
-                                );
+                                eprintln!("  Failed to fetch PR #{}: {}", pr_number, e);
                                 return;
                             }
-                        },
-                        Err(e) => {
-                            eprintln!("  Failed to fetch PR #{}: {}", pr_number, e);
-                            return;
-                        }
-                    };
+                        };
 
                     let wrapped = WebhookPayload {
                         action: String::new(),

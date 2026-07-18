@@ -30,6 +30,7 @@ FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
 COPY --from=builder /usr/local/bin/codasaurus /codasaurus
 
 ENV PORT=3000
+ENV CODASAURUS_DATA_DIR=/data
 EXPOSE 3000
 USER 65532:65532
 ENTRYPOINT ["/codasaurus"]

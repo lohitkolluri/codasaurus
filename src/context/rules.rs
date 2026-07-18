@@ -1,5 +1,5 @@
-use std::sync::LazyLock;
 use regex::Regex;
+use std::sync::LazyLock;
 
 static CHECKBOX_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*[-*]\s+\[([ xX])\]\s+(.+)$").unwrap());
@@ -10,14 +10,16 @@ static BRANCH_RE: LazyLock<Regex> = LazyLock::new(|| {
 static BRANCH_INLINE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(branches?\s+(?:must|should)\s+(?:start|begin)\s+with\s+`([^`]+)`)").unwrap()
 });
-static DCO_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)(signed.off.by|DCO|developer.certificate.of.origin)").unwrap());
+static DCO_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(signed.off.by|DCO|developer.certificate.of.origin)").unwrap()
+});
 static CONVENTIONAL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(conventional\s*commits?|commit\s*(message)?\s*(convention|format|style))")
         .unwrap()
 });
-static FILE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)(?:required|must\s+have|must\s+include)\s+`([^`]+)`").unwrap());
+static FILE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(?:required|must\s+have|must\s+include)\s+`([^`]+)`").unwrap()
+});
 
 /// A structured rule extracted from a contribution guideline file.
 #[derive(Debug, Clone)]

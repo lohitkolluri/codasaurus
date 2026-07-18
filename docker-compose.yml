@@ -1,4 +1,11 @@
 services:
+  init-data:
+    image: busybox:1.37
+    user: "0:0"
+    command: ["sh", "-c", "mkdir -p /data && chown -R 65532:65532 /data"]
+    volumes:
+      - codasaurus-data:/data
+
   codasaurus:
     build:
       context: .
@@ -12,8 +19,12 @@ services:
       - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:?error}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - PORT=3000
+      - CODASAURUS_DATA_DIR=/data
     volumes:
-      - codasaurus-data:/data/codasaurus
+      - codasaurus-data:/data
+    depends_on:
+      init-data:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "/codasaurus", "health", "--port", "3000"]

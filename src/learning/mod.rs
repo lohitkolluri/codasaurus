@@ -11,5 +11,3 @@ pub struct LearnedRule {
     pub reason: String,
     pub created_at: String,
 }
-
-

@@ -203,10 +203,9 @@ fn resolve_private_key() -> anyhow::Result<String> {
     if let Ok(key) = std::env::var("GITHUB_APP_PRIVATE_KEY") {
         return Ok(key);
     }
-    let b64 = std::env::var("GITHUB_APP_PRIVATE_KEY_B64")
-        .map_err(|_| anyhow::anyhow!(
-            "GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_B64 required"
-        ))?;
+    let b64 = std::env::var("GITHUB_APP_PRIVATE_KEY_B64").map_err(|_| {
+        anyhow::anyhow!("GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_B64 required")
+    })?;
     use base64::Engine;
     let decoded = base64::engine::general_purpose::URL_SAFE
         .decode(b64.as_bytes())

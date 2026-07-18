@@ -37,8 +37,16 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                 Ok(vulns) => {
                     for vuln in &vulns {
                         let severity = match vuln.severity.as_str() {
-                            s if s.eq_ignore_ascii_case("critical") || s.eq_ignore_ascii_case("high") => "blocking",
-                            s if s.eq_ignore_ascii_case("moderate") || s.eq_ignore_ascii_case("medium") => "warning",
+                            s if s.eq_ignore_ascii_case("critical")
+                                || s.eq_ignore_ascii_case("high") =>
+                            {
+                                "blocking"
+                            }
+                            s if s.eq_ignore_ascii_case("moderate")
+                                || s.eq_ignore_ascii_case("medium") =>
+                            {
+                                "warning"
+                            }
                             _ => "info",
                         };
                         let fixed = vuln

@@ -96,6 +96,4 @@ impl CodeGraph {
         }
         affected
     }
-
-
 }

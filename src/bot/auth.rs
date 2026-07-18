@@ -13,7 +13,10 @@ fn build_github_client() -> anyhow::Result<reqwest::Client> {
         .build()?)
 }
 
-pub async fn get_installation_token(config: &BotConfig, installation_id: Option<i64>) -> Result<String> {
+pub async fn get_installation_token(
+    config: &BotConfig,
+    installation_id: Option<i64>,
+) -> Result<String> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()

@@ -45,14 +45,21 @@ fn default_base_url() -> String {
 }
 
 impl LlmConfig {
-    /// Reads CODASAURUS_API_KEY first, then OPENROUTER_API_KEY as fallback.
-    /// Returns `None` if neither env var is set.
+    /// Reads an OpenAI-compatible endpoint from the environment.
+    ///
+    /// `CODASAURUS_BASE_URL` enables self-hosted servers such as Ollama,
+    /// vLLM, or LocalAI. Authentication is optional for custom endpoints but
+    /// required when using the default OpenRouter endpoint.
     pub fn from_env() -> Option<Self> {
+        let base_url = std::env::var("CODASAURUS_BASE_URL")
+            .ok()
+            .filter(|url| !url.is_empty())
+            .unwrap_or_else(default_base_url);
         let api_key = std::env::var("CODASAURUS_API_KEY")
             .or_else(|_| std::env::var("OPENROUTER_API_KEY"))
-            .ok()?;
+            .unwrap_or_default();
 
-        if api_key.is_empty() {
+        if api_key.is_empty() && base_url == default_base_url() {
             return None;
         }
 
@@ -66,7 +73,7 @@ impl LlmConfig {
             model,
             max_tokens: default_max_tokens(),
             temperature: default_temperature(),
-            base_url: default_base_url(),
+            base_url,
         })
     }
 }
@@ -290,15 +297,19 @@ RULES:
         "temperature": config.temperature
     });
 
-    let resp = client
+    let mut request = client
         .post(&url)
-        .header("Authorization", format!("Bearer {}", config.api_key))
         .header("Content-Type", "application/json")
-        .header("HTTP-Referer", "https://github.com/lohitkolluri/codasaurus")
-        .header("X-Title", "Codasaurus")
-        .json(&body)
-        .send()
-        .await?;
+        .json(&body);
+    if !config.api_key.is_empty() {
+        request = request.bearer_auth(&config.api_key);
+    }
+    if config.base_url.trim_end_matches('/') == default_base_url() {
+        request = request
+            .header("HTTP-Referer", "https://github.com/lohitkolluri/codasaurus")
+            .header("X-Title", "Codasaurus");
+    }
+    let resp = request.send().await?;
 
     let status = resp.status();
     if !status.is_success() {

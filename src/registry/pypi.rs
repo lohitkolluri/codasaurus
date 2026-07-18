@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 
 pub fn check(package: &str) -> Result<Option<bool>> {
     let url = format!("https://pypi.org/pypi/{}/json", package);
-    let client = super::CLIENT.as_ref()
+    let client = super::CLIENT
+        .as_ref()
         .context("registry HTTP client not available (failed to initialize)")?;
     let resp = client.get(&url).send()?;
     match resp.status().as_u16() {
@@ -11,5 +12,3 @@ pub fn check(package: &str) -> Result<Option<bool>> {
         _ => Ok(None),
     }
 }
-
-

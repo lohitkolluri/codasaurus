@@ -1,8 +1,8 @@
 use crate::detectors::Finding;
 use crate::parser::ParsedFile;
 use crate::registry;
-use std::sync::LazyLock;
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
 pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     let mut findings = Vec::new();
@@ -76,7 +76,8 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                             ),
                             suggestion: Some(format!(
                                 "Could not verify `{}` on {}. Run `{} {}` manually to confirm.",
-                                package, registry_name,
+                                package,
+                                registry_name,
                                 match registry_name {
                                     "npm" => "npm view",
                                     "pypi" => "pip install --dry-run",

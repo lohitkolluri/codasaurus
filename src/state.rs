@@ -13,7 +13,10 @@ pub struct ReviewState {
 
 impl ReviewState {
     pub fn open() -> Result<Self> {
-        let path = Self::db_path()?;
+        Self::open_at(Self::db_path()?)
+    }
+
+    fn open_at(path: PathBuf) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -26,8 +29,7 @@ impl ReviewState {
     }
 
     fn db_path() -> Result<PathBuf> {
-        let home = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-        Ok(home.join("codasaurus").join("review_state.db"))
+        Ok(crate::storage::data_dir().join("review_state.db"))
     }
 
     /// Lock the connection, recovering from a poisoned mutex if needed.
@@ -63,9 +65,8 @@ impl ReviewState {
     pub fn get_comment_id(&self, repo: &str, pr_number: i64) -> Result<Option<i64>> {
         let conn = self.lock();
         let key = format!("{}/{}", repo, pr_number);
-        let mut stmt = conn.prepare_cached(
-            "SELECT comment_id FROM review_comments WHERE repo_pr = ?1",
-        )?;
+        let mut stmt =
+            conn.prepare_cached("SELECT comment_id FROM review_comments WHERE repo_pr = ?1")?;
         let mut rows = stmt.query_map([&key], |row| row.get::<_, i64>(0))?;
         match rows.next() {
             Some(Ok(id)) => Ok(Some(id)),
@@ -77,9 +78,8 @@ impl ReviewState {
     pub fn get_reviewed_sha(&self, repo: &str, pr_number: i64) -> Result<Option<String>> {
         let conn = self.lock();
         let key = format!("{}/{}", repo, pr_number);
-        let mut stmt = conn.prepare_cached(
-            "SELECT head_sha FROM reviewed_commits WHERE repo_pr = ?1",
-        )?;
+        let mut stmt =
+            conn.prepare_cached("SELECT head_sha FROM reviewed_commits WHERE repo_pr = ?1")?;
         let mut rows = stmt.query_map([&key], |row| row.get::<_, String>(0))?;
         match rows.next() {
             Some(Ok(sha)) => Ok(Some(sha)),

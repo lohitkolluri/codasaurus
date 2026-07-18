@@ -124,8 +124,12 @@ pub struct PreMergeConfig {
     pub max_warnings: usize,
 }
 
-fn default_zero() -> usize { 0 }
-fn default_ten() -> usize { 10 }
+fn default_zero() -> usize {
+    0
+}
+fn default_ten() -> usize {
+    10
+}
 
 fn default_true() -> bool {
     true
@@ -211,10 +215,7 @@ pub fn load(path: Option<&str>) -> Result<Config> {
             if pb.exists() {
                 Some(pb)
             } else {
-                eprintln!(
-                    "Warning: config file '{}' not found, using defaults.",
-                    p
-                );
+                eprintln!("Warning: config file '{}' not found, using defaults.", p);
                 None
             }
         }
@@ -267,5 +268,3 @@ fn find_config() -> Result<Option<PathBuf>> {
 
     Ok(resolved)
 }
-
-

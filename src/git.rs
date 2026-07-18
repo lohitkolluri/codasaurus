@@ -34,8 +34,6 @@ pub fn get_diff_between(ref_a: &str, ref_b: &str) -> Result<String> {
     Ok(diff)
 }
 
-
-
 pub fn is_git_repo() -> bool {
     std::process::Command::new("git")
         .args(["rev-parse", "--git-dir"])

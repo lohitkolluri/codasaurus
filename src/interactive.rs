@@ -234,7 +234,9 @@ fn copy_to_clipboard(text: &str) -> bool {
     };
 
     let copied = copy_cmd(
-        std::process::Command::new("pbcopy").arg("-").stdin(std::process::Stdio::piped()),
+        std::process::Command::new("pbcopy")
+            .arg("-")
+            .stdin(std::process::Stdio::piped()),
     ) || copy_cmd(
         std::process::Command::new("xclip")
             .args(["-selection", "clipboard"])
@@ -453,7 +455,10 @@ fn run_tui(
 }
 
 fn selected_item(state: &AppState) -> Option<&TuiItem> {
-    state.filtered.get(state.selected).map(|&idx| &state.items[idx])
+    state
+        .filtered
+        .get(state.selected)
+        .map(|&idx| &state.items[idx])
 }
 
 fn snap_scroll_to_selected(state: &mut AppState) {
@@ -521,7 +526,7 @@ fn render_main(f: &mut Frame, area: Rect, state: &AppState) {
     // Content area: left pane (findings list) + right pane (detail)
     let content_chunks = Layout::horizontal([
         Constraint::Percentage(40),
-        Constraint::Length(1),  // gap
+        Constraint::Length(1), // gap
         Constraint::Percentage(59),
     ])
     .split(chunks[2]);
@@ -590,7 +595,9 @@ fn render_header(f: &mut Frame, area: Rect, state: &AppState) {
         spans.push(Span::raw("  "));
         spans.push(Span::styled(
             format!("[{} dismissed]", dimmed),
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         ));
     }
 
@@ -721,30 +728,35 @@ fn build_finding_row<'a>(idx: usize, item: &'a TuiItem, state: &AppState) -> Lis
         f.message.clone()
     };
 
-    ListItem::new(Line::from(vec![
-        Span::styled(
-            format!(" {} ", sev_char),
-            (if is_dismissing {
-                Style::default().fg(Color::DarkGray)
-            } else {
-                Style::default().fg(sev_color)
-            })
-            .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!("{}{}", f.detector, location),
-            Style::default().fg(Color::Rgb(120, 180, 240)),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            msg_display,
-            if is_dismissing {
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
-            } else {
-                Style::default().fg(Color::White)
-            },
-        ),
-    ]).style(bg))
+    ListItem::new(
+        Line::from(vec![
+            Span::styled(
+                format!(" {} ", sev_char),
+                (if is_dismissing {
+                    Style::default().fg(Color::DarkGray)
+                } else {
+                    Style::default().fg(sev_color)
+                })
+                .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{}{}", f.detector, location),
+                Style::default().fg(Color::Rgb(120, 180, 240)),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                msg_display,
+                if is_dismissing {
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::DIM)
+                } else {
+                    Style::default().fg(Color::White)
+                },
+            ),
+        ])
+        .style(bg),
+    )
 }
 
 fn render_detail_pane(f: &mut Frame, area: Rect, state: &AppState) {
@@ -802,10 +814,7 @@ fn render_detail_pane(f: &mut Frame, area: Rect, state: &AppState) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
-        Span::styled(
-            &finding.file,
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled(&finding.file, Style::default().fg(Color::DarkGray)),
         if finding.line > 0 {
             Span::styled(
                 format!(":{}", finding.line),
@@ -948,14 +957,23 @@ fn render_footer(f: &mut Frame, area: Rect, state: &AppState) {
 
 fn render_help(f: &mut Frame, area: Rect) {
     let text = Text::from(vec![
-        Line::from(Span::styled(" Help", Style::default().add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            " Help",
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
         Line::from(Span::raw("")),
         Line::from(Span::raw("  ↑/↓   j/k       Navigate findings")),
-        Line::from(Span::raw("  Enter             Toggle expanded view (suggestion + codemod)")),
+        Line::from(Span::raw(
+            "  Enter             Toggle expanded view (suggestion + codemod)",
+        )),
         Line::from(Span::raw("  o                 Open file in editor")),
         Line::from(Span::raw("  d                 Dismiss finding (persisted)")),
-        Line::from(Span::raw("  p                 Copy AI fix prompt to clipboard")),
-        Line::from(Span::raw("  a   b   w   i     Filter: All / Blocking / Warning / Info")),
+        Line::from(Span::raw(
+            "  p                 Copy AI fix prompt to clipboard",
+        )),
+        Line::from(Span::raw(
+            "  a   b   w   i     Filter: All / Blocking / Warning / Info",
+        )),
         Line::from(Span::raw("  Tab               Cycle through filters")),
         Line::from(Span::raw("  ?                 Toggle this help")),
         Line::from(Span::raw("  q   Esc           Quit")),
@@ -975,12 +993,11 @@ fn render_help(f: &mut Frame, area: Rect) {
         )),
     ]);
 
-    let para = Paragraph::new(text)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)),
-        );
+    let para = Paragraph::new(text).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan)),
+    );
 
     let inner = Rect {
         x: area.x + 4,

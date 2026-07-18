@@ -1,6 +1,6 @@
 use anyhow::Result;
-use std::sync::LazyLock;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 /// A parsed source file with imports and structure info
 #[derive(Debug, Clone)]
@@ -95,16 +95,15 @@ pub fn parse_unified_diff(path: &str, patch: &str) -> Result<ParsedFile> {
 
 fn parse_new_hunk_start(header: &str) -> Option<usize> {
     let new_range = header.split_whitespace().nth(2)?;
-    new_range
-        .strip_prefix('+')?
-        .split(',')
-        .next()?
-        .parse()
-        .ok()
+    new_range.strip_prefix('+')?.split(',').next()?.parse().ok()
 }
 
-fn parse_lines(path: &str, language: String, raw_content: String, lines: Vec<SourceLine>) -> ParsedFile {
-
+fn parse_lines(
+    path: &str,
+    language: String,
+    raw_content: String,
+    lines: Vec<SourceLine>,
+) -> ParsedFile {
     let imports = extract_imports(&language, &lines);
 
     ParsedFile {
@@ -250,9 +249,7 @@ static IMPORT_PATTERNS: LazyLock<HashMap<&'static str, Vec<ImportPattern>>> = La
         "ruby",
         vec![
             ImportPattern::new(r#"^\s*require\s+['"](?P<pkg>[^'"]+)['"]"#),
-            ImportPattern::new(
-                r#"^\s*require_relative\s+['"](?P<pkg>[^'"]+)['"]"#,
-            ),
+            ImportPattern::new(r#"^\s*require_relative\s+['"](?P<pkg>[^'"]+)['"]"#),
             ImportPattern::new(r#"^\s*gem\s+['"](?P<pkg>[^'"]+)['"]"#),
         ],
     );
@@ -286,8 +283,6 @@ pub fn is_supported(path: &str) -> bool {
     let lang = detect_language(path);
     supported_languages().contains(&lang.as_str())
 }
-
-
 
 #[cfg(test)]
 mod tests {

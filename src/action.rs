@@ -1,5 +1,8 @@
 use anyhow::{Context, Result};
 
+const PR_FILES_PER_PAGE: usize = 100;
+const MAX_PR_FILE_PAGES: usize = 30;
+
 /// Run codasaurus as a GitHub Action, posting findings as a Check Run with annotations.
 ///
 /// Reads the GitHub event payload from `GITHUB_EVENT_PATH`, fetches the PR diff,
@@ -10,8 +13,8 @@ pub fn run_check_run(event_path: Option<String>) -> Result<()> {
         .or_else(|| std::env::var("GITHUB_EVENT_PATH").ok())
         .context("No event path provided and GITHUB_EVENT_PATH not set")?;
 
-    let token = std::env::var("GITHUB_TOKEN")
-        .context("GITHUB_TOKEN environment variable not set")?;
+    let token =
+        std::env::var("GITHUB_TOKEN").context("GITHUB_TOKEN environment variable not set")?;
 
     let event_json =
         std::fs::read_to_string(&event_path).context("Failed to read GITHUB_EVENT_PATH file")?;
@@ -19,9 +22,9 @@ pub fn run_check_run(event_path: Option<String>) -> Result<()> {
     let event: serde_json::Value =
         serde_json::from_str(&event_json).context("Failed to parse GitHub event JSON")?;
 
-    let pr = event["pull_request"]
-        .as_object()
-        .context("Not a pull_request event — GITHUB_EVENT_PATH does not contain a pull_request payload")?;
+    let pr = event["pull_request"].as_object().context(
+        "Not a pull_request event — GITHUB_EVENT_PATH does not contain a pull_request payload",
+    )?;
 
     let repo_full_name = event["repository"]["full_name"]
         .as_str()
@@ -45,35 +48,27 @@ pub fn run_check_run(event_path: Option<String>) -> Result<()> {
     let repo_api = format!("https://api.github.com/repos/{}", repo_full_name);
     let auth_header = format!("Bearer {}", token);
 
-    // Fetch the list of changed files in the PR
-    let files_text: String = client
-        .get(format!("{}/pulls/{}/files", repo_api, pr_number))
-        .header("Authorization", &auth_header)
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "codasaurus/0.1.0")
-        .send()
-        .context("Failed to fetch PR files from GitHub API")?
-        .text()
-        .context("Failed to read PR files response body")?;
+    let files = fetch_pr_files(&client, &repo_api, pr_number, &auth_header)?;
 
-    let files: Vec<serde_json::Value> = serde_json::from_str(&files_text)
-        .context("Failed to parse PR files response as JSON")?;
-
-    // Run detectors on each changed file's patch
-    let mut findings = crate::detectors::Findings::new();
-    let config = crate::config::Config::default();
+    // Parse every changed file before running detectors so cross-file checks
+    // (such as imports versus dependency manifests) have complete context.
+    let mut parsed_files = Vec::new();
+    let config = crate::config::load(None).unwrap_or_default();
     for file in &files {
         let filename = file["filename"].as_str().unwrap_or("unknown");
         let patch = match file["patch"].as_str() {
             Some(p) if !p.is_empty() && p.len() < 100_000 => p,
             _ => continue,
         };
-        if let Ok(parsed) = crate::parser::parse_file(filename, patch) {
-            findings.extend(
-                crate::detectors::run_all(&[parsed], &config).findings,
-            );
+        if let Ok(parsed) = crate::parser::parse_unified_diff(filename, patch) {
+            parsed_files.push(parsed);
         }
     }
+    let findings = if parsed_files.is_empty() {
+        crate::detectors::Findings::new()
+    } else {
+        crate::detectors::run_all(&parsed_files, &config)
+    };
 
     // Create the check run in "in_progress" status
     let check_run: serde_json::Value = client
@@ -88,6 +83,8 @@ pub fn run_check_run(event_path: Option<String>) -> Result<()> {
         }))
         .send()
         .context("Failed to create check run")?
+        .error_for_status()
+        .context("GitHub rejected check run creation")?
         .json()
         .context("Failed to parse check run creation response")?;
 
@@ -122,8 +119,7 @@ pub fn run_check_run(event_path: Option<String>) -> Result<()> {
         .collect();
 
     let truncated = all_annotations.len() > 50;
-    let annotations: Vec<serde_json::Value> =
-        all_annotations.into_iter().take(50).collect();
+    let annotations: Vec<serde_json::Value> = all_annotations.into_iter().take(50).collect();
 
     // Update the check run with completed status and annotations
     let mut summary = format!(
@@ -135,10 +131,7 @@ pub fn run_check_run(event_path: Option<String>) -> Result<()> {
     }
 
     client
-        .patch(format!(
-            "{}/check-runs/{}",
-            repo_api, check_run_id
-        ))
+        .patch(format!("{}/check-runs/{}", repo_api, check_run_id))
         .header("Authorization", &auth_header)
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", "codasaurus/0.1.0")
@@ -152,7 +145,43 @@ pub fn run_check_run(event_path: Option<String>) -> Result<()> {
             }
         }))
         .send()
-        .context("Failed to update check run")?;
+        .context("Failed to update check run")?
+        .error_for_status()
+        .context("GitHub rejected check run update")?;
 
     Ok(())
+}
+
+fn fetch_pr_files(
+    client: &reqwest::blocking::Client,
+    repo_api: &str,
+    pr_number: i64,
+    auth_header: &str,
+) -> Result<Vec<serde_json::Value>> {
+    let mut files = Vec::new();
+
+    for page in 1..=MAX_PR_FILE_PAGES {
+        let response = client
+            .get(format!(
+                "{repo_api}/pulls/{pr_number}/files?per_page={PR_FILES_PER_PAGE}&page={page}"
+            ))
+            .header("Authorization", auth_header)
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "codasaurus/0.1.0")
+            .send()
+            .context("Failed to fetch PR files from GitHub API")?
+            .error_for_status()
+            .context("GitHub rejected PR-file request")?;
+        let page_files: Vec<serde_json::Value> = response
+            .json()
+            .context("Failed to parse PR files response as JSON")?;
+        let is_last_page = page_files.len() < PR_FILES_PER_PAGE;
+        files.extend(page_files);
+
+        if is_last_page || page == MAX_PR_FILE_PAGES {
+            return Ok(files);
+        }
+    }
+
+    unreachable!("the bounded page loop always returns")
 }
