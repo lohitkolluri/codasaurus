@@ -468,7 +468,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     // repository-level and have no source line, so an empty inline-comment list
     // must never be treated as a clean review.
     if findings.is_empty() {
-        let body = "## 🦕 Codasaurus Review\n\n✅ **No issues found** — auto-approved!\n\n<sub>🦕 Reviewed by [Codasaurus](https://github.com/lohitkolluri/codasaurus)</sub>";
+        let body = "✅ No issues found — approved.";
         let review = serde_json::json!({"body": body, "event": "APPROVE"});
         let approve_url = format!(
             "https://api.github.com/repos/{}/pulls/{}/reviews",
@@ -631,7 +631,7 @@ fn build_comment_body(finding: &Finding) -> String {
     let mut body = format!("**{} {}**\n\n{}\n\n{}", icon, title, finding.message, impact);
 
     if let Some(ref s) = finding.suggestion {
-        let _ = write!(body, "\n\n**Fix:** {}", s);
+        let _ = write!(body, "\n\n**💡 Suggestion:** {}", s);
     }
     if let Some(ref c) = finding.codemod {
         let _ = write!(body, "\n```suggestion\n{}\n```", c);
