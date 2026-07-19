@@ -2,37 +2,36 @@
 /// The SQLite schema is active; PostgreSQL schema is defined as a constant
 /// for future use once the runtime driver registration is resolved.
 
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
-/// Active SQLite schema.
-const SQLITE_SCHEMA: &str = "
+const POSTGRES_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS app_config (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS repos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     github_id BIGINT UNIQUE,
     full_name TEXT NOT NULL,
     owner TEXT NOT NULL,
     name TEXT NOT NULL,
     default_branch TEXT,
     installation_id BIGINT NOT NULL,
-    private INTEGER NOT NULL DEFAULT 0,
-    active INTEGER NOT NULL DEFAULT 0,
+    private BOOLEAN NOT NULL DEFAULT FALSE,
+    active BOOLEAN NOT NULL DEFAULT FALSE,
     config_json TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_repos_owner ON repos(owner);
 CREATE INDEX IF NOT EXISTS idx_repos_active ON repos(active);
 
 CREATE TABLE IF NOT EXISTS reviews (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    repo_id INTEGER NOT NULL REFERENCES repos(id),
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    repo_id BIGINT NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
     pr_number BIGINT NOT NULL,
     pr_title TEXT,
     pr_author TEXT,
@@ -42,18 +41,19 @@ CREATE TABLE IF NOT EXISTS reviews (
     status TEXT NOT NULL DEFAULT 'pending'
         CHECK (status IN ('pending', 'running', 'passed', 'failed', 'error')),
     summary_json TEXT,
-    started_at TEXT,
-    completed_at TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_reviews_repo ON reviews(repo_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status);
 CREATE INDEX IF NOT EXISTS idx_reviews_created ON reviews(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reviews_repo_status ON reviews(repo_id, status, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS findings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    review_id INTEGER NOT NULL REFERENCES reviews(id),
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    review_id BIGINT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
     fingerprint TEXT UNIQUE,
     file_path TEXT NOT NULL,
     line_start INTEGER,
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS findings (
     code_snippet TEXT,
     context TEXT,
     category TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_findings_review ON findings(review_id);
@@ -77,40 +77,41 @@ CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
 CREATE INDEX IF NOT EXISTS idx_findings_fingerprint ON findings(fingerprint);
 
 CREATE TABLE IF NOT EXISTS dismissals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fingerprint TEXT NOT NULL REFERENCES findings(fingerprint),
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    fingerprint TEXT NOT NULL REFERENCES findings(fingerprint) ON DELETE CASCADE,
     dismissed_by TEXT,
     reason TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(fingerprint)
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     event_type TEXT NOT NULL,
     actor TEXT,
     target_type TEXT,
     target_id BIGINT,
     metadata_json TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_log(event_type);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_event_created ON audit_log(event_type, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin', 'viewer')),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
     email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    expires_at TEXT NOT NULL
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
@@ -118,18 +119,18 @@ CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
 const MIGRATION_VERSION: i64 = 2;
 
-pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS schema_version (
             version BIGINT PRIMARY KEY,
-            applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )",
     )
     .execute(pool)
     .await?;
 
     let exists: bool = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM schema_version WHERE version = ?",
+        "SELECT COUNT(*) FROM schema_version WHERE version = $1",
     )
     .bind(MIGRATION_VERSION)
     .fetch_one(pool)
@@ -140,22 +141,11 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         return Ok(());
     }
 
-    for statement in split_sql(SQLITE_SCHEMA) {
+    for statement in split_sql(POSTGRES_SCHEMA) {
         sqlx::query(&statement).execute(pool).await?;
     }
 
-    // SQLite optimizations
-    for pragma in [
-        "PRAGMA journal_mode = WAL",
-        "PRAGMA synchronous = NORMAL",
-        "PRAGMA cache_size = -8000",
-        "PRAGMA busy_timeout = 5000",
-        "PRAGMA foreign_keys = ON",
-    ] {
-        let _ = sqlx::query(pragma).execute(pool).await;
-    }
-
-    sqlx::query("INSERT INTO schema_version (version) VALUES (?)")
+    sqlx::query("INSERT INTO schema_version (version) VALUES ($1)")
         .bind(MIGRATION_VERSION)
         .execute(pool)
         .await?;
