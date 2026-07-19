@@ -1,0 +1,76 @@
+- generic [ref=f2e2]:
+  - generic [ref=f2e3]:
+    - link "Skip to content" [ref=f2e4] [cursor=pointer]:
+      - /url: "#start-of-content"
+    - banner [ref=f2e6]:
+      - heading "Navigation Menu" [level=2] [ref=f2e7]
+      - generic [ref=f2e8]:
+        - link "Homepage" [ref=f2e10] [cursor=pointer]:
+          - /url: /
+        - generic [ref=f2e13]:
+          - navigation "Global" [ref=f2e16]:
+            - list [ref=f2e17]:
+              - listitem [ref=f2e18]:
+                - button "Platform" [ref=f2e20] [cursor=pointer]
+              - listitem [ref=f2e23]:
+                - button "Solutions" [ref=f2e25] [cursor=pointer]
+              - listitem [ref=f2e28]:
+                - button "Resources" [ref=f2e30] [cursor=pointer]
+              - listitem [ref=f2e33]:
+                - button "Open Source" [ref=f2e35] [cursor=pointer]
+              - listitem [ref=f2e38]:
+                - button "Enterprise" [ref=f2e40] [cursor=pointer]
+              - listitem [ref=f2e43]:
+                - link "Pricing" [ref=f2e44] [cursor=pointer]:
+                  - /url: https://github.com/pricing
+          - generic [ref=f2e46]:
+            - button "Search or jump to…" [ref=f2e49] [cursor=pointer]
+            - link "Sign in" [ref=f2e54] [cursor=pointer]:
+              - /url: /login?return_to=https%3A%2F%2Fgithub.com%2Fsettings%2Fapps%2Fnew
+            - link "Sign up" [ref=f2e55] [cursor=pointer]:
+              - /url: /signup?ref_cta=Sign+up&ref_loc=header+logged+out&ref_page=%2Fsettings%2Fapps%2Fnew&source=header
+            - button "Appearance settings" [ref=f2e58] [cursor=pointer]
+  - main [ref=f2e61]:
+    - generic [ref=f2e63]:
+      - heading "Invalid GitHub App configuration" [level=2] [ref=f2e65]
+      - paragraph [ref=f2e66]: The configuration does not appear to be a valid GitHub App manifest.
+      - list [ref=f2e67]:
+        - listitem [ref=f2e68]:
+          - generic [ref=f2e69]:
+            - strong [ref=f2e72]: Error
+            - strong [ref=f2e73]: redirect_url must be a valid URL
+  - contentinfo [ref=f2e74]:
+    - heading "Footer" [level=2] [ref=f2e75]
+    - generic [ref=f2e76]:
+      - generic [ref=f2e77]:
+        - link "GitHub Homepage" [ref=f2e78] [cursor=pointer]:
+          - /url: https://github.com
+        - generic [ref=f2e81]: © 2026 GitHub, Inc.
+      - navigation "Footer" [ref=f2e82]:
+        - heading "Footer navigation" [level=3] [ref=f2e83]
+        - list "Footer navigation" [ref=f2e84]:
+          - listitem [ref=f2e85]:
+            - link "Terms" [ref=f2e86] [cursor=pointer]:
+              - /url: https://docs.github.com/site-policy/github-terms/github-terms-of-service
+          - listitem [ref=f2e87]:
+            - link "Privacy" [ref=f2e88] [cursor=pointer]:
+              - /url: https://docs.github.com/site-policy/privacy-policies/github-privacy-statement
+          - listitem [ref=f2e89]:
+            - link "Security" [ref=f2e90] [cursor=pointer]:
+              - /url: https://github.com/security
+          - listitem [ref=f2e91]:
+            - link "Status" [ref=f2e92] [cursor=pointer]:
+              - /url: https://www.githubstatus.com/
+          - listitem [ref=f2e93]:
+            - link "Community" [ref=f2e94] [cursor=pointer]:
+              - /url: https://github.community/
+          - listitem [ref=f2e95]:
+            - link "Docs" [ref=f2e96] [cursor=pointer]:
+              - /url: https://docs.github.com/
+          - listitem [ref=f2e97]:
+            - link "Contact" [ref=f2e98] [cursor=pointer]:
+              - /url: https://support.github.com?tags=dotcom-footer
+          - listitem [ref=f2e99]:
+            - button "Manage cookies" [ref=f2e101] [cursor=pointer]
+          - listitem [ref=f2e102]:
+            - button "Do not share my personal information" [ref=f2e104] [cursor=pointer]

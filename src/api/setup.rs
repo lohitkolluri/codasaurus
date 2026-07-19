@@ -624,7 +624,7 @@ async fn github_callback_page(
         const r = await fetch('/api/setup/github/callback', {{
           method: 'POST',
           headers: {{ 'Content-Type': 'application/json' }},
-          body: JSON.stringify({{\"code\": "{}"}})
+          body: JSON.stringify({{"code": "{}"}})
         }});
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || 'Request failed');

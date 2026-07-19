@@ -1,0 +1,3 @@
+[     451ms] [ERROR] Failed to load resource: the server responded with a status of 400 () @ https://codasaurus.onrender.com/api/setup/github/callback:0
+[   28573ms] [ERROR] Failed to load resource: the server responded with a status of 400 () @ https://codasaurus.onrender.com/api/setup/github/callback:0
+[  306861ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ https://codasaurus.onrender.com/#/setup/llm:0
