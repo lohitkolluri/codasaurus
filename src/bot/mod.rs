@@ -78,10 +78,10 @@ impl WebhookContext {
     }
 }
 
-static BOT_CONFIG: std::sync::OnceLock<BotConfig> = std::sync::OnceLock::new();
+static BOT_CONFIG: std::sync::RwLock<Option<BotConfig>> = std::sync::RwLock::new(None);
 
 pub fn set_bot_config(config: BotConfig) {
-    let _ = BOT_CONFIG.set(config);
+    *BOT_CONFIG.write().expect("BOT_CONFIG lock poisoned") = Some(config);
 }
 
 #[derive(Deserialize)]
@@ -116,7 +116,11 @@ pub(crate) async fn handle_webhook(
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let config = BOT_CONFIG.get().ok_or(StatusCode::INTERNAL_SERVER_ERROR)?.clone();
+    let config = BOT_CONFIG
+        .read()
+        .expect("BOT_CONFIG lock poisoned")
+        .clone()
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let event = headers.get("x-github-event").and_then(|v| v.to_str().ok()).unwrap_or("");
     let delivery = headers.get("x-github-delivery").and_then(|v| v.to_str().ok()).unwrap_or("");

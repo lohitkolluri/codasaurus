@@ -66,6 +66,13 @@ pub async fn serve(
 fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> Router {
     let api = api::router().with_state(AppState { pool });
 
+    if bot_config.as_ref().map(|c| c.webhook_secret.is_empty()).unwrap_or(true) {
+        eprintln!("  ⚠ Webhook secret is empty — all GitHub events will return 401");
+        eprintln!("  → Run the setup wizard to configure your GitHub App");
+    } else {
+        println!("  GitHub bot configured");
+    }
+
     let bot_cfg = bot_config.unwrap_or_else(|| bot::BotConfig {
         app_id: String::new(),
         private_key: String::new(),

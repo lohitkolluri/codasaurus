@@ -4,6 +4,7 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::bot;
 use crate::db;
 
 use super::errors::ApiError;
@@ -686,6 +687,18 @@ async fn github_callback(
         .await?;
     db::config::set_config(&state.pool, "github_app_name", &app_name).await?;
     db::config::set_config(&state.pool, "github_app_slug", &slug).await?;
+
+    // Update the in-memory bot config so the webhook handler picks up the
+    // new credentials immediately without requiring a server restart.
+    let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
+    let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(3000);
+    bot::set_bot_config(bot::BotConfig {
+        app_id: app_id.clone(),
+        private_key: pem,
+        webhook_secret: webhook_secret.clone(),
+        host,
+        port,
+    });
 
     let install_url = format!("https://github.com/apps/{}/installations/new", slug);
 
