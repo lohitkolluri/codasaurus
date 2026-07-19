@@ -206,8 +206,21 @@
     margin: 0 0 16px 0;
   }
   .detector-grid {
-    display: flex;
-    flex-direction: column;
+    max-height: 320px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-muted) var(--bg-secondary);
+  }
+  .detector-grid::-webkit-scrollbar {
+    width: 6px;
+  }
+  .detector-grid::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+    border-radius: 3px;
+  }
+  .detector-grid::-webkit-scrollbar-thumb {
+    background: var(--text-muted);
+    border-radius: 3px;
   }
   .detector-row {
     display: flex;
