@@ -1312,13 +1312,37 @@ mod tests {
     use super::*;
     use crate::detectors::Finding;
 
-    fn f(detector: &str, severity: &'static str, file: &str, line: usize, msg: &str, sug: Option<&str>) -> Finding {
-        Finding { detector: detector.into(), severity, file: file.into(), line, column: 0, message: msg.into(), suggestion: sug.map(|s| s.into()), evidence: None, codemod: None }
+    fn f(
+        detector: &str,
+        severity: &'static str,
+        file: &str,
+        line: usize,
+        msg: &str,
+        sug: Option<&str>,
+    ) -> Finding {
+        Finding {
+            detector: detector.into(),
+            severity,
+            file: file.into(),
+            line,
+            column: 0,
+            message: msg.into(),
+            suggestion: sug.map(|s| s.into()),
+            evidence: None,
+            codemod: None,
+        }
     }
 
     #[test]
     fn comment_body_hallucinated_import() {
-        let body = build_comment_body(&f("hallucinated-imports", "blocking", "src/a.ts", 5, "Package `fakelib` not found on npm.", Some("Check npmjs.com")));
+        let body = build_comment_body(&f(
+            "hallucinated-imports",
+            "blocking",
+            "src/a.ts",
+            5,
+            "Package `fakelib` not found on npm.",
+            Some("Check npmjs.com"),
+        ));
         assert!(body.contains("Package Doesn't Exist"));
         assert!(body.contains("fakelib"));
         assert!(body.contains("💡 Suggestion"));
@@ -1326,14 +1350,28 @@ mod tests {
 
     #[test]
     fn comment_body_secret() {
-        let body = build_comment_body(&f("secrets", "blocking", "src/x.ts", 10, "API Key detected", Some("Use env vars")));
+        let body = build_comment_body(&f(
+            "secrets",
+            "blocking",
+            "src/x.ts",
+            10,
+            "API Key detected",
+            Some("Use env vars"),
+        ));
         assert!(body.contains("Credential in Source"));
         assert!(body.contains("hardcoded"));
     }
 
     #[test]
     fn comment_body_vulnerability() {
-        let body = build_comment_body(&f("vulnerabilities", "warning", "pkg.json", 7, "GHSA-123: desc", Some("Update `lodash`")));
+        let body = build_comment_body(&f(
+            "vulnerabilities",
+            "warning",
+            "pkg.json",
+            7,
+            "GHSA-123: desc",
+            Some("Update `lodash`"),
+        ));
         assert!(body.contains("Known Vulnerability"));
         assert!(body.contains("lodash"));
         assert!(body.contains("GHSA-123"));
@@ -1341,16 +1379,44 @@ mod tests {
 
     #[test]
     fn comment_body_todo() {
-        let body = build_comment_body(&f("todo-leaks", "warning", "src/a.ts", 15, "// TODO: fix", Some("Complete it")));
+        let body = build_comment_body(&f(
+            "todo-leaks",
+            "warning",
+            "src/a.ts",
+            15,
+            "// TODO: fix",
+            Some("Complete it"),
+        ));
         assert!(body.contains("Incomplete Code"));
     }
 
     #[test]
     fn merge_vulns_collapses_same_line() {
         let findings = vec![
-            f("vulnerabilities", "warning", "x.json", 1, "CVE-1: d1", Some("Up `lodash`")),
-            f("vulnerabilities", "warning", "x.json", 1, "CVE-2: d2", Some("Up `lodash`")),
-            f("hallucinated-imports", "blocking", "a.ts", 5, "not found", Some("Check npm")),
+            f(
+                "vulnerabilities",
+                "warning",
+                "x.json",
+                1,
+                "CVE-1: d1",
+                Some("Up `lodash`"),
+            ),
+            f(
+                "vulnerabilities",
+                "warning",
+                "x.json",
+                1,
+                "CVE-2: d2",
+                Some("Up `lodash`"),
+            ),
+            f(
+                "hallucinated-imports",
+                "blocking",
+                "a.ts",
+                5,
+                "not found",
+                Some("Check npm"),
+            ),
         ];
         let merged = merge_vulnerability_findings(&findings);
         assert_eq!(merged.len(), 2); // 2 vulns merged + 1 non-vuln
@@ -1359,8 +1425,22 @@ mod tests {
     #[test]
     fn merge_vulns_keeps_single() {
         let findings = vec![
-            f("vulnerabilities", "warning", "x.json", 1, "CVE-1: d1", Some("Up `lodash`")),
-            f("vulnerabilities", "blocking", "y.json", 2, "CVE-2: d2", Some("Up `zod`")),
+            f(
+                "vulnerabilities",
+                "warning",
+                "x.json",
+                1,
+                "CVE-1: d1",
+                Some("Up `lodash`"),
+            ),
+            f(
+                "vulnerabilities",
+                "blocking",
+                "y.json",
+                2,
+                "CVE-2: d2",
+                Some("Up `zod`"),
+            ),
         ];
         let merged = merge_vulnerability_findings(&findings);
         assert_eq!(merged.len(), 2); // different files, NOT merged
