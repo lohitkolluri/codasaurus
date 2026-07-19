@@ -190,7 +190,7 @@ pub async fn create_finding(
 }
 
 pub async fn get_stats(pool: &DbPool) -> Result<serde_json::Value, sqlx::Error> {
-    let total_repos: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repos")
+    let total_repos: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repos WHERE active = 1")
         .fetch_one(&pool.0)
         .await?;
 
