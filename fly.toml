@@ -1,5 +1,5 @@
 app = "codasaurus"
-primary_region = "iad"
+primary_region = "sin"
 
 [build]
   dockerfile = "Dockerfile"

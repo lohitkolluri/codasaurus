@@ -1,15 +1,38 @@
+# Git
 .git/
 .gitignore
+.gitattributes
+
+# Build artifacts
 target/
+node_modules/
+svelte-dashboard/dist/
+*.rs.bk
+
+# Docker
 Dockerfile
 .dockerignore
+docker-compose.yml
+
+# Dev & CI
+.github/
+.omo/
+Triage/
+TakeHomeAssessment/
+KubeWise/
+Makefile
+
+# Docs & assets (not needed at build time)
 *.md
 docs/
-.omo/
-.github/
 assets/
 action/
-tests/
-Makefile
-docker-compose.yml
-# Cargo.lock is required for reproducible builds — do not exclude
+
+# Secrets
+.env
+.env.example
+.envsitter/
+
+# OS junk
+.DS_Store
+Thumbs.db

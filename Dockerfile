@@ -1,28 +1,41 @@
-# Stage 1: Build Svelte SPA
+# ── Stage 1: Build Svelte SPA ──────────────────────────────────
 FROM node:20-alpine AS frontend
 WORKDIR /app/svelte-dashboard
+# Separate package.json for cache — only re-runs npm ci when deps change
 COPY svelte-dashboard/package*.json ./
 RUN npm ci
 COPY svelte-dashboard/ ./
 RUN npm run build
 
-# Stage 2: Build Rust binary
-# Keep the container compiler aligned with the MSRV of the locked dependency graph.
+# ── Stage 2: Build Rust binary ──────────────────────────────────
 FROM rust:1.88-slim-bookworm AS backend
-RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY . .
-# Copy pre-built Svelte assets so build.rs can skip npm
-COPY --from=frontend /app/svelte-dashboard/dist/ svelte-dashboard/dist/
-# Environment variable tells build.rs the frontend is already built
+
+# Cache cargo dependencies — only re-download on Cargo.lock changes
+COPY Cargo.toml Cargo.lock ./
 ENV CODASAURUS_SKIP_FRONTEND_BUILD=1
+# Create dummy src so cargo can pre-build dependencies
+RUN mkdir -p src && echo "fn main() {}" > src/main.rs \
+    && echo "" > src/lib.rs \
+    && cargo build --release --locked 2>&1 | tail -1 \
+    && rm -rf src
+
+# Now copy the real source — this invalidates only the final compilation
+COPY . .
+COPY --from=frontend /app/svelte-dashboard/dist/ svelte-dashboard/dist/
 RUN cargo build --release --locked
 
-# Stage 3: Runtime
+# ── Stage 3: Runtime ────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN groupadd -r codasaurus --gid 65532 && useradd -r -g codasaurus --uid 65532 codasaurus
-RUN mkdir -p /data && chown -R 65532:65532 /data
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN groupadd -r codasaurus --gid 65532 \
+    && useradd -r -g codasaurus --uid 65532 codasaurus \
+    && mkdir -p /data && chown -R 65532:65532 /data
 WORKDIR /app
 COPY --from=frontend /app/svelte-dashboard/dist/ /app/svelte-dashboard/dist/
 COPY --from=backend /app/target/release/codasaurus /usr/local/bin/codasaurus
