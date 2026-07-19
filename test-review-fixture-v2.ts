@@ -1,4 +1,4 @@
-// Test file for Codasaurus review — v2
+// Test file for Codasaurus review — v2 (spam reduction test)
 // Contains multiple intentional issues across different detectors
 
 import { z } from "zod"; // phantom dep: zod used but not in package.json
