@@ -40,9 +40,9 @@ fn render_terminal(findings: &Findings) {
     );
     println!();
 
-    // Sort findings by file then line (indirect sort to avoid cloning)
+    // Sort findings by file then line (indirect sort to avoid cloning the whole Vec)
     let mut indices: Vec<usize> = (0..findings.findings.len()).collect();
-    indices.sort_by(|&a, &b| {
+    indices.sort_unstable_by(|&a, &b| {
         findings.findings[a]
             .file
             .cmp(&findings.findings[b].file)

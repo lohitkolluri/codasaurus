@@ -95,7 +95,7 @@ pub fn detect_slop(
             line: 0,
             column: 0,
             message: format!(
-                "🤖 Possible AI-generated PR (score: {}/10). {}",
+                "Possible AI-generated PR (score: {}/10). {}",
                 score,
                 reasons.join("; ")
             ),

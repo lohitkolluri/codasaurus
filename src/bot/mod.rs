@@ -29,7 +29,8 @@ pub async fn serve(config: BotConfig) -> Result<()> {
         .route("/health", get(health))
         .route("/webhook", post(handle_webhook))
         .with_state(config)
-        .layer(RequestBodyLimitLayer::new(1024 * 1024));
+        .layer(RequestBodyLimitLayer::new(1024 * 1024))
+        .layer(tower_http::trace::TraceLayer::new_for_http());
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -149,7 +150,11 @@ async fn handle_webhook(
             .and_then(|c| c.get("body").and_then(|b| b.as_str()))
             .unwrap_or("");
         let is_review_cmd = comment_body.contains("@codasaurus review")
-            || comment_body.contains("@codasaurus full review");
+            || comment_body.contains("@codasaurus full review")
+            || comment_body.contains("@codasaurus-bot review")
+            || comment_body.contains("@codasaurus-bot full review");
+        let is_ignore_cmd = comment_body.contains("@codasaurus-bot ignore")
+            || comment_body.contains("@codasaurus ignore");
 
         if is_review_cmd {
             let is_pr = payload
@@ -210,6 +215,58 @@ async fn handle_webhook(
                     if let Err(e) = review::review_pr(&token, repo_name, &wrapped).await {
                         eprintln!("  Review error: {}", e);
                     }
+                });
+            }
+        } else if is_ignore_cmd {
+            let is_pr = payload
+                .issue
+                .as_ref()
+                .and_then(|i| i.get("pull_request"))
+                .is_some();
+            if is_pr {
+                let cfg = config.clone();
+                let inst_id = payload.installation.as_ref().map(|i| i.id);
+                let pr_number = payload
+                    .issue
+                    .as_ref()
+                    .and_then(|i| i["number"].as_i64())
+                    .unwrap_or(0);
+                let repo_full_name = payload
+                    .repo
+                    .as_ref()
+                    .and_then(|r| r["full_name"].as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                tokio::spawn(async move {
+                    let token = match auth::get_installation_token(&cfg, inst_id).await {
+                        Ok(t) => t,
+                        Err(e) => {
+                            eprintln!("  Auth error: {}", e);
+                            return;
+                        }
+                    };
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(30))
+                        .connect_timeout(std::time::Duration::from_secs(10))
+                        .build()
+                        .unwrap_or_else(|_| reqwest::Client::new());
+                    let url = format!(
+                        "https://api.github.com/repos/{}/issues/{}/comments",
+                        repo_full_name, pr_number
+                    );
+                    let body = "👋 Codasaurus ignore is now available as a placeholder. \
+                        To dismiss specific findings, use `@codasaurus-bot dismiss <fingerprint>` \
+                        or reply to an inline comment with `@codasaurus-bot ignore`. \
+                        Full per-finding dismissal will be available in a future release.";
+                    let _ = client
+                        .post(&url)
+                        .header("Authorization", format!("Bearer {}", token))
+                        .header("Accept", "application/vnd.github+json")
+                        .header("User-Agent", concat!("codasaurus/", env!("CARGO_PKG_VERSION")))
+                        .json(&serde_json::json!({"body": body}))
+                        .send()
+                        .await;
                 });
             }
         }

@@ -157,6 +157,8 @@ async fn post_or_update_comment(
         repo_name, pr_number
     );
 
+    let headers = github_api_headers(auth_header);
+
     if let Some(ref s) = state {
         if let Ok(Some(comment_id)) = s.get_comment_id(repo_name, pr_number) {
             let update_url = format!(
@@ -170,12 +172,7 @@ async fn post_or_update_comment(
                 || async {
                     client
                         .patch(&update_url)
-                        .header("Authorization", auth_header)
-                        .header("Accept", "application/vnd.github+json")
-                        .header(
-                            "User-Agent",
-                            concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
-                        )
+                        .headers(headers.clone())
                         .json(&serde_json::json!({"body": body}))
                         .send()
                         .await
@@ -202,12 +199,7 @@ async fn post_or_update_comment(
         || async {
             client
                 .post(&url)
-                .header("Authorization", auth_header)
-                .header("Accept", "application/vnd.github+json")
-                .header(
-                    "User-Agent",
-                    concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
-                )
+                .headers(headers.clone())
                 .json(&serde_json::json!({"body": body}))
                 .send()
                 .await?
@@ -880,6 +872,68 @@ fn build_review_body(
         let _ = writeln!(body);
     }
 
+    let mut vuln_by_pkg: BTreeMap<String, Vec<&Finding>> = BTreeMap::new();
+    for f in &findings.findings {
+        if f.detector != "vulnerabilities" {
+            continue;
+        }
+        // Suggestion format: "Update package `{package}` to the latest version to fix {CVE-ID}."
+        let pkg = match f.suggestion.as_ref().and_then(|s| s.split('`').nth(1)) {
+            Some(p) => p.to_string(),
+            None => continue,
+        };
+        vuln_by_pkg.entry(pkg).or_default().push(f);
+    }
+
+    if !vuln_by_pkg.is_empty() {
+        let _ = writeln!(body, "<details><summary>📦 **Package Vulnerabilities** ({} packages)</summary>", vuln_by_pkg.len());
+        let _ = writeln!(body);
+        for (pkg, pkg_findings) in &vuln_by_pkg {
+            let max_sev = pkg_findings
+                .iter()
+                .map(|f| f.severity)
+                .max_by_key(|s| match *s {
+                    "blocking" => 2,
+                    "warning" => 1,
+                    _ => 0,
+                })
+                .unwrap_or("info");
+            let sev_icon = match max_sev {
+                "blocking" => "🔴",
+                "warning" => "🟡",
+                _ => "🔵",
+            };
+            let _ = writeln!(
+                body,
+                "**{} `{}`** — {} vulnerability{}",
+                sev_icon,
+                pkg,
+                pkg_findings.len(),
+                if pkg_findings.len() == 1 { "" } else { "ies" }
+            );
+            let _ = writeln!(body);
+            let _ = writeln!(body, "| CVE | Severity | Summary |");
+            let _ = writeln!(body, "| --- | --- | --- |");
+            for f in pkg_findings {
+                let cve_id = f.message.split(':').next().unwrap_or(&f.message);
+                let summary = f.message.split(':').nth(1).unwrap_or("").trim();
+                let sev_icon_row = match f.severity {
+                    "blocking" => "🔴",
+                    "warning" => "🟡",
+                    _ => "🔵",
+                };
+                let _ = writeln!(
+                    body,
+                    "| `{}` | {} {} | {} |",
+                    cve_id, sev_icon_row, f.severity, summary
+                );
+            }
+            let _ = writeln!(body);
+        }
+        let _ = writeln!(body, "</details>");
+        let _ = writeln!(body);
+    }
+
     // Pre-merge checks
     let checks = evaluate_pre_merge_checks(config, pr_title, pr_body, blocking, warnings);
     if !checks.is_empty() {
@@ -894,6 +948,44 @@ fn build_review_body(
                 check.name, check.status, check.details
             );
         }
+        let _ = writeln!(body);
+    }
+
+    // AI Fix Prompt — aggregate all fixable findings into one copyable block
+    let fixable: Vec<&Finding> = findings
+        .findings
+        .iter()
+        .filter(|f| f.suggestion.is_some() || f.codemod.is_some())
+        .collect();
+
+    if !fixable.is_empty() {
+        let _ = writeln!(
+            body,
+            "<details><summary>🤖 **AI Fix Prompt**</summary>"
+        );
+        let _ = writeln!(body);
+        let _ = writeln!(
+            body,
+            "The following findings have suggested fixes. Share this with an AI coding agent:"
+        );
+        let _ = writeln!(body);
+        let _ = writeln!(body, "```text");
+        for f in &fixable {
+            let _ = writeln!(body, "--- {}:{} [{}] ({}) ---", f.file, f.line, f.severity, f.detector);
+            let _ = writeln!(body, "{}", f.message);
+            if let Some(ref s) = f.suggestion {
+                let _ = writeln!(body, "Suggestion: {}", s);
+            }
+            if let Some(ref c) = f.codemod {
+                let _ = writeln!(body, "Patch:");
+                for line in c.lines() {
+                    let _ = writeln!(body, "{}", line);
+                }
+            }
+            let _ = writeln!(body);
+        }
+        let _ = writeln!(body, "```");
+        let _ = writeln!(body, "</details>");
         let _ = writeln!(body);
     }
 

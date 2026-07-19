@@ -24,6 +24,7 @@ static CACHE: LazyLock<RwLock<HashMap<String, (bool, Instant)>>> =
 static CLIENT: LazyLock<Option<reqwest::blocking::Client>> = LazyLock::new(|| {
     match reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(5))
+        .connect_timeout(Duration::from_secs(5))
         .pool_max_idle_per_host(5)
         .build()
     {
@@ -181,60 +182,62 @@ fn check_osv(ecosystem: &str, package: &str) -> Result<Vec<OsvVulnerability>> {
     let client = CLIENT.as_ref().ok_or_else(|| {
         anyhow::anyhow!("registry HTTP client not available (failed to initialize)")
     })?;
+
+    let body = serde_json::json!({
+        "package": {
+            "name": package,
+            "ecosystem": ecosystem
+        }
+    });
+
     let data: serde_json::Value = retry_blocking(
         &RetryConfig::api_default(),
         "osv_query",
         &is_reqwest_error_retryable,
         || {
-            let b = serde_json::json!({
-                "package": {
-                    "name": package,
-                    "ecosystem": ecosystem
-                }
-            });
             client
                 .post("https://api.osv.dev/v1/query")
-                .json(&b)
+                .json(&body)
                 .send()?
                 .json::<serde_json::Value>()
                 .map_err(Into::into)
         },
     )?;
-    let vulns = data["vulns"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| {
-                    let id = v["id"].as_str()?.to_string();
-                    let summary = v["summary"].as_str().unwrap_or("").to_string();
-                    let severity = v
-                        .get("database_specific")
-                        .and_then(|d| d.get("severity"))
-                        .and_then(|s| s.as_str())
-                        .unwrap_or("UNKNOWN")
-                        .to_string();
-                    let fixed = v["affected"].as_array().and_then(|affected| {
-                        affected.first().and_then(|a| {
-                            a["ranges"].as_array().and_then(|ranges| {
-                                ranges.first().and_then(|r| {
-                                    r["events"].as_array().and_then(|events| {
-                                        events.iter().find_map(|e| {
-                                            e["fixed"].as_str().map(|s| s.to_string())
-                                        })
-                                    })
-                                })
-                            })
-                        })
-                    });
-                    Some(OsvVulnerability {
-                        id,
-                        summary,
-                        severity,
-                        fixed_version: fixed,
-                    })
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+
+    let vulns = data["vulns"].as_array().map_or_else(Vec::new, |arr| {
+        arr.iter().filter_map(extract_osv_vuln).collect()
+    });
+
     Ok(vulns)
+}
+
+fn extract_osv_vuln(v: &serde_json::Value) -> Option<OsvVulnerability> {
+    let id = v["id"].as_str()?.to_string();
+    let summary = v["summary"].as_str().unwrap_or("").to_string();
+    let severity = v
+        .get("database_specific")
+        .and_then(|d| d.get("severity"))
+        .and_then(|s| s.as_str())
+        .unwrap_or("UNKNOWN")
+        .to_string();
+    let fixed = v["affected"]
+        .as_array()
+        .and_then(|arr| arr.first())
+        .and_then(|a| a.get("ranges"))
+        .and_then(|r| r.as_array())
+        .and_then(|ranges| ranges.first())
+        .and_then(|r| r.get("events"))
+        .and_then(|e| e.as_array())
+        .and_then(|events| {
+            events.iter().find_map(|e| {
+                e["fixed"].as_str().map(|s| s.to_string())
+            })
+        });
+
+    Some(OsvVulnerability {
+        id,
+        summary,
+        severity,
+        fixed_version: fixed,
+    })
 }

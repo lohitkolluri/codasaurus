@@ -1,10 +1,12 @@
 use crate::bot::BotConfig;
 use crate::retry::{is_reqwest_error_retryable, retry_async, RetryConfig};
 use anyhow::{Context, Result};
+use std::sync::LazyLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// Build a production-configured HTTP client with timeouts and connection pooling.
-fn build_github_client() -> anyhow::Result<reqwest::Client> {
+/// Reusable HTTP client with timeouts and connection pooling.
+/// Created once and shared across all invocations to avoid socket exhaustion.
+static GITHUB_CLIENT: LazyLock<anyhow::Result<reqwest::Client>> = LazyLock::new(|| {
     Ok(reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .connect_timeout(Duration::from_secs(10))
@@ -12,7 +14,7 @@ fn build_github_client() -> anyhow::Result<reqwest::Client> {
         .pool_idle_timeout(Duration::from_secs(90))
         .tcp_nodelay(true)
         .build()?)
-}
+});
 
 pub async fn get_installation_token(
     config: &BotConfig,
@@ -36,7 +38,9 @@ pub async fn get_installation_token(
     let jwt =
         jsonwebtoken::encode(&jwt_header, &jwt_payload, &key).context("Failed to create JWT")?;
 
-    let client = build_github_client().context("Failed to build GitHub API client")?;
+    let client = GITHUB_CLIENT
+        .as_ref()
+        .map_err(|e| anyhow::anyhow!("Failed to build GitHub API client: {}", e))?;
     let jwt_auth = format!("Bearer {}", jwt);
 
     let inst_id = if let Some(iid) = installation_id {

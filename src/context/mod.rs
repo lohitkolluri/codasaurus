@@ -6,6 +6,10 @@ use std::fmt;
 use std::io::BufRead;
 use std::path::Path;
 
+/// Maximum number of entries to walk when building repo context.
+/// Prevents O(n) full-tree walks on large repos from blocking every LLM review call.
+const MAX_WALK_ENTRIES: usize = 10_000;
+
 /// Directories whose names (lowercased) are skipped from traversal entirely.
 const SKIP_DIRS: &[&str] = &[
     "node_modules",
@@ -261,6 +265,7 @@ pub fn build_repo_context(root: &str, guidelines_override: Option<&str>) -> Opti
 
     let walker = walkdir::WalkDir::new(root_path)
         .follow_links(false)
+        .max_open(256)
         .into_iter()
         .filter_entry(|e| {
             if e.depth() == 0 {
@@ -288,7 +293,7 @@ pub fn build_repo_context(root: &str, guidelines_override: Option<&str>) -> Opti
             e.ok()
         });
 
-    for entry in walker {
+    for entry in walker.into_iter().take(MAX_WALK_ENTRIES) {
         let depth = entry.depth();
         let path = entry.path();
 

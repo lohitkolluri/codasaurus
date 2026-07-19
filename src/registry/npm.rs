@@ -8,6 +8,10 @@ pub fn check(package: &str) -> Result<Option<bool>> {
     let resp = client
         .head(&url)
         .header("Accept", "application/vnd.npm.install-v1+json")
+        .header(
+            "User-Agent",
+            concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+        )
         .send()?;
     match resp.status().as_u16() {
         200 | 301 | 302 => Ok(Some(true)),

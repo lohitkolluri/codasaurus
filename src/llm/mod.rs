@@ -241,6 +241,7 @@ pub async fn review_diff(
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
+        .connect_timeout(Duration::from_secs(10))
         .build()?;
 
     let url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));

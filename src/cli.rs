@@ -48,7 +48,7 @@ pub fn run_check(opts: CheckOptions) -> Result<Findings> {
             let path_str = p.to_string_lossy().to_string();
             collect_parsed_file(&path_str, &mut parsed_files, opts.config);
         }
-    } else if opts.staged || (opts.diff.is_none() && !opts.staged) {
+    } else if opts.staged {
         let diff_output = git::get_staged_diff()?;
         let changed_files = extract_changed_files(&diff_output)?;
         for file_path in &changed_files {

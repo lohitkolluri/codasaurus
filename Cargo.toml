@@ -52,13 +52,13 @@ walkdir = "2"
 
 # Web server (for GitHub App bot)
 axum = "0.8"
-tower-http = { version = "0.6", features = ["limit"] }
+tower-http = { version = "0.6", features = ["cors", "limit", "trace"] }
 
 # Database (for feedback learning loop)
 rusqlite = { version = "0.40", features = ["bundled"] }
 
 # JWT generation (for GitHub App auth)
-jsonwebtoken = "9"
+jsonwebtoken = { version = "9", features = ["use_pem"] }
 
 # Crypto
 subtle = "2.6"

@@ -67,7 +67,35 @@ pub fn detect(config: &Config) -> Vec<Finding> {
                         codemod: None,
                     });
                 }
-                _ => {} // SectionRule and FileRequired are checked via LLM or ignored for now
+                ExtractedRule::FileRequired { path } => {
+                    let path_str = root_path.join(path);
+                    if !path_str.exists() {
+                        findings.push(Finding {
+                            detector: "guidelines".to_string(),
+                            severity: "warning",
+                            file: gf.path.to_string_lossy().to_string(),
+                            line: 0,
+                            column: 0,
+                            message: format!("Required file `{}` not found.", path),
+                            suggestion: Some(format!("Create `{}` or update the contributing guidelines if this file is no longer required.", path)),
+                            evidence: None,
+                            codemod: None,
+                        });
+                    }
+                }
+                ExtractedRule::SectionRule { heading, text } => {
+                    findings.push(Finding {
+                        detector: "guidelines".to_string(),
+                        severity: "info",
+                        file: gf.path.to_string_lossy().to_string(),
+                        line: 0,
+                        column: 0,
+                        message: format!("Guideline section: {} — {}", heading, text.chars().take(200).collect::<String>()),
+                        suggestion: None,
+                        evidence: None,
+                        codemod: None,
+                    });
+                }
             }
         }
     }
@@ -209,7 +237,7 @@ mod tests {
         // For unit testing, we test the rule -> finding conversion logic indirectly
         let findings = detect(&config);
         // Without a git repo, this should return empty
-        assert!(findings.is_empty() || !findings.is_empty());
+        assert!(findings.is_empty());
     }
 
     #[test]

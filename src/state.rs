@@ -47,6 +47,7 @@ impl ReviewState {
              PRAGMA synchronous = NORMAL;
              PRAGMA cache_size = -8000;
              PRAGMA busy_timeout = 5000;
+             PRAGMA foreign_keys = ON;
              CREATE TABLE IF NOT EXISTS review_comments (
                 repo_pr TEXT PRIMARY KEY,
                 comment_id INTEGER NOT NULL,

@@ -54,10 +54,14 @@ pub fn detect_secrets(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                 continue;
             }
 
-            // Skip lines that are entirely inside string literals (test fixtures, example code)
-            if is_in_string_context(trimmed) {
-                continue;
-            }
+    // Skip lines that are inside string literal context (test fixtures, example code, mocks)
+    if is_in_string_context(trimmed) {
+        continue;
+    }
+    // Skip lines containing test indicators to reduce false positives
+    if trimmed.contains("test_") || trimmed.contains("mock_") || trimmed.contains("fixture") {
+        continue;
+    }
 
             for pattern in SECRET_PATTERNS.iter() {
                 if let Some(captures) = pattern.regex.captures(trimmed) {
@@ -98,8 +102,11 @@ fn is_in_string_context(line: &str) -> bool {
     {
         return true;
     }
-    // Line is a comment containing example/sample keywords (case-insensitive ASCII)
-    if trimmed.len() >= 7 && trimmed.as_bytes()[..7].eq_ignore_ascii_case(b"example") {
+    // Line starts in a comment context containing example/sample keywords
+    if (trimmed.starts_with("// ") || trimmed.starts_with("# ") || trimmed.starts_with("<!--"))
+        && (trimmed[3..].to_ascii_lowercase().contains("example")
+            || trimmed[3..].to_ascii_lowercase().contains("sample"))
+    {
         return true;
     }
     false
@@ -156,14 +163,7 @@ fn mask_value(value: &str) -> String {
     if len <= 8 {
         return "***".to_string();
     }
-    let prefix = &value[..value.char_indices().nth(4).map(|(i, _)| i).unwrap_or(len)];
-    let suffix = &value[value
-        .char_indices()
-        .rev()
-        .nth(3)
-        .map(|(i, _)| i)
-        .unwrap_or(0)..];
-    format!("{}...{}", prefix, suffix)
+    format!("*** ({} chars)", len)
 }
 
 struct SecretPattern {
@@ -206,7 +206,7 @@ static SECRET_PATTERNS: LazyLock<Vec<SecretPattern>> = LazyLock::new(|| {
         ),
         SecretPattern::new(
             "JWT Token",
-            r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+",
+            r"eyJ[A-Za-z0-9_\-]{1,200}\.[A-Za-z0-9_\-]{1,200}\.[A-Za-z0-9_\-]{1,200}",
         ),
         SecretPattern::new(
             "Password",

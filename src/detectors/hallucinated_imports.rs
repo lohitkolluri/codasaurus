@@ -35,13 +35,10 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
             match registry::check_package(registry_name, &package) {
                 Ok(Some(true)) => {} // package exists
                 Ok(Some(false)) => {
-                    // extract_package_name already resolved the base package
-                    // (handling @scoped/packages, submodule paths, Rust :: paths).
-                    let correct_name = package.clone();
                     let codemod = match registry_name {
-                        "npm" => Some(format!("npm install {}", correct_name)),
-                        "pypi" => Some(format!("pip install {}", correct_name)),
-                        "crates.io" => Some(format!("cargo add {}", correct_name)),
+                        "npm" => Some(format!("npm install {}", package)),
+                        "pypi" => Some(format!("pip install {}", package)),
+                        "crates.io" => Some(format!("cargo add {}", package)),
                         _ => None,
                     };
                     findings.push(Finding {

@@ -48,6 +48,7 @@ impl LearningStore {
              PRAGMA temp_store = MEMORY;
              PRAGMA busy_timeout = 5000;
              PRAGMA auto_vacuum = INCREMENTAL;
+             PRAGMA foreign_keys = ON;
              CREATE TABLE IF NOT EXISTS dismissed_findings (
                 fingerprint TEXT PRIMARY KEY,
                 detector TEXT NOT NULL,
@@ -95,7 +96,7 @@ impl LearningStore {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             rusqlite::params![
                 rule.id, rule.detector, rule.file_pattern,
-                rule.message_pattern, rule.action, rule.reason
+                rule.message_pattern, rule.action.as_str(), rule.reason
             ],
         )?;
         Ok(())

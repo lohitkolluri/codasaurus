@@ -261,7 +261,12 @@ fn check_long_functions(path: &str, content: &str) -> Option<Finding> {
         let is_function = trimmed.contains("fn ")
             || trimmed.contains("def ")
             || trimmed.contains("function ")
-            || trimmed.contains("=>");
+            // `=>` alone is too broad (matches match arms, closures, array methods).
+            // Only match `=>` when it follows a fn/def/function keyword or a parameter list paren.
+            || (trimmed.contains("=>")
+                && (trimmed.ends_with("=>")
+                    || trimmed.contains(") =>")
+                    || trimmed.contains(") => {")));
         let has_open_brace = trimmed.contains('{') || trimmed.contains(':');
 
         if is_function && has_open_brace {
@@ -319,14 +324,19 @@ fn check_long_functions(path: &str, content: &str) -> Option<Finding> {
 }
 
 fn check_repeated_code(path: &str, lines: &[&str]) -> Option<Finding> {
-    // O(n) detection via HashMap of 3-line block hashes instead of O(n²) sliding window.
-    // Each 3-line block is stored by its line indices; any block with >1 occurrence is a repeat.
-    let mut blocks: std::collections::HashMap<&[&str], Vec<usize>> =
+    // O(n) detection via HashMap of 3-line block fingerprints instead of O(n²) sliding window.
+    // Uses a hash of the text content to avoid borrowing slices into the source.
+    let mut blocks: std::collections::HashMap<u64, Vec<usize>> =
         std::collections::HashMap::new();
+    use std::hash::{Hash, Hasher};
 
     let mut i = 0;
     while i + 3 < lines.len() {
-        blocks.entry(&lines[i..i + 3]).or_default().push(i);
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for line in &lines[i..i + 3] {
+            line.hash(&mut hasher);
+        }
+        blocks.entry(hasher.finish()).or_default().push(i);
         i += 1;
     }
 

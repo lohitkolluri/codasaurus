@@ -327,21 +327,35 @@ fn run_tui(
     rebuild_filtered(&mut state);
     rebuild_groups(&mut state);
 
-    let frame_duration = Duration::from_millis(16); // ~60 fps
+    let frame_duration = Duration::from_millis(16); // ~60 fps max
+
+    // Only re-draw when something actually changed (events, animation state).
+    // This prevents burning CPU at 60fps on an idle terminal.
+    let mut dirty = true;
 
     loop {
-        terminal.draw(|f| render(f, &state))?;
+        if dirty {
+            terminal.draw(|f| render(f, &state))?;
+            dirty = false;
+        }
 
-        // Advance smooth scroll each frame
+        // Advance smooth scroll each frame (only dirty if scroll changed)
+        let prev_scroll = state.display_scroll;
         advance_scroll(&mut state);
+        if state.display_scroll != prev_scroll {
+            dirty = true;
+        }
 
         // Process completed dismiss animations
-        process_dismissals(&mut state);
+        if process_dismissals(&mut state) {
+            dirty = true;
+        }
 
         // Check if copied flash expired
         if let Some(t) = state.copied_flash {
             if t.elapsed() > Duration::from_secs(2) {
                 state.copied_flash = None;
+                dirty = true;
             }
         }
 
@@ -349,10 +363,11 @@ fn run_tui(
         if let Some(t) = state.detail_pulse_at {
             if t.elapsed() > Duration::from_millis(120) {
                 state.detail_pulse_at = None;
+                dirty = true;
             }
         }
 
-        // Poll for events with a short timeout (enables ~60fps animation)
+        // Poll for events with a short timeout
         if !event::poll(frame_duration)? {
             continue;
         }
@@ -365,6 +380,7 @@ fn run_tui(
                         state.selected = (state.selected + 1).min(state.filtered.len() - 1);
                         state.detail_pulse_at = Some(Instant::now());
                         snap_scroll_to_selected(&mut state);
+                        dirty = true;
                     }
                 }
                 KeyCode::Char('k') | KeyCode::Up => {
@@ -372,10 +388,12 @@ fn run_tui(
                         state.selected = state.selected.saturating_sub(1);
                         state.detail_pulse_at = Some(Instant::now());
                         snap_scroll_to_selected(&mut state);
+                        dirty = true;
                     }
                 }
                 KeyCode::Enter => {
                     state.detail_expanded = !state.detail_expanded;
+                    dirty = true;
                 }
                 KeyCode::Char('o') => {
                     if let Some(item) = selected_item(&state) {
@@ -393,6 +411,7 @@ fn run_tui(
                         && !state.dismissing.iter().any(|(di, _)| *di == item_idx)
                     {
                         state.dismissing.push((item_idx, Instant::now()));
+                        dirty = true;
                     }
                 }
                 KeyCode::Char('p') => {
@@ -401,6 +420,7 @@ fn run_tui(
                             let prompt = gen_ai_prompt(item);
                             copy_to_clipboard(&prompt);
                             state.copied_flash = Some(Instant::now());
+                            dirty = true;
                         }
                     }
                 }
@@ -409,33 +429,39 @@ fn run_tui(
                     rebuild_filtered(&mut state);
                     rebuild_groups(&mut state);
                     state.detail_pulse_at = Some(Instant::now());
+                    dirty = true;
                 }
                 KeyCode::Char('w') => {
                     state.filter = SeverityFilter::Warning;
                     rebuild_filtered(&mut state);
                     rebuild_groups(&mut state);
                     state.detail_pulse_at = Some(Instant::now());
+                    dirty = true;
                 }
                 KeyCode::Char('i') => {
                     state.filter = SeverityFilter::Info;
                     rebuild_filtered(&mut state);
                     rebuild_groups(&mut state);
                     state.detail_pulse_at = Some(Instant::now());
+                    dirty = true;
                 }
                 KeyCode::Char('a') => {
                     state.filter = SeverityFilter::All;
                     rebuild_filtered(&mut state);
                     rebuild_groups(&mut state);
                     state.detail_pulse_at = Some(Instant::now());
+                    dirty = true;
                 }
                 KeyCode::Tab => {
                     state.filter = state.filter.next();
                     rebuild_filtered(&mut state);
                     rebuild_groups(&mut state);
                     state.detail_pulse_at = Some(Instant::now());
+                    dirty = true;
                 }
                 KeyCode::Char('?') => {
                     state.help_visible = !state.help_visible;
+                    dirty = true;
                 }
                 _ => {}
             },
@@ -480,7 +506,8 @@ fn advance_scroll(state: &mut AppState) {
     }
 }
 
-fn process_dismissals(state: &mut AppState) {
+/// Returns true if any dismissals were processed (caller should re-draw).
+fn process_dismissals(state: &mut AppState) -> bool {
     let mut changed = false;
     state.dismissing.retain(|(item_idx, started_at)| {
         if started_at.elapsed() > Duration::from_millis(250) {
@@ -498,6 +525,7 @@ fn process_dismissals(state: &mut AppState) {
         rebuild_groups(state);
         snap_scroll_to_selected(state);
     }
+    changed
 }
 
 fn render(f: &mut Frame, state: &AppState) {

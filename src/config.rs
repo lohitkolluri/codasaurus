@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -151,7 +151,7 @@ fn default_cache_ttl() -> u64 {
     3600
 }
 
-fn default_exclude_patterns() -> Vec<String> {
+static DEFAULT_EXCLUDE_PATTERNS: LazyLock<Vec<String>> = LazyLock::new(|| {
     vec![
         "*.lock".into(),
         "package-lock.json".into(),
@@ -169,6 +169,10 @@ fn default_exclude_patterns() -> Vec<String> {
         ".next/".into(),
         ".nuxt/".into(),
     ]
+});
+
+fn default_exclude_patterns() -> Vec<String> {
+    DEFAULT_EXCLUDE_PATTERNS.clone()
 }
 
 impl Default for Config {

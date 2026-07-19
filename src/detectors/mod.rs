@@ -136,16 +136,25 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
 
     all.extend(guidelines::detect(config));
 
-    // Filter findings through cached learning store (user dismissals + learned rules)
-    {
-        let mut guard = LEARNING_STORE.lock().unwrap_or_else(|e| e.into_inner());
-        if guard.is_none() {
-            *guard = LearningStore::open().ok();
-        }
-        if let Some(ref store) = *guard {
-            if let Ok(filtered) = store.filter_findings(&all.findings) {
-                return Findings { findings: filtered };
+    // Filter findings through cached learning store (user dismissals + learned rules).
+    // On error (poisoned lock, corrupt DB) we log and return all unfiltered findings
+    // rather than silently dropping. The store is opened once and cached.
+    match LEARNING_STORE.lock() {
+        Ok(mut guard) => {
+            if guard.is_none() {
+                *guard = LearningStore::open().ok();
             }
+            if let Some(ref store) = *guard {
+                match store.filter_findings(&all.findings) {
+                    Ok(filtered) => return Findings { findings: filtered },
+                    Err(e) => {
+                        eprintln!("Warning: learning store filter_findings failed: {}; returning all unfiltered findings", e);
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Warning: LEARNING_STORE mutex poisoned: {}; returning all unfiltered findings", e);
         }
     }
 
