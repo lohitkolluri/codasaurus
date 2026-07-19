@@ -42,6 +42,6 @@ COPY --from=backend /app/target/release/codasaurus /usr/local/bin/codasaurus
 USER codasaurus
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=3s --retries=3 \
-  CMD codasaurus health || exit 1
+  CMD codasaurus health --port $PORT || exit 1
 ENTRYPOINT ["codasaurus"]
-CMD ["serve", "--host", "0.0.0.0", "--port", "3000"]
+CMD ["serve", "--host", "0.0.0.0"]
