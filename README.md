@@ -2,7 +2,7 @@
   <a href="https://github.com/lohitkolluri/codasaurus/actions/workflows/ci.yml"><img src="https://github.com/lohitkolluri/codasaurus/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/status-beta-yellow" alt="Status">
   <img src="https://img.shields.io/github/license/lohitkolluri/codasaurus" alt="License">
-  <img src="https://img.shields.io/badge/rust-1.85+-blue" alt="Rust">
+  <img src="https://img.shields.io/badge/rust-1.88+-blue" alt="Rust">
 </p>
 
 <p align="center">
