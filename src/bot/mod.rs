@@ -1,8 +1,7 @@
 use axum::{
-    extract::State,
     http::StatusCode,
     routing::post,
-    Json, Router,
+    Extension, Json, Router,
 };
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -81,10 +80,12 @@ impl WebhookContext {
 }
 
 /// Build the webhook-only router for mounting under `/webhook` in the unified server.
+/// Uses Extension<BotConfig> instead of State to avoid Axum's Router<()>.nest()
+/// state-type mismatch that silently drops routes at runtime.
 pub fn webhook_router(config: BotConfig) -> Router {
     Router::new()
         .route("/", post(handle_webhook))
-        .with_state(config)
+        .layer(Extension(config))
 }
 
 #[derive(Deserialize)]
@@ -116,7 +117,7 @@ struct WebhookPayload {
 }
 
 async fn handle_webhook(
-    State(config): State<BotConfig>,
+    Extension(config): Extension<BotConfig>,
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
