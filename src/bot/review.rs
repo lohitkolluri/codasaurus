@@ -17,7 +17,7 @@ const MAX_PR_FILE_PAGES: usize = 30;
 /// Bound reviewer discovery to avoid exhausting an installation's API quota on a large PR.
 const MAX_REVIEWER_FILES: usize = 50;
 /// Keep review creation within GitHub's inline-comment payload limit.
-const MAX_INLINE_COMMENTS: usize = 300;
+const MAX_INLINE_COMMENTS: usize = 8;
 
 /// Build a production-configured GitHub API client with timeouts and pooling.
 static GITHUB_CLIENT: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
@@ -429,26 +429,39 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
 
     let mut review_comments: Vec<serde_json::Value> = Vec::new();
     let mut has_blocking = false;
-    for f in &findings.findings {
+    let mut seen_detectors: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+
+    // Merge vulnerability findings on the same (file, line) to avoid spam.
+    // One package with 9 CVEs → one inline comment, not nine.
+    let display_findings = merge_vulnerability_findings(&findings.findings);
+
+    // Sort by severity: blocking first, then warning, then info
+    let mut prioritized: Vec<&Finding> = display_findings.iter().collect();
+    prioritized.sort_by_key(|f| match f.severity {
+        "blocking" => 0,
+        "warning" => 1,
+        _ => 2,
+    });
+
+    for f in &prioritized {
         if f.severity == "blocking" {
             has_blocking = true;
         }
+        if f.line == 0 { continue; }
+        if review_comments.len() >= MAX_INLINE_COMMENTS { break; }
 
-        // `parse_unified_diff` maps findings to the new-file line number expected by GitHub.
-        if f.line > 0 {
-            let comment_body = build_comment_body(f);
-            let side = "RIGHT"; // always comment on the new code
+        // Dedup: only 1 inline comment per (file, detector) pair.
+        let key = (f.file.clone(), f.detector.clone());
+        if !seen_detectors.insert(key) { continue; }
 
-            let comment = serde_json::json!({
-                "path": f.file,
-                "line": f.line,
-                "side": side,
-                "body": comment_body,
-            });
-            if review_comments.len() < MAX_INLINE_COMMENTS {
-                review_comments.push(comment);
-            }
-        }
+        let comment_body = build_comment_body(f);
+        let comment = serde_json::json!({
+            "path": f.file,
+            "line": f.line,
+            "side": "RIGHT",
+            "body": comment_body,
+        });
+        review_comments.push(comment);
     }
 
     // Only approve when there are genuinely no findings. Some valid findings are
@@ -1104,4 +1117,50 @@ async fn save_review_to_db(
         eprintln!("Warning: failed to update review status: {}", e);
     }
     crate::db::audit::log_event(pool, &format!("review.{}", status), Some(pr_author), Some("review"), Some(review.id)).await;
+}
+
+fn merge_vulnerability_findings(findings: &[crate::detectors::Finding]) -> Vec<crate::detectors::Finding> {
+    use crate::detectors::Finding;
+    use std::collections::BTreeMap;
+
+    let mut groups: BTreeMap<(String, usize), Vec<&Finding>> = BTreeMap::new();
+    let mut non_vuln: Vec<&Finding> = Vec::new();
+
+    for f in findings {
+        if f.detector == "vulnerabilities" && f.line > 0 {
+            groups.entry((f.file.clone(), f.line)).or_default().push(f);
+        } else {
+            non_vuln.push(f);
+        }
+    }
+
+    let mut result: Vec<Finding> = non_vuln.into_iter().cloned().collect();
+
+    for ((file, line), group) in groups {
+        if group.len() <= 1 {
+            result.extend(group.into_iter().cloned());
+            continue;
+        }
+        let max_sev: &str = group.iter().map(|f| f.severity).max_by_key(|s| match *s {
+            "blocking" => 3, "warning" => 2, _ => 1,
+        }).unwrap_or("info");
+        let cve_list: Vec<&str> = group.iter().filter_map(|f| f.message.split(':').next()).collect();
+        let count = group.len();
+        result.push(Finding {
+            file,
+            line,
+            column: 0,
+            severity: match max_sev {
+                "blocking" => "blocking",
+                "warning" => "warning",
+                _ => "info",
+            },
+            detector: "vulnerabilities".into(),
+            message: format!("{} known CVE{}: {}", count, if count == 1 { "" } else { "s" }, cve_list.join(", ")),
+            suggestion: group.first().and_then(|f| f.suggestion.clone()),
+            codemod: None,
+            evidence: None,
+        });
+    }
+    result
 }
