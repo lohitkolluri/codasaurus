@@ -617,29 +617,54 @@ fn build_comment_body(finding: &Finding) -> String {
         "warning" => "🟡",
         _ => "🔵",
     };
-    let sev_label = match finding.severity {
-        "blocking" => "Blocking",
-        "warning" => "Warning",
-        _ => "Info",
-    };
-    let mut body = format!(
-        "**{} `{}` — {}**\n\n{}",
-        icon, finding.detector, sev_label, finding.message
-    );
-    if let Some(s) = &finding.suggestion {
-        let _ = write!(
-            body,
-            "\n\n<details><summary>💡 Suggested fix</summary>\n\n> {}\n",
-            s
-        );
-        if let Some(c) = &finding.codemod {
-            let _ = write!(body, "\n```suggestion\n{}\n```", c);
-        }
-        let _ = write!(body, "\n</details>");
-    } else if let Some(c) = &finding.codemod {
-        let _ = write!(body, "\n\n<details><summary>📝 Committable suggestion</summary>\n\n```suggestion\n{}\n```\n</details>", c);
+    let title = finding_display_title(finding);
+    let impact = finding_impact(finding);
+
+    let mut body = format!("**{} {}**\n\n{}\n\n{}", icon, title, finding.message, impact);
+
+    if let Some(ref s) = finding.suggestion {
+        let _ = write!(body, "\n\n**Fix:** {}", s);
+    }
+    if let Some(ref c) = finding.codemod {
+        let _ = write!(body, "\n```suggestion\n{}\n```", c);
     }
     body
+}
+
+fn finding_display_title(f: &Finding) -> String {
+    match f.detector.as_str() {
+        "hallucinated-imports" => "Nonexistent Package Import".into(),
+        "secrets" => "Hardcoded Credential".into(),
+        "phantom-deps" => "Missing Dependency Declaration".into(),
+        "todo-leaks" => "Leftover Placeholder".into(),
+        "vulnerabilities" => "Known Vulnerability".into(),
+        "over-engineering" => "Unnecessary Complexity".into(),
+        "boilerplate" => "Boilerplate Code".into(),
+        "stale-api" => "Deprecated API Usage".into(),
+        "graph" => "Unused Code".into(),
+        "guidelines" => "Guideline Violation".into(),
+        other => format!("{} Issue", capitalize_first(other)),
+    }
+}
+
+fn finding_impact(f: &Finding) -> &'static str {
+    match f.detector.as_str() {
+        "hallucinated-imports" => "This import will fail at build time or crash at runtime — the package does not exist.",
+        "secrets" => "Committed credentials are a security incident. The key must be rotated immediately — it is now in the git history.",
+        "phantom-deps" => "This dependency is used but not declared. It may work locally via hoisting but will fail in production or CI.",
+        "todo-leaks" => "TODOs and FIXMEs in committed code signal incomplete work. Address or remove before merging.",
+        "vulnerabilities" => "This dependency has a known CVE. Attackers can exploit it if the vulnerable path is reachable.",
+        "over-engineering" => "The pattern adds complexity without proportional benefit. Premature abstraction is expensive to undo.",
+        _ => "This finding should be addressed to maintain code quality and prevent future issues.",
+    }
+}
+
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+    }
 }
 
 struct CheckResult {
@@ -792,15 +817,11 @@ fn build_review_body(
     let _ = writeln!(body);
     let _ = writeln!(
         body,
-        "**{}** | 🔴 **{} blocking** | 🟡 **{} warnings** | 🔵 **{} info**",
-        verdict, blocking, warnings, infos
-    );
-    let _ = writeln!(
-        body,
-        "**Review confidence:** {} {}%",
-        score_emoji, confidence
+        "**{}** · 🔴 {} blocking · 🟡 {} warnings · 🔵 {} info · {} {}% confidence",
+        verdict, blocking, warnings, infos, score_emoji, confidence
     );
     let _ = writeln!(body);
+    let _ = writeln!(body, "---");
 
     // Group findings by file
     let mut by_file: BTreeMap<String, Vec<&Finding>> = BTreeMap::new();
@@ -917,6 +938,19 @@ fn build_review_body(
         let _ = writeln!(body);
     }
 
+    // Verified section — what checks passed cleanly
+    let verified = build_verified_list(findings);
+    if !verified.is_empty() {
+        let _ = writeln!(body, "## ✅ Verified");
+        let _ = writeln!(body);
+        let _ = writeln!(body, "The following checks passed with no issues found:");
+        let _ = writeln!(body);
+        for v in &verified {
+            let _ = writeln!(body, "- {}", v);
+        }
+        let _ = writeln!(body);
+    }
+
     let _ = writeln!(body, "---");
     let _ = writeln!(
         body,
@@ -926,6 +960,39 @@ fn build_review_body(
     let _ = writeln!(body);
 
     body
+}
+
+fn build_verified_list(findings: &Findings) -> Vec<String> {
+    let detectors_with_findings: std::collections::HashSet<&str> = findings
+        .findings
+        .iter()
+        .map(|f| f.detector.as_str())
+        .collect();
+
+    let clean_names: [(&str, &str); 10] = [
+        ("hallucinated-imports", "All imports resolve to real packages"),
+        ("secrets", "No hardcoded credentials detected"),
+        ("phantom-deps", "All dependencies are declared in the manifest"),
+        ("todo-leaks", "No leftover TODO or FIXME markers"),
+        ("vulnerabilities", "No known CVEs in dependencies"),
+        ("over-engineering", "No unnecessary abstraction detected"),
+        ("boilerplate", "No excessive boilerplate found"),
+        ("stale-api", "No deprecated API usage detected"),
+        ("graph", "No dead code or unused exports"),
+        ("guidelines", "Repository guidelines are followed"),
+    ];
+
+    let all_detectors: [&str; 10] = [
+        "hallucinated-imports", "secrets", "phantom-deps", "todo-leaks",
+        "vulnerabilities", "over-engineering", "boilerplate", "stale-api",
+        "graph", "guidelines",
+    ];
+
+    all_detectors
+        .iter()
+        .filter(|d| !detectors_with_findings.contains(*d))
+        .filter_map(|d| clean_names.iter().find(|(k, _)| k == d).map(|(_, v)| v.to_string()))
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
