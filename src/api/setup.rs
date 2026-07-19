@@ -398,7 +398,6 @@ async fn github_manifest_page(
             format!("{}/api/auth/github/callback", public_url)
         ],
         "setup_url": format!("{}/#/setup/complete", public_url),
-        "logo_url": format!("{}/logo.svg", public_url),
         "setup_on_update": true,
         "public": false,
         "request_oauth_on_install": false,
@@ -486,7 +485,6 @@ async fn github_manifest_url(
             format!("{}/api/auth/github/callback", public_url)
         ],
         "setup_url": format!("{}/#/setup/complete", public_url),
-        "logo_url": format!("{}/logo.svg", public_url),
         "setup_on_update": true,
         "public": false,
         "request_oauth_on_install": false,
