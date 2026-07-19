@@ -115,9 +115,9 @@ async fn sync_repos(State(state): State<AppState>) -> Result<Json<serde_json::Va
             None => continue,
         };
 
-        // List repos for this installation
+        // List repos for this installation (max 100 per page)
         let repos_resp: serde_json::Value = client
-            .get("https://api.github.com/installation/repositories")
+            .get("https://api.github.com/installation/repositories?per_page=100")
             .header("Authorization", format!("Bearer {}", token))
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", "codasaurus")
