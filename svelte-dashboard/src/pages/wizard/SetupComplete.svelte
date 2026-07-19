@@ -14,6 +14,11 @@
         else if (!status.llm) push("/setup/llm");
         else if (!status.github) push("/setup/github");
         else if (!status.admin) push("/setup/admin");
+      } else {
+        // Setup is already complete — this page was hit from a post-install
+        // redirect.  Send the user to their repos.
+        push("/app/repos");
+        return;
       }
     } catch {
       // ignore — render the page anyway

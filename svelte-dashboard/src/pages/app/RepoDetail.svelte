@@ -29,9 +29,25 @@
     loading = true;
     error = "";
     try {
-      const data = await api.get(`/api/repos/${id}`);
+      const [data, settings] = await Promise.all([
+        api.get(`/api/repos/${id}`),
+        api.get("/api/settings"),
+      ]);
       repo = data;
-      detectors = data.detectors ?? {};
+      // Inherit global detector defaults when no per-repo override
+      if (data.detectors && Object.keys(data.detectors).length > 0) {
+        detectors = data.detectors;
+      } else {
+        const DETECTOR_KEYS = [
+          "hallucinated_imports", "phantom_deps", "vulnerabilities", "secrets",
+          "over_engineering", "boilerplate", "todo_leaks", "stale_api", "graph", "guidelines",
+        ];
+        const defaults = {};
+        for (const key of DETECTOR_KEYS) {
+          defaults[key] = settings[`${key}_enabled`] !== "false";
+        }
+        detectors = defaults;
+      }
       llmEnabled = data.llm_enabled ?? true;
     } catch (err) {
       error = err.message || "Failed to load repo";

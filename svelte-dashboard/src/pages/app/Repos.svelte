@@ -299,8 +299,8 @@
     width: 100%;
   }
   .toggle-btn.active {
-    background: var(--accent);
+    background: #cf222e;
     color: #fff;
-    border-color: var(--accent);
+    border-color: #cf222e;
   }
 </style>
