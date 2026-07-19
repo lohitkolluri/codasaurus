@@ -51,6 +51,11 @@ pub struct GithubCallbackBody {
     pub code: String,
 }
 
+#[derive(Deserialize)]
+pub struct GithubCallbackQuery {
+    pub code: Option<String>,
+}
+
 #[derive(Serialize)]
 pub struct GithubCallbackResponse {
     pub status: String,
@@ -78,7 +83,7 @@ pub fn router() -> Router<AppState> {
         .route("/github/manifest-page", get(github_manifest_page))
         .route("/github/manifest-url", get(github_manifest_url))
         .route("/github", post(setup_github))
-        .route("/github/callback", post(github_callback))
+        .route("/github/callback", get(github_callback_page).post(github_callback))
         .route("/admin", post(setup_admin))
 }
 
@@ -388,7 +393,7 @@ async fn github_manifest_page(
             "url": "https://example.com/codasaurus-webhook",
             "active": false
         },
-        "redirect_url": format!("{}/#/setup/github/callback", public_url),
+        "redirect_url": format!("{}/api/setup/github/callback", public_url),
         "callback_urls": [
             format!("{}/api/auth/github/callback", public_url)
         ],
@@ -475,7 +480,7 @@ async fn github_manifest_url(
             "url": "https://example.com/codasaurus-webhook",
             "active": false
         },
-        "redirect_url": format!("{}/#/setup/github/callback", public_url),
+        "redirect_url": format!("{}/api/setup/github/callback", public_url),
         "callback_urls": [
             format!("{}/api/auth/github/callback", public_url)
         ],
@@ -557,6 +562,100 @@ async fn setup_github(
         message: Some("GitHub App credentials verified and saved".into()),
         test_passed: Some(test_passed),
     }))
+}
+
+/// GET /api/v1/setup/github/callback — lightweight HTML page that exchanges
+/// the manifest code with GitHub, then redirects to the SPA entry point.
+/// This avoids SPA routing issues (hash vs path) because the exchange happens
+/// in a plain page before handing control back to the SPA.
+async fn github_callback_page(
+    Query(params): Query<GithubCallbackQuery>,
+) -> impl axum::response::IntoResponse {
+    use axum::http::{header, StatusCode};
+    use axum::response::Html;
+
+    let code = match params.code {
+        Some(ref c) if !c.is_empty() => c.clone(),
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                Html(
+                    r#"<html><body style="font:14px sans-serif;padding:40px">
+                        <p>Missing authorization code from GitHub.</p>
+                        <a href="/#/setup/github">Back to setup</a>
+                    </body></html>"#.into(),
+                ),
+            );
+        }
+    };
+
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Completing GitHub App setup…</title>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           display: flex; justify-content: center; align-items: center;
+           height: 100vh; margin: 0; background: #f6f8fa; color: #1f2328; }}
+    .card {{ text-align: center; padding: 40px; background: #fff;
+             border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.12); max-width: 480px; }}
+    .spinner {{ border: 3px solid #d0d7de; border-top-color: #0969da;
+                border-radius: 50%; width: 24px; height: 24px;
+                animation: spin .8s linear infinite; margin: 16px auto; }}
+    @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+    .error {{ color: #cf222e; }}
+    .success {{ color: #1a7f37; }}
+    button {{ margin-top: 16px; padding: 8px 20px; font-size: 14px;
+              border-radius: 6px; border: 1px solid #d0d7de; background: #f6f8fa; cursor: pointer; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <p id="status">Exchanging code with GitHub…</p>
+    <div class="spinner" id="spinner"></div>
+    <div id="result"></div>
+  </div>
+  <script>
+    (async () => {{
+      try {{
+        const r = await fetch('/api/setup/github/callback', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{\"code\": "{}"}})
+        }});
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Request failed');
+        document.getElementById('spinner').style.display = 'none';
+        document.getElementById('status').textContent = 'GitHub App created and credentials saved!';
+        document.getElementById('status').className = 'success';
+        const btn = document.createElement('button');
+        btn.textContent = 'Return to Setup';
+        btn.onclick = () => {{ window.location.href = '/#/setup/github'; }};
+        document.getElementById('result').appendChild(btn);
+        // Also try to update the opener tab
+        if (window.opener && !window.opener.closed) {{
+          window.opener.location.href = '/#/setup/github';
+        }}
+      }} catch (err) {{
+        document.getElementById('spinner').style.display = 'none';
+        document.getElementById('status').textContent = 'Error: ' + err.message;
+        document.getElementById('status').className = 'error';
+        const btn = document.createElement('button');
+        btn.textContent = 'Back to Setup';
+        btn.onclick = () => {{ window.location.href = '/#/setup/github'; }};
+        document.getElementById('result').appendChild(btn);
+      }}
+    }})();
+  </script>
+</body>
+</html>"#,
+        code
+    );
+
+    (StatusCode::OK, [(header::CONTENT_TYPE, "text/html; charset=utf-8")], Html(html))
 }
 
 /// POST /api/v1/setup/github/callback
