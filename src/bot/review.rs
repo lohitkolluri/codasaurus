@@ -429,10 +429,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
 
     let mut review_comments: Vec<serde_json::Value> = Vec::new();
     let mut has_blocking = false;
-    let mut total_findings = 0;
-
     for f in &findings.findings {
-        total_findings += 1;
         if f.severity == "blocking" {
             has_blocking = true;
         }
@@ -505,9 +502,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
 
     let mut body = build_review_body(
         &findings,
-        total_findings,
         has_blocking,
-        repo_name,
         &pr_title,
         &pr_body,
         &config,
@@ -779,9 +774,7 @@ fn evaluate_pre_merge_checks(
 
 fn build_review_body(
     findings: &Findings,
-    _total: usize,
     has_blocking: bool,
-    repo_name: &str,
     pr_title: &str,
     pr_body: &str,
     config: &crate::config::Config,
@@ -804,24 +797,20 @@ fn build_review_body(
         _ => "🔴",
     };
 
-    let verdict = if has_blocking {
-        "⛔ Changes requested"
+    let verdict_line = if has_blocking {
+        "> [!CAUTION] Changes Requested"
     } else if warnings > 0 {
-        "⚠️ Review with suggestions"
+        "> [!WARNING] Review with Suggestions"
     } else {
-        "ℹ️ Info only"
+        "> [!NOTE] No Issues Found"
     };
 
-    let mut body = String::with_capacity(2048);
+    let mut body = String::with_capacity(4096);
     let _ = writeln!(body, "## 🦕 Codasaurus Review");
     let _ = writeln!(body);
-    let _ = writeln!(
-        body,
-        "**{}** · 🔴 {} blocking · 🟡 {} warnings · 🔵 {} info · {} {}% confidence",
-        verdict, blocking, warnings, infos, score_emoji, confidence
-    );
+    let _ = writeln!(body, "{verdict_line}");
+    let _ = writeln!(body, "> 🔴 **{blocking}** blocking · 🟡 **{warnings}** warnings · 🔵 **{infos}** info · {score_emoji} **{confidence}%** confidence");
     let _ = writeln!(body);
-    let _ = writeln!(body, "---");
 
     // Group findings by file
     let mut by_file: BTreeMap<String, Vec<&Finding>> = BTreeMap::new();
@@ -829,34 +818,32 @@ fn build_review_body(
         by_file.entry(f.file.clone()).or_default().push(f);
     }
 
-    // Per-file finding tables
-    for (file_path, file_findings) in &by_file {
-        let _ = writeln!(body, "### `{}`", file_path);
+    if !by_file.is_empty() {
+        let _ = writeln!(body, "### 📂 Findings");
         let _ = writeln!(body);
-        let _ = writeln!(body, "| Line | Severity | Finding |");
-        let _ = writeln!(body, "| --- | --- | --- |");
-        for f in file_findings {
-            let icon = match f.severity {
-                "blocking" => "🔴",
-                "warning" => "🟡",
-                _ => "🔵",
-            };
-            let line_str = if f.line > 0 {
-                format!(":{}", f.line)
-            } else {
-                String::new()
-            };
-            let _ = writeln!(
-                body,
-                "| `{}` | {} {} | `{}` — {} |",
-                line_str.trim_start_matches(':'),
-                icon,
-                f.severity,
-                f.detector,
-                f.message
-            );
+        for (file_path, file_findings) in &by_file {
+            let _ = writeln!(body, "#### `{file_path}`");
+            let _ = writeln!(body);
+            let _ = writeln!(body, "| Line | Severity | Detector | Issue |");
+            let _ = writeln!(body, "| ---: | :---: | --- | --- |");
+            for f in file_findings {
+                let icon = match f.severity {
+                    "blocking" => "🔴",
+                    "warning" => "🟡",
+                    _ => "🔵",
+                };
+                let line_cell = if f.line > 0 { f.line.to_string() } else { "—".into() };
+                let short_msg = summarize_message(&f.message, 80);
+                let _ = writeln!(
+                    body,
+                    "| {line_cell} | {icon} {sev} | `{det}` | {msg} |",
+                    sev = f.severity,
+                    det = f.detector,
+                    msg = short_msg,
+                );
+            }
+            let _ = writeln!(body);
         }
-        let _ = writeln!(body);
     }
 
     let mut vuln_by_pkg: BTreeMap<String, Vec<&Finding>> = BTreeMap::new();
@@ -873,101 +860,62 @@ fn build_review_body(
     }
 
     if !vuln_by_pkg.is_empty() {
-        let _ = writeln!(body, "<details><summary>📦 **Package Vulnerabilities** ({} packages)</summary>", vuln_by_pkg.len());
+        let _ = writeln!(body, "### 📦 Vulnerable Dependencies");
         let _ = writeln!(body);
-        for (pkg, pkg_findings) in &vuln_by_pkg {
-            let max_sev = pkg_findings
-                .iter()
-                .map(|f| f.severity)
-                .max_by_key(|s| match *s {
-                    "blocking" => 2,
-                    "warning" => 1,
-                    _ => 0,
-                })
-                .unwrap_or("info");
-            let sev_icon = match max_sev {
-                "blocking" => "🔴",
-                "warning" => "🟡",
-                _ => "🔵",
-            };
-            let _ = writeln!(
-                body,
-                "**{} `{}`** — {} vulnerability{}",
-                sev_icon,
-                pkg,
-                pkg_findings.len(),
-                if pkg_findings.len() == 1 { "" } else { "ies" }
-            );
-            let _ = writeln!(body);
-            let _ = writeln!(body, "| CVE | Severity | Summary |");
-            let _ = writeln!(body, "| --- | --- | --- |");
-            for f in pkg_findings {
+        let _ = writeln!(body, "| Package | CVE | Severity |");
+        let _ = writeln!(body, "| --- | --- | :---: |");
+        for (pkg, pkg_findings) in vuln_by_pkg.iter().take(10) {
+            for f in pkg_findings.iter().take(3) {
                 let cve_id = f.message.split(':').next().unwrap_or(&f.message);
-                let summary = f.message.split(':').nth(1).unwrap_or("").trim();
-                let sev_icon_row = match f.severity {
+                let icon = match f.severity {
                     "blocking" => "🔴",
                     "warning" => "🟡",
                     _ => "🔵",
                 };
-                let _ = writeln!(
-                    body,
-                    "| `{}` | {} {} | {} |",
-                    cve_id, sev_icon_row, f.severity, summary
-                );
+                let _ = writeln!(body, "| `{pkg}` | `{cve_id}` | {icon} {s} |", s = f.severity);
             }
-            let _ = writeln!(body);
         }
-        let _ = writeln!(body, "</details>");
         let _ = writeln!(body);
     }
 
-    // Pre-merge checks
     let checks = evaluate_pre_merge_checks(config, pr_title, pr_body, blocking, warnings);
     if !checks.is_empty() {
-        let _ = writeln!(body, "🚥 **Pre-merge Checks**");
+        let _ = writeln!(body, "### 🚥 Pre-merge Checks");
         let _ = writeln!(body);
         let _ = writeln!(body, "| Check | Status | Details |");
-        let _ = writeln!(body, "| --- | --- | --- |");
+        let _ = writeln!(body, "| --- | :---: | --- |");
         for check in &checks {
-            let _ = writeln!(
-                body,
-                "| {} | {} | {} |",
-                check.name, check.status, check.details
-            );
+            let _ = writeln!(body, "| {} | {} | {} |", check.name, check.status, check.details);
         }
         let _ = writeln!(body);
     }
 
-    // Verified section — what checks passed cleanly
     let verified = build_verified_list(findings);
     if !verified.is_empty() {
-        let _ = writeln!(body, "## ✅ Verified");
-        let _ = writeln!(body);
-        let _ = writeln!(body, "The following checks passed with no issues found:");
+        let _ = writeln!(body, "### ✅ Verified");
         let _ = writeln!(body);
         for v in &verified {
-            let _ = writeln!(body, "- {}", v);
+            let _ = writeln!(body, "- [x] {v}");
+        }
+        // Show remaining unchecked detectors
+        let remaining = build_unverified_list(findings);
+        for r in &remaining {
+            let _ = writeln!(body, "- [ ] {r}");
         }
         let _ = writeln!(body);
     }
 
     let _ = writeln!(body, "---");
-    let _ = writeln!(
-        body,
-        "<sub>🦕 Reviewed by [Codasaurus](https://github.com/lohitkolluri/codasaurus) — `{}`</sub>",
-        repo_name
-    );
+    let _ = writeln!(body);
+    let _ = writeln!(body, "<sub>🦕 Reviewed by [Codasaurus](https://github.com/lohitkolluri/codasaurus)</sub>");
     let _ = writeln!(body);
 
     body
 }
 
 fn build_verified_list(findings: &Findings) -> Vec<String> {
-    let detectors_with_findings: std::collections::HashSet<&str> = findings
-        .findings
-        .iter()
-        .map(|f| f.detector.as_str())
-        .collect();
+    let detector_set: std::collections::HashSet<&str> = findings
+        .findings.iter().map(|f| f.detector.as_str()).collect();
 
     let clean_names: [(&str, &str); 10] = [
         ("hallucinated-imports", "All imports resolve to real packages"),
@@ -982,17 +930,44 @@ fn build_verified_list(findings: &Findings) -> Vec<String> {
         ("guidelines", "Repository guidelines are followed"),
     ];
 
-    let all_detectors: [&str; 10] = [
-        "hallucinated-imports", "secrets", "phantom-deps", "todo-leaks",
-        "vulnerabilities", "over-engineering", "boilerplate", "stale-api",
-        "graph", "guidelines",
+    clean_names
+        .iter()
+        .filter(|(k, _)| !detector_set.contains(k))
+        .map(|(_, v)| v.to_string())
+        .collect()
+}
+
+fn build_unverified_list(findings: &Findings) -> Vec<String> {
+    let detector_set: std::collections::HashSet<&str> = findings
+        .findings.iter().map(|f| f.detector.as_str()).collect();
+
+    let fail_names: [(&str, &str); 10] = [
+        ("hallucinated-imports", "Nonesistent package imports found"),
+        ("secrets", "Hardcoded credentials detected"),
+        ("phantom-deps", "Dependencies used but undeclared"),
+        ("todo-leaks", "Leftover TODO or FIXME markers found"),
+        ("vulnerabilities", "CVEs found in dependencies"),
+        ("over-engineering", "Unnecessary abstraction detected"),
+        ("boilerplate", "Excessive boilerplate found"),
+        ("stale-api", "Deprecated API usage detected"),
+        ("graph", "Dead code or unused exports found"),
+        ("guidelines", "Guideline violations found"),
     ];
 
-    all_detectors
+    fail_names
         .iter()
-        .filter(|d| !detectors_with_findings.contains(*d))
-        .filter_map(|d| clean_names.iter().find(|(k, _)| k == d).map(|(_, v)| v.to_string()))
+        .filter(|(k, _)| detector_set.contains(k))
+        .map(|(_, v)| v.to_string())
         .collect()
+}
+
+fn summarize_message(msg: &str, max_len: usize) -> String {
+    if msg.len() <= max_len {
+        return msg.to_string();
+    }
+    let truncated = &msg[..max_len.min(msg.len())];
+    let last_space = truncated.rfind(' ').unwrap_or(max_len);
+    format!("{}…", &msg[..last_space])
 }
 
 #[allow(clippy::too_many_arguments)]
