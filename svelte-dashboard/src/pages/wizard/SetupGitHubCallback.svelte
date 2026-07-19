@@ -32,7 +32,7 @@
   });
 
   function goToInstall() {
-    if (installUrl) window.open(installUrl, "_blank");
+    if (installUrl) window.location.href = installUrl;
   }
 
   function handleNext() {
