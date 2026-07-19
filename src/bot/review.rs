@@ -802,18 +802,10 @@ fn build_review_body(
     );
     let _ = writeln!(body);
 
-    // Single pass: group findings by file AND build severity buckets
+    // Group findings by file
     let mut by_file: BTreeMap<String, Vec<&Finding>> = BTreeMap::new();
-    let mut blocking_findings: Vec<&Finding> = Vec::new();
-    let mut warning_findings: Vec<&Finding> = Vec::new();
-    let mut info_findings: Vec<&Finding> = Vec::new();
     for f in &findings.findings {
         by_file.entry(f.file.clone()).or_default().push(f);
-        match f.severity {
-            "blocking" => blocking_findings.push(f),
-            "warning" => warning_findings.push(f),
-            _ => info_findings.push(f),
-        }
     }
 
     // Per-file finding tables
@@ -843,54 +835,6 @@ fn build_review_body(
                 f.message
             );
         }
-        let _ = writeln!(body);
-    }
-
-    // Collapsible detailed breakdown by severity — uses pre-bucketed Vecs (0 additional iterations)
-    let _ = writeln!(body, "---");
-    let _ = writeln!(body);
-
-    if !blocking_findings.is_empty() {
-        let _ = writeln!(
-            body,
-            "<details><summary>🔴 **{} Blocking**</summary>",
-            blocking
-        );
-        let _ = writeln!(body);
-        for f in &blocking_findings {
-            let _ = writeln!(body, "- **`{}:{}`** — {}", f.file, f.line, f.message);
-            if let Some(ref s) = f.suggestion {
-                let _ = writeln!(body, "  - > 💡 {}", s);
-            }
-        }
-        let _ = writeln!(body, "</details>");
-        let _ = writeln!(body);
-    }
-
-    if !warning_findings.is_empty() {
-        let _ = writeln!(
-            body,
-            "<details><summary>🟡 **{} Warnings**</summary>",
-            warnings
-        );
-        let _ = writeln!(body);
-        for f in &warning_findings {
-            let _ = writeln!(body, "- **`{}:{}`** — {}", f.file, f.line, f.message);
-            if let Some(ref s) = f.suggestion {
-                let _ = writeln!(body, "  - > 💡 {}", s);
-            }
-        }
-        let _ = writeln!(body, "</details>");
-        let _ = writeln!(body);
-    }
-
-    if !info_findings.is_empty() {
-        let _ = writeln!(body, "<details><summary>🔵 **{} Info**</summary>", infos);
-        let _ = writeln!(body);
-        for f in &info_findings {
-            let _ = writeln!(body, "- **`{}:{}`** — {}", f.file, f.line, f.message);
-        }
-        let _ = writeln!(body, "</details>");
         let _ = writeln!(body);
     }
 

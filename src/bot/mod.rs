@@ -89,6 +89,10 @@ pub fn set_config_pool(pool: crate::db::DbPool) {
     let _ = CONFIG_POOL.set(pool);
 }
 
+fn bot_db_pool() -> Option<&'static crate::db::DbPool> {
+    CONFIG_POOL.get()
+}
+
 async fn reload_bot_config() -> Option<BotConfig> {
     let pool = CONFIG_POOL.get()?;
     let app_id = db::config::get_config(pool, "github_app_id").await.ok().flatten()?;
@@ -370,17 +374,10 @@ async fn handle_installation_created(
         Some(i) => i.id,
         None => return,
     };
-    let db_url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!("  [bot] DATABASE_URL not set, skipping repo sync");
-            return;
-        }
-    };
-    let pool = match db::create_pool(&db_url).await {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("  [bot] Failed to connect to DB: {}", e);
+    let pool = match bot_db_pool() {
+        Some(p) => p,
+        None => {
+            eprintln!("  [bot] DB pool not available, skipping repo sync");
             return;
         }
     };
@@ -428,13 +425,9 @@ async fn handle_repos_added(
         Some(i) => i.id,
         None => return,
     };
-    let db_url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => return,
-    };
-    let pool = match db::create_pool(&db_url).await {
-        Ok(p) => p,
-        Err(_) => return,
+    let pool = match bot_db_pool() {
+        Some(p) => p,
+        None => return,
     };
     for repo in &repos {
         let github_id = repo["id"].as_i64();
@@ -478,13 +471,9 @@ async fn ensure_repo_exists(
     inst_id: Option<i64>,
     repo_val: &Option<serde_json::Value>,
 ) {
-    let db_url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => return,
-    };
-    let pool = match db::create_pool(&db_url).await {
-        Ok(p) => p,
-        Err(_) => return,
+    let pool = match bot_db_pool() {
+        Some(p) => p,
+        None => return,
     };
     // Check if repo already exists
     if let Ok(Some(_)) = db::repos::get_repo_by_full_name(&pool, full_name).await {
