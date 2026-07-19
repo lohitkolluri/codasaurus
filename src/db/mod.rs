@@ -50,10 +50,9 @@ pub fn normalize_database_url(raw: &str) -> String {
     raw.to_string()
 }
 
-/// Create a PostgreSQL pool, run migrations, and return a `DbPool`.
+/// Create a PostgreSQL pool with SSL (required by Render and most cloud providers).
 pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
     let url = if database_url.starts_with("sqlite://") {
-        // Legacy SQLite URL — needs PostgreSQL migration
         eprintln!("  Legacy SQLite URL detected. Switch to postgres:// URL.");
         return Err(sqlx::Error::Protocol(
             "SQLite is no longer supported. Use a postgres:// DATABASE_URL.".into(),
@@ -61,6 +60,18 @@ pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
     } else {
         normalize_database_url(database_url)
     };
+
+    // Ensure SSL is enabled for PostgreSQL connections
+    let url = if url.contains("render.com") && !url.contains("sslmode") {
+        format!("{}?sslmode=require", url)
+    } else if !url.contains("sslmode") && !url.contains("?") {
+        format!("{}?sslmode=require", url)
+    } else if !url.contains("sslmode") && url.contains("?") {
+        format!("{}&sslmode=require", url)
+    } else {
+        url
+    };
+
     let pool = sqlx::PgPool::connect(&url).await?;
     migrations::run_migrations(&pool).await?;
     Ok(DbPool(pool))
