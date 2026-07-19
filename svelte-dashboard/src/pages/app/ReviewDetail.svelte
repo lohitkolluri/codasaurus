@@ -114,17 +114,17 @@
           </div>
 
           <div class="content-area" style="padding:24px 32px">
-            {#if selectedFindings.length === 0 && selectedFile}
+            {#if fileFindings.length === 0 && selectedFile}
               <p style="color:var(--text-muted)">No findings for this file</p>
             {:else if !selectedFile}
               <p style="color:var(--text-muted)">Select a file to view findings</p>
             {:else}
-              {#each selectedFindings as finding}
+              {#each fileFindings as finding}
                 <div class="finding-item">
                   <div class="finding-location">
                     {finding.file_path ?? finding.file}
-                    {#if finding.line_number}
-                      <span>:{finding.line_number}</span>
+                    {#if finding.line_start}
+                      <span>:{finding.line_start}</span>
                     {/if}
                     <SeverityBadge severity={finding.severity ?? "info"} />
                   </div>

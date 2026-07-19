@@ -77,7 +77,7 @@ async fn set_setting(
     // Allowlist of writable config keys — prevents arbitrary config writes.
     const ALLOWED_KEYS: &[&str] = &[
         "llm_provider", "openrouter_api_key", "llm_model", "llm_base_url",
-        "public_url",
+        "public_url", "default_severity",
         "hallucinated_imports_enabled", "phantom_deps_enabled",
         "vulnerabilities_enabled", "secrets_enabled",
         "over_engineering_enabled", "boilerplate_enabled",

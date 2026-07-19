@@ -35,11 +35,10 @@
     error = "";
     try {
       const params = new URLSearchParams();
-      if (filterRepo) params.set("repo", filterRepo);
+      if (filterRepo) params.set("repo_id", filterRepo);
       if (filterStatus) params.set("status", filterStatus);
-      if (filterSeverity) params.set("severity", filterSeverity);
-      params.set("page", String(page));
-      params.set("per_page", "20");
+      params.set("limit", "20");
+      params.set("offset", String((page - 1) * 20));
 
       const data = await api.get(`/api/reviews?${params.toString()}`);
       reviews = data.reviews ?? data ?? [];
@@ -87,10 +86,8 @@
           <label for="filter-status">Status</label>
           <select id="filter-status" bind:value={filterStatus} onchange={handleFilterChange}>
             <option value="">All</option>
-            <option value="passing">Passing</option>
-            <option value="failing">Failing</option>
-            <option value="pending">Pending</option>
-            <option value="in_progress">In Progress</option>
+            <option value="passed">Passed</option>
+            <option value="failed">Failed</option>
           </select>
         </div>
         <div class="form-group">

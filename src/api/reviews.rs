@@ -20,6 +20,10 @@ pub struct ListReviewsParams {
     pub status: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    #[serde(alias = "page")]
+    pub _page: Option<i64>,
+    #[serde(alias = "per_page")]
+    pub _per_page: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -48,13 +52,33 @@ async fn list_reviews(
     let status = params.status.as_deref();
 
     let reviews = db::reviews::list_reviews(&state.pool, repo_id, status, limit, offset).await?;
-
-    // Total count for pagination (match the same filters)
     let total: i64 = count_reviews(&state.pool, repo_id, status).await?;
+    let total_pages = ((total as f64) / (limit as f64)).ceil() as i64;
+
+    // Enrich each review with its repo name
+    let mut enriched: Vec<serde_json::Value> = Vec::new();
+    for r in &reviews {
+        let repo_name: Option<String> = sqlx::query_scalar(
+            "SELECT full_name FROM repos WHERE id = ?",
+        )
+        .bind(r.repo_id)
+        .fetch_optional(&state.pool.0)
+        .await
+        .ok()
+        .flatten();
+        let name = repo_name.clone().unwrap_or_default();
+        let mut v = serde_json::to_value(r).unwrap_or_default();
+        if let Some(obj) = v.as_object_mut() {
+            obj.insert("repo_name".into(), json!(name));
+            obj.insert("repo_full_name".into(), json!(name));
+        }
+        enriched.push(v);
+    }
 
     Ok(Json(json!({
-        "reviews": reviews,
+        "reviews": enriched,
         "total": total,
+        "total_pages": total_pages,
         "limit": limit,
         "offset": offset,
     })))

@@ -13,7 +13,6 @@
   import SetupDatabase from "./pages/wizard/SetupDatabase.svelte";
   import SetupLLM from "./pages/wizard/SetupLLM.svelte";
   import SetupGitHub from "./pages/wizard/SetupGitHub.svelte";
-  import SetupGitHubCallback from "./pages/wizard/SetupGitHubCallback.svelte";
   import SetupAdmin from "./pages/wizard/SetupAdmin.svelte";
   import SetupComplete from "./pages/wizard/SetupComplete.svelte";
 
@@ -53,7 +52,6 @@
     "/setup/database": SetupDatabase,
     "/setup/llm": SetupLLM,
     "/setup/github": SetupGitHub,
-    "/setup/github/callback": SetupGitHubCallback,
     "/setup/admin": SetupAdmin,
     "/setup/complete": SetupComplete,
     "/login": Login,
