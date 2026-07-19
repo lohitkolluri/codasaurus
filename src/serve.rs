@@ -60,27 +60,10 @@ pub async fn serve(
 }
 
 fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> Router {
-    let state = AppState { pool };
-
-    // API routes + health check (both use AppState)
-    // api::router() nests sub-routers under full /api/v1/* paths,
-    // so we merge at the root level.
-    let mut app = Router::new()
-        .merge(api::router())
-        .route("/health", get(health_handler));
-
-    // SPA static file serving — acts as catch-all for unmatched routes
-    let dist_path = Path::new("svelte-dashboard").join("dist");
-    if dist_path.exists() {
-        let serve_dir = ServeDir::new(&dist_path)
-            .append_index_html_on_directories(true)
-            .not_found_service(ServeFile::new(dist_path.join("index.html")));
-        app = app.fallback_service(serve_dir);
-    }
-
-    // Resolve shared state — converts Router<AppState> → Router<()>
-    // Everything above this line shares the AppState.
-    let mut app = app.with_state(state);
+    // Compose sub-routers as Router<()> before adding fallback. Nesting a
+    // stateful router after .with_state() in Axum 0.8 causes the nested
+    // routes to not match, returning 405 on POST (hits SPA fallback instead).
+    let api = api::router().with_state(AppState { pool });
 
     // Always mount the webhook endpoint. It will gracefully return 401 if
     // the bot isn't configured (signature verification fails with empty secret).
@@ -91,7 +74,21 @@ fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> 
         host: "0.0.0.0".into(),
         port: 3000,
     });
-    app = app.nest("/webhook", bot::webhook_router(bot_cfg));
+    let webhook = bot::webhook_router(bot_cfg);
+
+    let mut app = Router::new()
+        .merge(api)
+        .route("/health", get(health_handler))
+        .nest("/webhook", webhook);
+
+    // SPA static file serving — acts as catch-all for unmatched routes
+    let dist_path = Path::new("svelte-dashboard").join("dist");
+    if dist_path.exists() {
+        let serve_dir = ServeDir::new(&dist_path)
+            .append_index_html_on_directories(true)
+            .not_found_service(ServeFile::new(dist_path.join("index.html")));
+        app = app.fallback_service(serve_dir);
+    }
 
     // Layers applied to the final resolved router
     app = app
