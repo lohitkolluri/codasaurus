@@ -191,30 +191,46 @@ pub async fn create_finding(
 }
 
 pub async fn get_stats(pool: &DbPool) -> Result<serde_json::Value, sqlx::Error> {
-    let total_repos: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repos WHERE active = 1")
+    // Single transaction so stats are consistent
+    sqlx::query("BEGIN").execute(&pool.0).await?;
+    let result = async {
+        let total_repos: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repos WHERE active = 1")
+            .fetch_one(&pool.0)
+            .await?;
+
+        let total_reviews_today: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM reviews WHERE date(created_at) = CURRENT_DATE",
+        )
         .fetch_one(&pool.0)
         .await?;
 
-    let total_reviews_today: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM reviews WHERE date(created_at) = date('now')",
-    )
-    .fetch_one(&pool.0)
-    .await?;
-
-    let pass_rate: f64 = sqlx::query_scalar(
-        "SELECT COALESCE(AVG(CASE WHEN status = 'passed' THEN 100.0 WHEN status = 'failed' THEN 0.0 ELSE NULL END), 0.0) FROM reviews",
-    )
-    .fetch_one(&pool.0)
-    .await?;
-
-    let total_findings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM findings")
+        let pass_rate: Option<f64> = sqlx::query_scalar(
+            "SELECT AVG(CASE WHEN status = 'passed' THEN 100.0 WHEN status = 'failed' THEN 0.0 ELSE NULL END) FROM reviews",
+        )
         .fetch_one(&pool.0)
         .await?;
 
-    Ok(serde_json::json!({
-        "total_repos": total_repos,
-        "total_reviews_today": total_reviews_today,
-        "pass_rate": pass_rate,
-        "total_findings": total_findings,
-    }))
+        let total_findings: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM findings")
+            .fetch_one(&pool.0)
+            .await?;
+
+        Ok::<_, sqlx::Error>((total_repos, total_reviews_today, pass_rate, total_findings))
+    }
+    .await;
+
+    match result {
+        Ok((total_repos, total_reviews_today, pass_rate, total_findings)) => {
+            sqlx::query("COMMIT").execute(&pool.0).await?;
+            Ok(serde_json::json!({
+                "total_repos": total_repos,
+                "total_reviews_today": total_reviews_today,
+                "pass_rate": pass_rate,
+                "total_findings": total_findings,
+            }))
+        }
+        Err(e) => {
+            sqlx::query("ROLLBACK").execute(&pool.0).await.ok();
+            Err(e)
+        }
+    }
 }
