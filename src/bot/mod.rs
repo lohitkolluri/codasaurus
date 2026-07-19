@@ -153,11 +153,23 @@ async fn handle_webhook(
         )
     {
         if payload.pull_request.is_some() {
+            let repo_val = payload.repo.clone();
+            let repo_full_name = payload
+                .repo
+                .as_ref()
+                .and_then(|r| r["full_name"].as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let inst_id = payload.installation.as_ref().map(|i| i.id);
             let pr = payload.pull_request.as_ref().cloned();
-            let ctx = WebhookContext::from_payload(config.clone(), &payload);
+            let cfg = config.clone();
             tokio::spawn(async move {
+                // Auto-add the repo if it doesn't exist (industry standard pattern)
+                if repo_full_name != "unknown" {
+                    ensure_repo_exists(&repo_full_name, inst_id, &repo_val).await;
+                }
                 let _ = timeout(Duration::from_secs(300), async move {
-                let token = match get_installation_token(&ctx.cfg, ctx.inst_id).await {
+                let token = match get_installation_token(&cfg, inst_id).await {
                     Ok(t) => t,
                     Err(e) => {
                         eprintln!("  Auth error: {}", e);
@@ -175,7 +187,7 @@ async fn handle_webhook(
                     repositories_added: None,
                     repositories_removed: None,
                 };
-                if let Err(e) = review_pr(&token, &ctx.repo_full_name, &wrapped).await {
+                if let Err(e) = review_pr(&token, &repo_full_name, &wrapped).await {
                     eprintln!("  Review error: {}", e);
                 }
                 }).await;
@@ -411,4 +423,46 @@ async fn handle_repos_added(
         }
     }
     println!("  [bot] Synced {} added repos", repos.len());
+}
+
+/// Auto-register a repo when we receive a webhook event for it.
+/// This is the industry-standard pattern: don't require a separate sync step.
+async fn ensure_repo_exists(
+    full_name: &str,
+    inst_id: Option<i64>,
+    repo_val: &Option<serde_json::Value>,
+) {
+    let db_url = match std::env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => return,
+    };
+    let pool = match db::create_pool(&db_url).await {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    // Check if repo already exists
+    if let Ok(Some(_)) = db::repos::get_repo_by_full_name(&pool, full_name).await {
+        return; // already exists
+    }
+    let inst = inst_id.unwrap_or(0);
+    let github_id = repo_val.as_ref().and_then(|r| r["id"].as_i64());
+    let default_branch = repo_val.as_ref().and_then(|r| r["default_branch"].as_str().map(String::from));
+    let private = repo_val.as_ref().and_then(|r| r["private"].as_bool()).unwrap_or(false);
+    let parts: Vec<&str> = full_name.splitn(2, '/').collect();
+    if parts.len() < 2 {
+        return;
+    }
+    let _ = db::repos::create_repo(
+        &pool,
+        &RepoCreate {
+            github_id,
+            full_name: full_name.to_string(),
+            owner: parts[0].to_string(),
+            name: parts[1].to_string(),
+            default_branch,
+            installation_id: inst,
+            private,
+        },
+    )
+    .await;
 }
