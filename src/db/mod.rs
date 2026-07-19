@@ -9,10 +9,10 @@ pub mod users;
 pub use models::*;
 
 #[derive(Clone)]
-pub struct DbPool(pub sqlx::Pool<sqlx::Sqlite>);
+pub struct DbPool(pub sqlx::Pool<sqlx::Any>);
 
 impl std::ops::Deref for DbPool {
-    type Target = sqlx::Pool<sqlx::Sqlite>;
+    type Target = sqlx::Pool<sqlx::Any>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -50,14 +50,22 @@ pub fn normalize_database_url(raw: &str) -> String {
     raw.to_string()
 }
 
-/// Create a SQLite pool from a database URL, run migrations, and return a `DbPool`.
-pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
-    let pool = sqlx::SqlitePool::connect(database_url).await?;
-    migrations::run_migrations(&pool).await?;
-    Ok(DbPool(pool))
+/// Detect whether a database URL points to PostgreSQL.
+pub fn is_postgres_url(url: &str) -> bool {
+    url.starts_with("postgres://") || url.starts_with("postgresql://")
 }
 
-/// Run embedded migrations on the given pool.
-pub async fn run_migrations(pool: &sqlx::Pool<sqlx::Sqlite>) -> Result<(), sqlx::Error> {
-    migrations::run_migrations(pool).await
+/// Create a connection pool from a database URL, run migrations, and return a `DbPool`.
+/// Supports both SQLite (`sqlite://...`) and PostgreSQL (`postgres://...`).
+pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
+    let url = if is_postgres_url(database_url) {
+        normalize_database_url(database_url)
+    } else {
+        database_url.to_string()
+    };
+
+    let pool = sqlx::AnyPool::connect(&url).await?;
+    let is_pg = is_postgres_url(database_url);
+    migrations::run_migrations(&pool, is_pg).await?;
+    Ok(DbPool(pool))
 }

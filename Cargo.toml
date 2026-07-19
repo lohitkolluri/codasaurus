@@ -57,7 +57,7 @@ axum = "0.8"
 tower-http = { version = "0.6", features = ["cors", "fs", "limit", "trace"] }
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "postgres", "migrate", "chrono"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "postgres", "any", "migrate", "chrono"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 

@@ -26,7 +26,8 @@ pub async fn serve(
     env_bot_config: Option<bot::BotConfig>,
 ) -> Result<()> {
     let pool = crate::db::create_pool(database_url).await?;
-    println!("  Database connected (SQLite)");
+    let db_type = if database_url.starts_with("postgres") { "PostgreSQL" } else { "SQLite" };
+    println!("  Database connected ({})", db_type);
 
     // Try loading bot config from DB (setup wizard may have stored it),
     // with env vars taking precedence.
