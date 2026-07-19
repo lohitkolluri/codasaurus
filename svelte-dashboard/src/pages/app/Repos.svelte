@@ -78,6 +78,18 @@
       error = err.message || "Failed to get install URL";
     }
   }
+
+  async function manageRepos() {
+    try {
+      const data = await api.get("/api/github/manage-url");
+      if (data.url) {
+        window.open(data.url, "_blank");
+      }
+    } catch {
+      // fallback to install URL
+      installRepo();
+    }
+  }
 </script>
 
 <div class="app-layout">
@@ -95,8 +107,9 @@
         </div>
         <div class="toolbar-actions">
           <span class="toolbar-count">{repos.length} configured</span>
+          <button onclick={manageRepos}>Configure repos on GitHub</button>
           <button onclick={syncRepos} disabled={syncing}>{syncing ? "Syncing…" : "Sync Repos"}</button>
-          <button class="primary" onclick={installRepo}>Install repository</button>
+          <button class="primary" onclick={installRepo}>Install on new repos</button>
         </div>
       </div>
 
