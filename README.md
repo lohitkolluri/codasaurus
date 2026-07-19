@@ -259,7 +259,7 @@ For your own projects, use the check command directly:
 
 ```yaml
 - name: Codasaurus Review
-  run: npx codasaurus check --diff origin/main --ci
+  uses: lohitkolluri/codasaurus@v1
 ```
 
 ## Development

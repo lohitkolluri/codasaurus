@@ -17,16 +17,12 @@ docker-compose.yml
 # Dev & CI
 .github/
 .omo/
-Triage/
-TakeHomeAssessment/
-KubeWise/
 Makefile
 
 # Docs & assets (not needed at build time)
 *.md
 docs/
 assets/
-action/
 
 # Secrets
 .env
