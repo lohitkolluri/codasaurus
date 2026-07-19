@@ -1,8 +1,8 @@
 use crate::retry::{is_reqwest_error_retryable, retry_blocking, RetryConfig};
 use anyhow::{Context, Result};
 
-const PR_FILES_PER_PAGE: usize = 100;
-const MAX_PR_FILE_PAGES: usize = 30;
+const PR_FILES_PER_PAGE: usize = crate::util::github::PR_FILES_PER_PAGE;
+const MAX_PR_FILE_PAGES: usize = crate::util::github::MAX_PR_FILE_PAGES;
 
 /// Run codasaurus as a GitHub Action, posting findings as a Check Run with annotations.
 ///

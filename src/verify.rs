@@ -3,6 +3,7 @@ use crate::detectors::graph as code_graph;
 use crate::evidence::{execute_command, ChangedSymbol, FixPacket, TestExecution, VerifyReport};
 use crate::git;
 use crate::parser;
+use crate::util;
 use anyhow::Result;
 use std::time::Duration;
 
@@ -120,7 +121,7 @@ fn get_changed_files(opts: &VerifyOptions) -> Result<Vec<String>> {
             let mut files = Vec::new();
             for entry in walkdir::WalkDir::new(p)
                 .into_iter()
-                .filter_entry(|e| !is_hidden(e))
+                .filter_entry(|e| !util::is_hidden(e.path()))
                 .filter_map(|e| e.ok())
             {
                 if entry.file_type().is_file() {
@@ -471,14 +472,6 @@ fn is_python_project() -> bool {
     std::path::Path::new("setup.py").exists()
         || std::path::Path::new("pyproject.toml").exists()
         || std::path::Path::new("requirements.txt").exists()
-}
-
-fn is_hidden(entry: &walkdir::DirEntry) -> bool {
-    entry
-        .file_name()
-        .to_str()
-        .map(|s| s.starts_with('.') && s != ".")
-        .unwrap_or(false)
 }
 
 #[cfg(test)]

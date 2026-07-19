@@ -5,6 +5,8 @@ use axum::{
     Json, Router,
 };
 use serde::Deserialize;
+use std::time::Duration;
+use tokio::time::timeout;
 
 mod auth;
 mod review;
@@ -102,6 +104,7 @@ async fn handle_webhook(
             let pr = payload.pull_request.as_ref().cloned();
             let ctx = WebhookContext::from_payload(config.clone(), &payload);
             tokio::spawn(async move {
+                let _ = timeout(Duration::from_secs(300), async move {
                 let token = match get_installation_token(&ctx.cfg, ctx.inst_id).await {
                     Ok(t) => t,
                     Err(e) => {
@@ -120,6 +123,7 @@ async fn handle_webhook(
                 if let Err(e) = review_pr(&token, &ctx.repo_full_name, &wrapped).await {
                     eprintln!("  Review error: {}", e);
                 }
+                }).await;
             });
         }
     } else if event == "issue_comment" && payload.action == "created" {
@@ -161,6 +165,7 @@ async fn handle_webhook(
 }
 
 async fn spawn_review(ctx: WebhookContext, pr_number: i64) {
+    let _ = timeout(Duration::from_secs(300), async move {
     let token = match get_installation_token(&ctx.cfg, ctx.inst_id).await {
         Ok(t) => t,
         Err(e) => {
@@ -190,9 +195,11 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64) {
     if let Err(e) = review_pr(&token, &ctx.repo_full_name, &wrapped).await {
         eprintln!("  Review error: {}", e);
     }
+    }).await;
 }
 
 async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64) {
+    let _ = timeout(Duration::from_secs(120), async move {
     let token = match get_installation_token(&ctx.cfg, ctx.inst_id).await {
         Ok(t) => t,
         Err(e) => {
@@ -221,4 +228,5 @@ async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64) {
         .json(&serde_json::json!({"body": body}))
         .send()
         .await;
+    }).await;
 }

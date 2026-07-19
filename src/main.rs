@@ -188,7 +188,7 @@ fn main() -> Result<()> {
                     .unwrap_or(3000)
             });
             let database_url = std::env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "sqlite://codasaurus.db?mode=rwc".to_string());
+                .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", codasaurus::storage::data_dir().join("codasaurus.db").display()));
 
             // Bot config is optional — only load if env vars are set
             let bot_config = std::env::var("GITHUB_APP_ID").ok().and_then(|_| {

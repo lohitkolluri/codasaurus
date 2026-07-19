@@ -80,7 +80,7 @@ fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> 
     // Layers applied to the final resolved router
     app = app
         .layer(TraceLayer::new_for_http())
-        .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024));
+        .layer(RequestBodyLimitLayer::new(25 * 1024 * 1024));
 
     app
 }

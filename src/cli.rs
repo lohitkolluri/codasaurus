@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::detectors::{self, Findings};
 use crate::git;
 use crate::parser;
+use crate::util;
 use anyhow::Result;
 use colored::Colorize;
 use std::path::Path;
@@ -31,7 +32,7 @@ pub fn run_check(opts: CheckOptions) -> Result<Findings> {
         if p.is_dir() {
             for entry in walkdir::WalkDir::new(p)
                 .into_iter()
-                .filter_entry(|e| !is_hidden(e))
+                .filter_entry(|e| !util::is_hidden(e.path()))
                 .filter_map(|e| {
                     if let Err(err) = &e {
                         eprintln!("Warning: error accessing directory entry: {}", err);
@@ -243,12 +244,4 @@ fn extract_changed_files(diff_output: &str) -> Result<Vec<String>> {
     files.sort();
     files.dedup();
     Ok(files)
-}
-
-fn is_hidden(entry: &walkdir::DirEntry) -> bool {
-    entry
-        .file_name()
-        .to_str()
-        .map(|s| s.starts_with('.') && s != ".")
-        .unwrap_or(false)
 }

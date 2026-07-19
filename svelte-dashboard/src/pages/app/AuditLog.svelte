@@ -91,7 +91,7 @@
                 </td>
                 <td style="font-family:var(--font-code);font-size:12px">{entry.event_type ?? entry.event ?? "—"}</td>
                 <td>{entry.actor ?? entry.user ?? "—"}</td>
-                <td>{entry.target ?? "—"}</td>
+                <td>{entry.target_type ?? entry.target_id ?? "—"}</td>
               </tr>
             {/each}
           </tbody>

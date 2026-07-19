@@ -1,6 +1,6 @@
 <script>
   import { push } from "svelte-spa-router";
-  import { login, currentUser } from "../stores/auth.js";
+  import { login } from "../stores/auth.js";
 
   let email = $state("");
   let password = $state("");

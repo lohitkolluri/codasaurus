@@ -20,4 +20,5 @@ pub mod registry;
 pub mod serve;
 pub mod state;
 pub mod storage;
+pub mod util;
 pub mod verify;
