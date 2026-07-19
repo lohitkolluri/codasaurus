@@ -46,8 +46,10 @@ fn main() {
         panic!("Svelte build failed");
     }
 
-    // Tell cargo to re-run if Svelte source changes
+    // Tell cargo to re-run if Svelte source or deps change
     println!("cargo:rerun-if-changed=svelte-dashboard/src/");
+    println!("cargo:rerun-if-changed=svelte-dashboard/package.json");
+    println!("cargo:rerun-if-changed=svelte-dashboard/package-lock.json");
 
     // Ensure the dist directory exists
     let dist = svelte_dir.join("dist");
