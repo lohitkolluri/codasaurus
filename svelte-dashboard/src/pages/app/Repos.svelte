@@ -11,6 +11,8 @@
   let repos = $state([]);
   let loading = $state(true);
   let error = $state("");
+  let syncing = $state(false);
+  let syncMsg = $state("");
 
   onMount(async () => {
     try {
@@ -21,6 +23,20 @@
       loading = false;
     }
   });
+
+  async function syncRepos() {
+    syncing = true;
+    syncMsg = "";
+    try {
+      const data = await api.post("/api/repos/sync");
+      syncMsg = `Synced ${data.synced} repos`;
+      repos = await api.get("/api/repos");
+    } catch (err) {
+      syncMsg = "Sync failed: " + (err.message || "unknown error");
+    } finally {
+      syncing = false;
+    }
+  }
 
   function openRepo(id) {
     push(`/app/repos/${id}`);
@@ -53,9 +69,14 @@
         </div>
         <div class="toolbar-actions">
           <span class="toolbar-count">{repos.length} configured</span>
+          <button onclick={syncRepos} disabled={syncing}>{syncing ? "Syncing…" : "Sync Repos"}</button>
           <button class="primary" onclick={installRepo}>Install repository</button>
         </div>
       </div>
+
+      {#if syncMsg}
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px">{syncMsg}</p>
+      {/if}
 
       {#if error}
         <ErrorState message={error} />

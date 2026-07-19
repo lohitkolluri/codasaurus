@@ -390,8 +390,8 @@ async fn github_manifest_page(
         "name": format!("codasaurus-{}", suffix),
         "url": &public_url,
         "hook_attributes": {
-            "url": "https://example.com/codasaurus-webhook",
-            "active": false
+            "url": format!("{}/webhook/", public_url),
+            "active": true
         },
         "redirect_url": format!("{}/api/setup/github/callback", public_url),
         "callback_urls": [
@@ -477,8 +477,8 @@ async fn github_manifest_url(
         "name": format!("codasaurus-{}", suffix),
         "url": &public_url,
         "hook_attributes": {
-            "url": "https://example.com/codasaurus-webhook",
-            "active": false
+            "url": format!("{}/webhook/", public_url),
+            "active": true
         },
         "redirect_url": format!("{}/api/setup/github/callback", public_url),
         "callback_urls": [
