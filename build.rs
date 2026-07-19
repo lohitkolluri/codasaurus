@@ -27,7 +27,7 @@ fn main() {
         println!("cargo:info=Installing Svelte dependencies...");
         let status = Command::new("npm")
             .args(["install"])
-            .current_dir(&svelte_dir)
+            .current_dir(svelte_dir.as_path())
             .status()
             .expect("npm install failed");
         if !status.success() {
