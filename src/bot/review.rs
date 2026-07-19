@@ -951,44 +951,6 @@ fn build_review_body(
         let _ = writeln!(body);
     }
 
-    // AI Fix Prompt — aggregate all fixable findings into one copyable block
-    let fixable: Vec<&Finding> = findings
-        .findings
-        .iter()
-        .filter(|f| f.suggestion.is_some() || f.codemod.is_some())
-        .collect();
-
-    if !fixable.is_empty() {
-        let _ = writeln!(
-            body,
-            "<details><summary>🤖 **AI Fix Prompt**</summary>"
-        );
-        let _ = writeln!(body);
-        let _ = writeln!(
-            body,
-            "The following findings have suggested fixes. Share this with an AI coding agent:"
-        );
-        let _ = writeln!(body);
-        let _ = writeln!(body, "```text");
-        for f in &fixable {
-            let _ = writeln!(body, "--- {}:{} [{}] ({}) ---", f.file, f.line, f.severity, f.detector);
-            let _ = writeln!(body, "{}", f.message);
-            if let Some(ref s) = f.suggestion {
-                let _ = writeln!(body, "Suggestion: {}", s);
-            }
-            if let Some(ref c) = f.codemod {
-                let _ = writeln!(body, "Patch:");
-                for line in c.lines() {
-                    let _ = writeln!(body, "{}", line);
-                }
-            }
-            let _ = writeln!(body);
-        }
-        let _ = writeln!(body, "```");
-        let _ = writeln!(body, "</details>");
-        let _ = writeln!(body);
-    }
-
     let _ = writeln!(body, "---");
     let _ = writeln!(
         body,

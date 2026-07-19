@@ -163,10 +163,6 @@ pub(crate) async fn handle_webhook(
 
     let config = config.ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let event = headers.get("x-github-event").and_then(|v| v.to_str().ok()).unwrap_or("");
-    let delivery = headers.get("x-github-delivery").and_then(|v| v.to_str().ok()).unwrap_or("");
-    eprintln!("  [webhook] received {event} ({delivery})");
-
     // Signature verification MUST come before delivery dedup — otherwise an
     // attacker who reuses a captured delivery ID bypasses HMAC auth entirely.
     let sig = headers
@@ -174,10 +170,8 @@ pub(crate) async fn handle_webhook(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     if !verify::verify_signature(&config.webhook_secret, &body, sig) {
-        eprintln!("  [webhook] signature verification FAILED for {event}");
         return Err(StatusCode::UNAUTHORIZED);
     }
-    eprintln!("  [webhook] signature verified");
 
     // Replay attack protection: check X-GitHub-Delivery
     let delivery_id = headers
@@ -205,14 +199,6 @@ pub(crate) async fn handle_webhook(
         )
     {
         if payload.pull_request.is_some() {
-            let pr_number = payload.pull_request.as_ref().and_then(|p| p["number"].as_i64()).unwrap_or(0);
-            let repo_full_name = payload
-                .repo
-                .as_ref()
-                .and_then(|r| r["full_name"].as_str())
-                .unwrap_or("unknown")
-                .to_string();
-            eprintln!("  [webhook] dispatching PR #{pr_number} ({repo_full_name}) action={}", payload.action);
             let repo_val = payload.repo.clone();
             let repo_full_name = payload
                 .repo
@@ -301,8 +287,6 @@ pub(crate) async fn handle_webhook(
             payload.installation,
             payload.repositories_added.unwrap_or_default(),
         ));
-    } else {
-        eprintln!("  [webhook] ignoring: {event} action={}", payload.action);
     }
     Ok(Json(serde_json::json!({"status": "ok"})))
 }
