@@ -12,12 +12,32 @@
   let testError = $state("");
   let configured = $state(false);
 
+  /* Model search */
+  let models = $state([]);
+  let modelSearch = $state("");
+  let modelDropdown = $state(false);
+  let modelFiltered = $derived.by(() => {
+    if (!modelSearch) return models.slice(0, 20);
+    const q = modelSearch.toLowerCase();
+    return models
+      .filter(m => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
+      .slice(0, 15);
+  });
+
   const providerConfigs = {
     openrouter: { model: "openai/gpt-4o", baseUrl: "https://openrouter.ai/api/v1" },
     ollama: { model: "llama3", baseUrl: "http://localhost:11434" },
     custom: { model: "", baseUrl: "" },
     disabled: { model: "", baseUrl: "" },
   };
+
+  async function loadModels() {
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/models");
+      const data = await res.json();
+      models = (data.data || []).map(m => ({ id: m.id, name: m.name || m.id }));
+    } catch { /* offline */ }
+  }
 
   onMount(async () => {
     try {
@@ -27,9 +47,11 @@
       if (cfg.model) model = cfg.model;
       if (cfg.base_url) baseUrl = cfg.base_url;
       if (cfg.provider) configured = true;
+      modelSearch = model;
     } catch {
       // no saved config — use defaults
     }
+    if (provider === "openrouter") loadModels();
   });
 
   function handleProviderChange(val) {
@@ -38,7 +60,23 @@
     if (cfg) {
       model = cfg.model;
       baseUrl = cfg.baseUrl;
+      modelSearch = cfg.model;
     }
+    if (val === "openrouter" && models.length === 0) loadModels();
+  }
+
+  function selectModel(m) {
+    model = m.id;
+    modelSearch = m.id;
+    modelDropdown = false;
+  }
+
+  function handleModelKeydown(e) {
+    if (e.key === "Escape") { modelDropdown = false; e.target.blur(); }
+  }
+
+  function handleModelBlur() {
+    setTimeout(() => (modelDropdown = false), 150);
   }
 
   async function testConnection() {
@@ -88,7 +126,29 @@
 
     <div class="form-group">
       <label for="model">Model</label>
-      <input id="model" type="text" bind:value={model} placeholder={providerConfigs[provider]?.model ?? "gpt-4"} />
+      {#if provider === "openrouter"}
+        <div class="search-wrap">
+          <input id="model" type="text" bind:value={modelSearch}
+            oninput={() => (modelDropdown = true)}
+            onfocus={() => (modelDropdown = true)}
+            onkeydown={handleModelKeydown}
+            onblur={handleModelBlur}
+            placeholder="Search models…" autocomplete="off" />
+          {#if modelDropdown && modelFiltered.length > 0}
+            <div class="search-dropdown">
+              {#each modelFiltered as m}
+                <button class="search-item" class:active={m.id === model}
+                  onmousedown={(e) => e.preventDefault()}
+                  onclick={() => selectModel(m)}>
+                  <span class="search-id">{m.id}</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {:else}
+        <input id="model" type="text" bind:value={model} />
+      {/if}
     </div>
 
     <div class="form-group">
@@ -114,3 +174,10 @@
     <button class="primary" onclick={handleNext} disabled={!configured}>Next Step</button>
   </div>
 </div>
+
+<style>
+  .search-wrap { position: relative; }
+  .search-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 20; max-height: 240px; overflow-y: auto; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; margin-top: 4px; box-shadow: var(--shadow-md); }
+  .search-item { display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; border-radius: 0; background: none; font-size: 13px; font-family: var(--font-mono); color: var(--text-primary); cursor: pointer; }
+  .search-item:hover, .search-item.active { background: var(--bg-secondary); }
+</style>
