@@ -335,21 +335,48 @@ async fn test_llm_connection(
     }
 }
 
+/// Resolve the public-facing URL for the GitHub App manifest.
+/// Checks DB config → `PUBLIC_URL` env var → auto-detects from request Host header.
+async fn resolve_public_url(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+) -> String {
+    if let Some(url) = db::config::get_config(&state.pool, "public_url")
+        .await
+        .ok()
+        .flatten()
+    {
+        return url;
+    }
+    if let Ok(url) = std::env::var("PUBLIC_URL") {
+        return url;
+    }
+    // Auto-detect from request Host header
+    if let Some(host) = headers
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+    {
+        let scheme = if host.starts_with("localhost") || host.starts_with("127.") {
+            "http"
+        } else {
+            "https"
+        };
+        return format!("{}://{}", scheme, host);
+    }
+    "http://localhost:3000".to_string()
+}
+
 /// GET /api/setup/github/manifest-page — auto-submitting HTML form that
 /// POSTs the manifest to GitHub. This is the officially documented flow:
 /// https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest
 async fn github_manifest_page(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
 ) -> Result<impl axum::response::IntoResponse, ApiError> {
     use axum::http::{header, StatusCode};
     use axum::response::Html;
 
-    let public_url = db::config::get_config(&state.pool, "public_url")
-        .await
-        .ok()
-        .flatten()
-        .or_else(|| std::env::var("PUBLIC_URL").ok())
-        .unwrap_or_else(|| "http://localhost:3000".to_string());
+    let public_url = resolve_public_url(&state, &headers).await;
 
     let manifest = json!({
         "name": "codasaurus",
@@ -431,13 +458,9 @@ async fn github_manifest_page(
 /// GET /api/setup/github/manifest — return the manifest JSON for programmatic use.
 async fn github_manifest_url(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let public_url = db::config::get_config(&state.pool, "public_url")
-        .await
-        .ok()
-        .flatten()
-        .or_else(|| std::env::var("PUBLIC_URL").ok())
-        .unwrap_or_else(|| "http://localhost:3000".to_string());
+    let public_url = resolve_public_url(&state, &headers).await;
 
     let manifest = json!({
         "name": "codasaurus",
