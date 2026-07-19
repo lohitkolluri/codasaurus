@@ -22,6 +22,7 @@ RUN cargo build --release --locked
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN groupadd -r codasaurus --gid 65532 && useradd -r -g codasaurus --uid 65532 codasaurus
+RUN mkdir -p /data && chown -R 65532:65532 /data
 WORKDIR /app
 COPY --from=frontend /app/svelte-dashboard/dist/ /app/svelte-dashboard/dist/
 COPY --from=backend /app/target/release/codasaurus /usr/local/bin/codasaurus
