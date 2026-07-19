@@ -171,8 +171,10 @@ async fn setup_database(
                 ));
             }
 
+            let db_url = crate::db::normalize_database_url(&body.url);
+
             // Try connecting
-            let test_pool = sqlx::PgPool::connect(&body.url)
+            let test_pool = sqlx::PgPool::connect(&db_url)
                 .await
                 .map_err(|e| ApiError::bad_request(format!("Cannot connect: {}", e)))?;
 
@@ -185,7 +187,7 @@ async fn setup_database(
 
             db::config::set_config(&state.pool, "database_provider", "postgres")
                 .await?;
-            db::config::set_config(&state.pool, "database_url", &body.url)
+            db::config::set_config(&state.pool, "database_url", &db_url)
                 .await?;
 
             Ok(Json(SetupResponse {

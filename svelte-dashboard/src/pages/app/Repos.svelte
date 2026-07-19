@@ -75,12 +75,12 @@
           </thead>
           <tbody>
             {#each repos as repo}
-              <tr style="cursor:pointer" onclick={() => openRepo(repo.id)}>
+              <tr style="cursor:pointer" onclick={() => openRepo(repo.id)} role="button" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter') openRepo(repo.id); }}>
                 <td style="font-weight:600">{repo.full_name ?? repo.name ?? repo.id}</td>
                 <td>{repo.default_branch ?? "main"}</td>
-                <td>{repo.last_review_at ? new Date(repo.last_review_at).toLocaleDateString() : "—"}</td>
+                <td>{repo.updated_at ? new Date(repo.updated_at).toLocaleDateString() : "—"}</td>
                 <td>
-                  {#if repo.enabled}
+                  {#if repo.active}
                     <span class="status-badge passing">Active</span>
                   {:else}
                     <span class="status-badge pending">Inactive</span>

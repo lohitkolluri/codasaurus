@@ -39,10 +39,10 @@
         <!-- loading, spinner shown -->
       {:else if stats}
         <div class="stats-row">
-          <StatsCard label="Repos Monitored" value={stats.repos_monitored ?? 0} />
-          <StatsCard label="Reviews Today" value={stats.reviews_today ?? 0} />
+          <StatsCard label="Repos Monitored" value={stats.total_repos ?? 0} />
+          <StatsCard label="Reviews Today" value={stats.total_reviews_today ?? 0} />
           <StatsCard label="Pass Rate" value={stats.pass_rate != null ? `${stats.pass_rate}%` : "—"} />
-          <StatsCard label="Active Findings" value={stats.active_findings ?? 0} />
+          <StatsCard label="Active Findings" value={stats.total_findings ?? 0} />
         </div>
 
         <h2 class="page-title" style="font-size:18px">Recent Activity</h2>

@@ -114,10 +114,10 @@
         <EmptyState message="No reviews found" />
       {:else}
         {#each reviews as review}
-          <div class="review-card" style="margin-bottom:8px" onclick={() => goToReview(review.id)}>
+          <div class="review-card" style="margin-bottom:8px" onclick={() => goToReview(review.id)} role="button" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter') goToReview(review.id); }}>
             <h3>{review.pr_title ?? `PR #${review.pr_number}`}</h3>
             <div class="review-meta">
-              <span>{review.repo_name ?? ""}</span>
+              <span>{review.repo_name ?? `Repo #${review.repo_id}`}</span>
               <span class="status-badge {review.status}">{review.status}</span>
               <span>{review.created_at ? new Date(review.created_at).toLocaleString() : ""}</span>
             </div>

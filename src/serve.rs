@@ -85,17 +85,31 @@ fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> 
     app
 }
 
-/// Try to load bot credentials from the DB (stored by the setup wizard),
-/// falling back to env vars if no env config was passed.
+/// Try to load bot credentials from environment variables first, then
+/// the DB (stored by the setup wizard). If env vars gave us a partial
+/// config (e.g. GITHUB_APP_ID set but GITHUB_WEBHOOK_SECRET missing),
+/// fall back to DB-stored values for the missing fields.
 async fn resolve_bot_config(
     pool: &db::DbPool,
     host: &str,
     port: u16,
     env_config: Option<bot::BotConfig>,
 ) -> Option<bot::BotConfig> {
-    // If env vars already gave us a config, use it directly
+    // If env vars already gave us a config, use it with DB fallbacks
     if let Some(cfg) = env_config {
-        return Some(cfg);
+        let webhook_secret = if cfg.webhook_secret.is_empty() {
+            db::config::get_config(pool, "github_webhook_secret")
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+        } else {
+            cfg.webhook_secret
+        };
+        return Some(bot::BotConfig {
+            webhook_secret,
+            ..cfg
+        });
     }
 
     // Try loading from DB (setup wizard stores here)

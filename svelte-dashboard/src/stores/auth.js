@@ -7,8 +7,8 @@ export const authLoading = writable(true);
 export async function checkSession() {
   authLoading.set(true);
   try {
-    const user = await api.get("/api/auth/me");
-    currentUser.set(user);
+    const res = await api.get("/api/auth/me");
+    currentUser.set(res.user ?? null);
   } catch {
     currentUser.set(null);
   } finally {
@@ -17,9 +17,9 @@ export async function checkSession() {
 }
 
 export async function login(email, password) {
-  const user = await api.post("/api/auth/login", { email, password });
-  currentUser.set(user);
-  return user;
+  const res = await api.post("/api/auth/login", { email, password });
+  currentUser.set(res.user ?? null);
+  return res.user;
 }
 
 export async function logout() {

@@ -122,7 +122,10 @@ async fn rotate_github_credentials(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     for key in GITHUB_KEYS {
-        db::config::set_config(&state.pool, key, "").await?;
+        sqlx::query("DELETE FROM app_config WHERE key = ?")
+            .bind(key)
+            .execute(&state.pool.0)
+            .await?;
     }
     Ok(Json(json!({ "status": "ok", "message": "Credentials cleared. Re-run the manifest flow to set up a new GitHub App." })))
 }

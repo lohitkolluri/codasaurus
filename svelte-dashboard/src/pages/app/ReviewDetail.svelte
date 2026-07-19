@@ -10,19 +10,34 @@
   import { params } from "svelte-spa-router";
 
   let review = $state(null);
-  let files = $state([]);
   let allFindings = $state([]);
   let loading = $state(true);
   let error = $state("");
 
   let selectedFile = $state(null);
 
+  let files = $derived.by(() => {
+    const seen = new Set();
+    return allFindings.filter((f) => {
+      const path = f.file_path ?? f.file;
+      if (!path || seen.has(path)) return false;
+      seen.add(path);
+      return true;
+    });
+  });
+
+  let fileFindings = $derived.by(() => {
+    if (!selectedFile || !allFindings.length) return [];
+    return allFindings.filter((f) => f.file_path === selectedFile || f.file === selectedFile);
+  });
+
+  let selectedFindings = $derived(fileFindings);
+
   onMount(async () => {
     try {
       const id = $params.id;
       const data = await api.get(`/api/reviews/${id}`);
-      review = data;
-      files = data.files ?? [];
+      review = data.review ?? null;
       allFindings = data.findings ?? [];
     } catch (err) {
       error = err.message || "Failed to load review";
@@ -31,19 +46,8 @@
     }
   });
 
-  let fileFindings = $derived.by(() => {
-    if (!selectedFile || !allFindings.length) return [];
-    return allFindings.filter((f) => f.file_path === selectedFile || f.file === selectedFile);
-  });
-
   function countSeverity(findings, severity) {
     return findings.filter((f) => f.severity === severity).length;
-  }
-
-  let selectedFindings = $derived(fileFindings);
-
-  function selectFile(filePath) {
-    selectedFile = filePath;
   }
 
   function getFindingsForFile(filePath) {
@@ -54,7 +58,7 @@
 <div class="app-layout">
   <Sidebar />
   <div class="app-main">
-    <Header title={review ? `Review #${review.id ?? review.pr_number}` : "Review"} />
+    <Header title={review ? `PR #${review.pr_number ?? review.id}` : "Review"} />
     <div class="app-content" style="padding:0">
       <LoadingSpinner loading={loading} />
 
@@ -66,29 +70,31 @@
         <div style="padding:24px 32px;border-bottom:1px solid var(--border)">
           <h2 style="font-size:20px;font-weight:700;margin-bottom:8px">{review.pr_title ?? `PR #${review.pr_number}`}</h2>
           <div style="display:flex;gap:12px;font-size:13px;color:var(--text-muted);align-items:center">
-            <span>{review.repo_name ?? ""}</span>
+            <span>{review.repo_full_name ?? ""}</span>
             <span class="status-badge {review.status}">{review.status}</span>
-            {#if review.commit_sha}
-              <span style="font-family:var(--font-code);font-size:12px">{review.commit_sha.slice(0, 7)}</span>
+            {#if review.pr_head_sha}
+              <span style="font-family:var(--font-code);font-size:12px">{review.pr_head_sha.slice(0, 7)}</span>
             {/if}
           </div>
         </div>
 
         <div class="page-with-sidebar" style="height:auto;min-height:calc(100vh - var(--header-height) - 120px)">
           <div class="file-tree">
-            {#each files as file}
+            {#each files as f}
               <div
                 class="file-tree-item"
-                class:active={selectedFile === (file.file_path ?? file.file)}
-                onclick={() => selectFile(file.file_path ?? file.file)}
-              >
-                <span>{file.file_name ?? file.file_path?.split("/").pop() ?? file.file}</span>
+                class:active={selectedFile === (f.file_path ?? f.file)}
+                onclick={() => selectFile(f.file_path ?? f.file)}
+                role="button"
+                tabindex="0"
+                onkeydown={(e) => { if (e.key === 'Enter') selectFile(f.file_path ?? f.file); }}>
+                <span>{f.file_path?.split("/").pop() ?? f.file}</span>
                 <div class="severity-counts">
-                  {#if countSeverity(getFindingsForFile(file.file_path ?? file.file), "blocking") > 0}
-                    <span style="color:var(--error)">{countSeverity(getFindingsForFile(file.file_path ?? file.file), "blocking")}</span>
+                  {#if countSeverity(getFindingsForFile(f.file_path ?? f.file), "blocking") > 0}
+                    <span style="color:var(--error)">{countSeverity(getFindingsForFile(f.file_path ?? f.file), "blocking")}</span>
                   {/if}
-                  {#if countSeverity(getFindingsForFile(file.file_path ?? file.file), "warning") > 0}
-                    <span style="color:var(--text-primary)">{countSeverity(getFindingsForFile(file.file_path ?? file.file), "warning")}</span>
+                  {#if countSeverity(getFindingsForFile(f.file_path ?? f.file), "warning") > 0}
+                    <span style="color:var(--text-primary)">{countSeverity(getFindingsForFile(f.file_path ?? f.file), "warning")}</span>
                   {/if}
                 </div>
               </div>
