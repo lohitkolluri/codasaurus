@@ -634,48 +634,107 @@ fn build_comment_body(finding: &Finding) -> String {
         _ => "🔵",
     };
     let title = finding_display_title(finding);
-    let impact = finding_impact(finding);
+    let explanation = finding_explanation(finding);
+    let action = finding_action(finding);
 
-    let mut body = format!(
-        "**{} {}**\n\n{}\n\n{}",
-        icon, title, finding.message, impact
-    );
-
-    if let Some(ref s) = finding.suggestion {
-        let _ = write!(body, "\n\n**💡 Suggestion:** {}", s);
-    }
-    if let Some(ref c) = finding.codemod {
-        let _ = write!(body, "\n```suggestion\n{}\n```", c);
-    }
-    body
+    format!(
+        "**{icon} {title}**\n\n{explanation}\n\n{action}",
+        icon = icon,
+        title = title,
+        explanation = explanation,
+        action = action,
+    )
 }
 
 fn finding_display_title(f: &Finding) -> String {
     match f.detector.as_str() {
-        "hallucinated-imports" => "Nonexistent Package Import".into(),
-        "secrets" => "Hardcoded Credential".into(),
-        "phantom-deps" => "Missing Dependency Declaration".into(),
-        "todo-leaks" => "Leftover Placeholder".into(),
-        "vulnerabilities" => "Known Vulnerability".into(),
-        "over-engineering" => "Unnecessary Complexity".into(),
+        "hallucinated-imports" => {
+            let pkg = extract_package_name(&f.message);
+            format!("Package Doesn't Exist — `{}`", pkg)
+        }
+        "secrets" => "Credential in Source".into(),
+        "phantom-deps" => {
+            let pkg = extract_package_name(&f.message);
+            format!("Missing Dependency — `{}`", pkg)
+        }
+        "todo-leaks" => "Incomplete Code".into(),
+        "vulnerabilities" => {
+            let pkg = f
+                .suggestion
+                .as_ref()
+                .and_then(|s| s.split('`').nth(1))
+                .unwrap_or("package");
+            format!("Known Vulnerability — `{}`", pkg)
+        }
+        "over-engineering" => "Unnecessary Abstraction".into(),
         "boilerplate" => "Boilerplate Code".into(),
-        "stale-api" => "Deprecated API Usage".into(),
+        "stale-api" => "Deprecated API".into(),
         "graph" => "Unused Code".into(),
         "guidelines" => "Guideline Violation".into(),
         other => format!("{} Issue", capitalize_first(other)),
     }
 }
 
-fn finding_impact(f: &Finding) -> &'static str {
+fn finding_explanation(f: &Finding) -> String {
     match f.detector.as_str() {
-        "hallucinated-imports" => "This import will fail at build time or crash at runtime — the package does not exist.",
-        "secrets" => "Committed credentials are a security incident. The key must be rotated immediately — it is now in the git history.",
-        "phantom-deps" => "This dependency is used but not declared. It may work locally via hoisting but will fail in production or CI.",
-        "todo-leaks" => "TODOs and FIXMEs in committed code signal incomplete work. Address or remove before merging.",
-        "vulnerabilities" => "This dependency has a known CVE. Attackers can exploit it if the vulnerable path is reachable.",
-        "over-engineering" => "The pattern adds complexity without proportional benefit. Premature abstraction is expensive to undo.",
-        _ => "This finding should be addressed to maintain code quality and prevent future issues.",
+        "hallucinated-imports" => {
+            let pkg = extract_package_name(&f.message);
+            format!(
+                "`{}` doesn't appear to exist on the registry. This import will fail at \
+                 build time or crash at runtime — the package simply isn't available.",
+                pkg
+            )
+        }
+        "secrets" => "A secret key or token is hardcoded in this file. Since it's committed, \
+                      it's now part of the git history and should be rotated immediately. \
+                      Anyone with repository access can use it."
+            .to_string(),
+        "phantom-deps" => {
+            let pkg = extract_package_name(&f.message);
+            format!(
+                "`{}` is imported but not declared in the project manifest. It may work \
+                 locally through hoisting or a global install, but this will break in CI \
+                 or on any fresh environment.",
+                pkg
+            )
+        }
+        "todo-leaks" => "A `TODO` or `FIXME` marker made it into the commit. These signal \
+                         incomplete work — either the task was forgotten or the marker was \
+                         left in by accident."
+            .to_string(),
+        "vulnerabilities" => {
+            let cve = f.message.split(':').next().unwrap_or(&f.message);
+            let desc = f.message.split(':').nth(1).unwrap_or("").trim();
+            format!(
+                "{} ({}) affects this dependency. {}",
+                cve,
+                f.suggestion
+                    .as_ref()
+                    .and_then(|s| s.split('`').nth(1))
+                    .unwrap_or("unknown"),
+                desc
+            )
+        }
+        "over-engineering" => "The abstraction here adds complexity without a clear benefit at \
+                               this scale. Early abstraction is harder to undo than it is to \
+                               add later when the need is proven."
+            .to_string(),
+        _ => "This finding should be addressed to maintain code quality.".into(),
     }
+}
+
+fn finding_action(f: &Finding) -> String {
+    if let Some(ref s) = f.suggestion {
+        return format!("**💡 Suggestion:** {}", s);
+    }
+    if let Some(ref c) = f.codemod {
+        return format!("```suggestion\n{}\n```", c);
+    }
+    "Please review and address this finding.".into()
+}
+
+fn extract_package_name(msg: &str) -> String {
+    msg.split('`').nth(1).unwrap_or("unknown").to_string()
 }
 
 fn capitalize_first(s: &str) -> String {
