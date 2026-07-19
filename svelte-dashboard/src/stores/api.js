@@ -1,5 +1,5 @@
 const BASE_URL = "";
-const REQUEST_TIMEOUT_MS = 15000;
+const REQUEST_TIMEOUT_MS = 30000;
 
 async function request(method, path, body) {
   const controller = new AbortController();
