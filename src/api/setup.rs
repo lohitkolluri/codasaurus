@@ -378,8 +378,11 @@ async fn github_manifest_page(
 
     let public_url = resolve_public_url(&state, &headers).await;
 
+    // Unique suffix so the GitHub App name doesn't collide
+    let suffix: String = uuid::Uuid::new_v4().to_string().chars().take(4).collect();
+
     let manifest = json!({
-        "name": "codasaurus",
+        "name": format!("codasaurus-{}", suffix),
         "url": &public_url,
         "hook_attributes": {
             "url": "https://example.com/codasaurus-webhook",
@@ -462,8 +465,11 @@ async fn github_manifest_url(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let public_url = resolve_public_url(&state, &headers).await;
 
+    // Unique suffix so the GitHub App name doesn't collide
+    let suffix: String = uuid::Uuid::new_v4().to_string().chars().take(4).collect();
+
     let manifest = json!({
-        "name": "codasaurus",
+        "name": format!("codasaurus-{}", suffix),
         "url": &public_url,
         "hook_attributes": {
             "url": "https://example.com/codasaurus-webhook",
