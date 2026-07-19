@@ -1,6 +1,7 @@
 use crate::detectors::Finding;
 use crate::parser::ParsedFile;
 use aho_corasick::AhoCorasick;
+use regex::Regex;
 use std::sync::LazyLock;
 
 static TODO_RE: LazyLock<AhoCorasick> = LazyLock::new(|| {
@@ -8,6 +9,12 @@ static TODO_RE: LazyLock<AhoCorasick> = LazyLock::new(|| {
         .ascii_case_insensitive(true)
         .build(["todo", "fixme", "xxx", "hack"])
         .expect("valid TODO patterns")
+});
+
+// Lines matching these patterns (word-boundary checked) skip secret detection.
+// Avoids false positives from substrings like "contest" matching "test_".
+static SKIP_LINE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\btest_\b|\bmock_\b|\bfixture\b").expect("valid skip line regex")
 });
 
 static SECRET_PRE_CHECK: LazyLock<AhoCorasick> = LazyLock::new(|| {
@@ -54,14 +61,15 @@ pub fn detect_secrets(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                 continue;
             }
 
-    // Skip lines that are inside string literal context (test fixtures, example code, mocks)
-    if is_in_string_context(trimmed) {
-        continue;
-    }
-    // Skip lines containing test indicators to reduce false positives
-    if trimmed.contains("test_") || trimmed.contains("mock_") || trimmed.contains("fixture") {
-        continue;
-    }
+            // Skip lines that are inside string literal context (test fixtures, example code, mocks)
+            if is_in_string_context(trimmed) {
+                continue;
+            }
+            // Skip test/mock/fixture lines — word-boundary checked to avoid
+            // false positives from substrings like "contest" matching "test_".
+            if SKIP_LINE_RE.is_match(trimmed) {
+                continue;
+            }
 
             for pattern in SECRET_PATTERNS.iter() {
                 if let Some(captures) = pattern.regex.captures(trimmed) {
