@@ -181,12 +181,17 @@ pub fn is_excluded(path: &str, patterns: &[String]) -> bool {
             }
         }
         // Directory prefix: dist/ -> contains /dist/ or starts with dist/
+        // Must match full directory segment so "dist/" doesn't match "distribution/"
         if p.ends_with('/') {
             let dir = &p[..p.len() - 1];
-            if path_lower.contains(&format!("/{}", dir)) {
+            if path_lower.starts_with(p) {
                 return true;
             }
-            if path_lower.starts_with(p) {
+            if path_lower.contains(&format!("/{}/", dir)) {
+                return true;
+            }
+            // Also match if the path has a trailing slash
+            if path_lower.ends_with(&format!("/{}", dir)) {
                 return true;
             }
         }

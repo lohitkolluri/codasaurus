@@ -88,7 +88,7 @@ pub fn populate(files: &[ParsedFile]) {
                         if file_b_path == a_path {
                             continue;
                         }
-                        if import_name.contains(word) || word.contains(import_name) {
+                        if word == import_name {
                             let from_sym = format!("{}::{}", a_path, word);
                             let to_sym = format!("{}::{}", file_b_path, import_name);
                             let edge_key = (from_sym.clone(), to_sym.clone());

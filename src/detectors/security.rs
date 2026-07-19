@@ -103,11 +103,15 @@ pub fn detect_secrets(parsed_files: &[ParsedFile]) -> Vec<Finding> {
 fn is_in_string_context(line: &str) -> bool {
     let trimmed = line.trim();
     // Entire line wrapped in quotes: "const API_KEY = ..." or '...'
-    if (trimmed.starts_with('"') && trimmed.ends_with('"'))
-        || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
-        || (trimmed.starts_with("// ") && trimmed.contains("example"))
-        || (trimmed.starts_with("# ") && trimmed.contains("example"))
-    {
+    // BUT: don't skip JSON key-value lines like "api_key": "secret"
+    // which would falsely hide real secrets in config files.
+    let is_quoted_line = (trimmed.starts_with('"') && trimmed.ends_with('"'))
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\''));
+    if is_quoted_line {
+        // A line containing `: "` or `: '` is likely a config key-value pair.
+        if trimmed.contains(": \"") || trimmed.contains(": '") {
+            return false;
+        }
         return true;
     }
     // Line starts in a comment context containing example/sample keywords
