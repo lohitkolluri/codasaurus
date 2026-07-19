@@ -142,6 +142,13 @@ pub struct User {
     pub created_at: String,
 }
 
+/// Public-facing user data — never contains the password hash.
+#[derive(Serialize, Debug, Clone)]
+pub struct UserView {
+    pub email: String,
+    pub role: String,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct UserCreate {
     pub email: String,

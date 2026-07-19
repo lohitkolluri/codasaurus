@@ -34,24 +34,33 @@ pub async fn verify_password(
     pool: &DbPool,
     email: &str,
     password: &str,
-) -> Result<Option<User>, sqlx::Error> {
+) -> Result<Option<UserView>, sqlx::Error> {
     let user: Option<User> =
         sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = ?")
             .bind(email)
             .fetch_optional(&pool.0)
             .await?;
 
-    match user {
-        Some(u) => {
-            let parsed_hash = PasswordHash::new(&u.password_hash)
-                .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
-            let argon2 = Argon2::default();
-            match argon2.verify_password(password.as_bytes(), &parsed_hash) {
-                Ok(_) => Ok(Some(u)),
-                Err(_) => Ok(None),
-            }
+    // Always run argon2 (even for missing users) to prevent timing attacks
+    // that could reveal whether an email is registered.
+    let (expected_hash, user_view) = match user {
+        Some(u) => (u.password_hash.clone(), Some(UserView { email: u.email, role: u.role })),
+        None => {
+            // Use a dummy hash for unknown emails so verification takes ~same time
+            let salt = argon2::password_hash::SaltString::generate(&mut OsRng);
+            let dummy = Argon2::default()
+                .hash_password(b"dummy-bc84a2e7f9", &salt)
+                .map(|h| h.to_string())
+                .unwrap_or_else(|_| "$argon2id$v=19$m=19456,t=2,p=1$dummy".into());
+            (dummy, None)
         }
-        None => Ok(None),
+    };
+
+    let parsed_hash = PasswordHash::new(&expected_hash)
+        .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+    match Argon2::default().verify_password(password.as_bytes(), &parsed_hash) {
+        Ok(_) => Ok(user_view),
+        Err(_) => Ok(None),
     }
 }
 
