@@ -101,7 +101,12 @@ async fn setup_status(
 ) -> Result<Json<SetupStatus>, ApiError> {
     use db::config::get_config;
 
-    let database = get_config(&state.pool, "database_provider").await.ok().flatten().is_some();
+    let database = get_config(&state.pool, "database_provider")
+        .await
+        .ok()
+        .flatten()
+        .is_some()
+        || std::env::var("DATABASE_URL").is_ok();
 
     // Check both DB config and env vars for GitHub. If GITHUB_APP_ID is set
     // in the environment, the bot is already configured at startup — no need
