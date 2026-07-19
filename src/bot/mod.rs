@@ -406,6 +406,9 @@ async fn handle_installation_created(
         }
     }
     let count = repos.len();
+    if let Some(p) = bot_db_pool() {
+        crate::db::audit::log_event(p, "installation.created", None, Some("installation"), Some(inst_id)).await;
+    }
     println!("  [bot] Synced {} repos from installation", count);
 }
 
@@ -426,7 +429,10 @@ async fn handle_installation_deleted(installation: Option<InstallationInfo>) {
         .execute(&pool.0)
         .await
     {
-        Ok(r) => println!("  [bot] Deactivated {} repos from uninstalled app {}", r.rows_affected(), inst_id),
+        Ok(r) => {
+            println!("  [bot] Deactivated {} repos from uninstalled app {}", r.rows_affected(), inst_id);
+            crate::db::audit::log_event(pool, "installation.deleted", None, Some("installation"), Some(inst_id)).await;
+        }
         Err(e) => eprintln!("  [bot] Failed to deactivate repos: {}", e),
     }
 }

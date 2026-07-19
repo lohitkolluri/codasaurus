@@ -1103,4 +1103,5 @@ async fn save_review_to_db(
     .await {
         eprintln!("Warning: failed to update review status: {}", e);
     }
+    crate::db::audit::log_event(pool, &format!("review.{}", status), Some(pr_author), Some("review"), Some(review.id)).await;
 }

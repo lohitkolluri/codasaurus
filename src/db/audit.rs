@@ -30,3 +30,21 @@ pub async fn list_audit_entries(
         }
     }
 }
+
+pub async fn log_event(
+    pool: &DbPool,
+    event_type: &str,
+    actor: Option<&str>,
+    target_type: Option<&str>,
+    target_id: Option<i64>,
+) {
+    let _ = sqlx::query(
+        "INSERT INTO audit_log (event_type, actor, target_type, target_id) VALUES (?, ?, ?, ?)",
+    )
+    .bind(event_type)
+    .bind(actor)
+    .bind(target_type)
+    .bind(target_id)
+    .execute(&pool.0)
+    .await;
+}
