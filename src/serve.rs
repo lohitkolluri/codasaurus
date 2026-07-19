@@ -45,8 +45,6 @@ pub async fn serve(
     let bot_config = resolve_bot_config(&pool, host, port, env_bot_config).await;
     if bot_config.is_some() {
         println!("  GitHub bot configured");
-    } else {
-        println!("  Starting in dashboard-only mode (no GitHub bot)");
     }
 
     let app = build_router(pool, bot_config);
@@ -84,10 +82,16 @@ fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> 
     // Everything above this line shares the AppState.
     let mut app = app.with_state(state);
 
-    // Bot webhook (has its own BotConfig state, already resolved by webhook_router)
-    if let Some(config) = bot_config {
-        app = app.nest("/webhook", bot::webhook_router(config));
-    }
+    // Always mount the webhook endpoint. It will gracefully return 401 if
+    // the bot isn't configured (signature verification fails with empty secret).
+    let bot_cfg = bot_config.unwrap_or_else(|| bot::BotConfig {
+        app_id: String::new(),
+        private_key: String::new(),
+        webhook_secret: String::new(),
+        host: "0.0.0.0".into(),
+        port: 3000,
+    });
+    app = app.nest("/webhook", bot::webhook_router(bot_cfg));
 
     // Layers applied to the final resolved router
     app = app

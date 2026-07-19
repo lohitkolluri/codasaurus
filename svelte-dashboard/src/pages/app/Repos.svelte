@@ -233,7 +233,8 @@
   .table-wrapper {
     border: 1px solid var(--border);
     border-radius: 8px;
-    overflow: hidden;
+    overflow: auto;
+    max-height: calc(100vh - 360px);
     background: var(--bg-primary);
   }
   table {
@@ -255,16 +256,6 @@
     padding: 10px 14px;
     text-align: left;
     border-bottom: 1px solid var(--border);
-  }
-  tbody {
-    display: block;
-    overflow-y: auto;
-    max-height: calc(100vh - 360px);
-  }
-  thead, tbody tr {
-    display: table;
-    width: 100%;
-    table-layout: fixed;
   }
   td {
     padding: 10px 14px;
