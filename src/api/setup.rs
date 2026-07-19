@@ -281,7 +281,7 @@ async fn test_llm_connection(
     }
 }
 
-/// GET /api/v1/setup/github/manifest-url
+/// GET /api/setup/github/manifest-url
 async fn github_manifest_url(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
@@ -293,25 +293,42 @@ async fn github_manifest_url(
         .or_else(|| std::env::var("PUBLIC_URL").ok())
         .unwrap_or_else(|| "http://localhost:3000".to_string());
 
+    // Auto-generate a webhook secret — the user doesn't need to set this manually
+    let webhook_secret = uuid::Uuid::new_v4().to_string().replace('-', "");
+
     let manifest = json!({
         "name": "codasaurus",
         "url": &public_url,
         "hook_attributes": {
-            "url": format!("{}/api/v1/setup/github/webhook", public_url),
+            "url": format!("{}/webhook", public_url),
+            "secret": webhook_secret,
+            "active": true
         },
         "redirect_url": format!("{}/setup/github/callback", public_url),
+        "callback_urls": [
+            format!("{}/api/auth/github/callback", public_url)
+        ],
+        "setup_url": format!("{}/setup/complete", public_url),
+        "setup_on_update": true,
         "public": false,
+        "request_oauth_on_install": true,
+        "expire_user_tokens": true,
         "default_permissions": {
             "pull_requests": "write",
             "checks": "write",
             "contents": "read",
             "issues": "read",
-            "metadata": "read"
+            "metadata": "read",
+            "emails": "read"
         },
         "default_events": [
             "pull_request",
             "issue_comment",
-            "push"
+            "push",
+            "check_run",
+            "check_suite",
+            "installation",
+            "installation_repositories"
         ]
     });
 
