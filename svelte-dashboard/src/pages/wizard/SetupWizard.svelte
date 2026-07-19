@@ -34,10 +34,12 @@
     }
     const next = firstIncomplete();
     if (!next) return;
-    if (!status.database) push("/setup/database");
-    else if (!status.llm) push("/setup/llm");
-    else if (!status.github) push("/setup/github");
-    else if (!status.admin) push("/setup/admin");
+    goToStep(next.key);
+  }
+
+  function goToStep(key) {
+    const routes = { database: "/setup/database", llm: "/setup/llm", github: "/setup/github", admin: "/setup/admin" };
+    push(routes[key] ?? "/setup");
   }
 
   onMount(async () => {
@@ -64,7 +66,7 @@
   {:else}
     <div style="max-width:400px;margin:0 auto">
       {#each steps as step, i}
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border-light)">
+        <div class="step-row" onclick={() => goToStep(step.key)} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && goToStep(step.key)}>
           <div style="text-align:left">
             <div style="font-size:14px;font-weight:500">{step.label}</div>
             <div style="font-size:12px;color:var(--text-muted)">{step.desc}</div>
@@ -85,3 +87,18 @@
     </button>
   {/if}
 </div>
+
+<style>
+  .step-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-light);
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .step-row:hover {
+    opacity: 0.7;
+  }
+</style>
