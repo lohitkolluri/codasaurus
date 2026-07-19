@@ -1,10 +1,10 @@
 /// Cross-database compatible schema for both SQLite and PostgreSQL.
-/// Uses syntax that works on both where possible, and branches
-/// on the database type for DDL that must differ (PRAGMAs, SERIAL).
+/// The SQLite schema is active; PostgreSQL schema is defined as a constant
+/// for future use once the runtime driver registration is resolved.
 
-use sqlx::Pool;
+use sqlx::SqlitePool;
 
-/// SQLite-specific schema (uses `INTEGER PRIMARY KEY` for auto-increment).
+/// Active SQLite schema.
 const SQLITE_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS app_config (
     key TEXT PRIMARY KEY,
@@ -107,113 +107,9 @@ CREATE TABLE IF NOT EXISTS users (
 );
 ";
 
-/// PostgreSQL-specific schema (uses `BIGSERIAL` for auto-increment).
-const POSTGRES_SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS app_config (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS repos (
-    id BIGSERIAL PRIMARY KEY,
-    github_id BIGINT UNIQUE,
-    full_name TEXT NOT NULL,
-    owner TEXT NOT NULL,
-    name TEXT NOT NULL,
-    default_branch TEXT,
-    installation_id BIGINT NOT NULL,
-    private BOOLEAN NOT NULL DEFAULT false,
-    active BOOLEAN NOT NULL DEFAULT true,
-    config_json TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_repos_owner ON repos(owner);
-CREATE INDEX IF NOT EXISTS idx_repos_active ON repos(active);
-
-CREATE TABLE IF NOT EXISTS reviews (
-    id BIGSERIAL PRIMARY KEY,
-    repo_id INTEGER NOT NULL REFERENCES repos(id),
-    pr_number BIGINT NOT NULL,
-    pr_title TEXT,
-    pr_author TEXT,
-    pr_base_branch TEXT,
-    pr_head_branch TEXT,
-    pr_head_sha TEXT,
-    status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending', 'running', 'passed', 'failed', 'error')),
-    summary_json TEXT,
-    started_at TIMESTAMP,
-    completed_at TIMESTAMP,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_reviews_repo ON reviews(repo_id);
-CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status);
-CREATE INDEX IF NOT EXISTS idx_reviews_created ON reviews(created_at DESC);
-
-CREATE TABLE IF NOT EXISTS findings (
-    id BIGSERIAL PRIMARY KEY,
-    review_id INTEGER NOT NULL REFERENCES reviews(id),
-    fingerprint TEXT UNIQUE,
-    file_path TEXT NOT NULL,
-    line_start INTEGER,
-    line_end INTEGER,
-    column_start INTEGER,
-    column_end INTEGER,
-    severity TEXT NOT NULL CHECK (severity IN ('blocking', 'warning', 'info')),
-    detector TEXT NOT NULL,
-    rule_id TEXT,
-    message TEXT NOT NULL,
-    suggested_fix TEXT,
-    code_snippet TEXT,
-    context TEXT,
-    category TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_findings_review ON findings(review_id);
-CREATE INDEX IF NOT EXISTS idx_findings_file ON findings(file_path);
-CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
-CREATE INDEX IF NOT EXISTS idx_findings_fingerprint ON findings(fingerprint);
-
-CREATE TABLE IF NOT EXISTS dismissals (
-    id BIGSERIAL PRIMARY KEY,
-    fingerprint TEXT NOT NULL REFERENCES findings(fingerprint),
-    dismissed_by TEXT,
-    reason TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(fingerprint)
-);
-
-CREATE TABLE IF NOT EXISTS audit_log (
-    id BIGSERIAL PRIMARY KEY,
-    event_type TEXT NOT NULL,
-    actor TEXT,
-    target_type TEXT,
-    target_id BIGINT,
-    metadata_json TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_log(event_type);
-CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
-
-CREATE TABLE IF NOT EXISTS users (
-    id BIGSERIAL PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin', 'viewer')),
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-";
-
 const MIGRATION_VERSION: i64 = 1;
 
-pub async fn run_migrations(pool: &Pool<sqlx::Any>, is_postgres: bool) -> Result<(), sqlx::Error> {
-    // Create schema version table (compatible across both databases)
+pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS schema_version (
             version BIGINT PRIMARY KEY,
@@ -223,7 +119,6 @@ pub async fn run_migrations(pool: &Pool<sqlx::Any>, is_postgres: bool) -> Result
     .execute(pool)
     .await?;
 
-    // Check if migration 1 has already been applied
     let exists: bool = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM schema_version WHERE version = ?",
     )
@@ -236,27 +131,21 @@ pub async fn run_migrations(pool: &Pool<sqlx::Any>, is_postgres: bool) -> Result
         return Ok(());
     }
 
-    // Detect database type and run appropriate schema
-    let schema = if is_postgres { POSTGRES_SCHEMA } else { SQLITE_SCHEMA };
-
-    for statement in split_sql(schema) {
+    for statement in split_sql(SQLITE_SCHEMA) {
         sqlx::query(&statement).execute(pool).await?;
     }
 
-    // SQLite-specific optimizations
-    if !is_postgres {
-        for pragma in [
-            "PRAGMA journal_mode = WAL",
-            "PRAGMA synchronous = NORMAL",
-            "PRAGMA cache_size = -8000",
-            "PRAGMA busy_timeout = 5000",
-            "PRAGMA foreign_keys = ON",
-        ] {
-            let _ = sqlx::query(pragma).execute(pool).await;
-        }
+    // SQLite optimizations
+    for pragma in [
+        "PRAGMA journal_mode = WAL",
+        "PRAGMA synchronous = NORMAL",
+        "PRAGMA cache_size = -8000",
+        "PRAGMA busy_timeout = 5000",
+        "PRAGMA foreign_keys = ON",
+    ] {
+        let _ = sqlx::query(pragma).execute(pool).await;
     }
 
-    // Record migration
     sqlx::query("INSERT INTO schema_version (version) VALUES (?)")
         .bind(MIGRATION_VERSION)
         .execute(pool)
@@ -297,11 +186,9 @@ fn split_sql(sql: &str) -> Vec<String> {
             current.push(c);
         }
     }
-
     let trimmed = current.trim().to_string();
     if !trimmed.is_empty() {
         statements.push(trimmed);
     }
-
     statements
 }
