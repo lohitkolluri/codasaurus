@@ -113,6 +113,14 @@ pub fn populate(files: &[ParsedFile]) {
     }
 }
 
+/// Lock the global code graph for read-only access.
+/// Used by `codasaurus verify` to share the same graph the detectors built.
+pub fn lock_graph() -> Result<std::sync::MutexGuard<'static, CodeGraph>, String> {
+    CODE_GRAPH
+        .lock()
+        .map_err(|e| format!("code graph mutex poisoned: {}", e))
+}
+
 pub fn detect(parsed_files: &[ParsedFile], _config: &Config) -> Vec<Finding> {
     let mut findings = Vec::new();
 

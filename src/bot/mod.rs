@@ -1,13 +1,10 @@
-use anyhow::Result;
 use axum::{
     extract::State,
     http::StatusCode,
-    routing::{get, post},
+    routing::post,
     Json, Router,
 };
 use serde::Deserialize;
-use tokio::signal;
-use tower_http::limit::RequestBodyLimitLayer;
 
 mod auth;
 mod review;
@@ -22,52 +19,11 @@ pub struct BotConfig {
     pub port: u16,
 }
 
-pub async fn serve(config: BotConfig) -> Result<()> {
-    let addr = format!("{}:{}", config.host, config.port);
-    println!("  Bot listening on {}", addr);
-    let app = Router::new()
-        .route("/health", get(health))
-        .route("/webhook", post(handle_webhook))
+/// Build the webhook-only router for mounting under `/webhook` in the unified server.
+pub fn webhook_router(config: BotConfig) -> Router {
+    Router::new()
+        .route("/", post(handle_webhook))
         .with_state(config)
-        .layer(RequestBodyLimitLayer::new(1024 * 1024))
-        .layer(tower_http::trace::TraceLayer::new_for_http());
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
-    Ok(())
-}
-
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => {
-            println!("  Shutting down (Ctrl+C)...");
-        }
-        _ = terminate => {
-            println!("  Shutting down (SIGTERM)...");
-        }
-    }
-}
-
-async fn health() -> &'static str {
-    "ok"
 }
 
 #[derive(Deserialize)]

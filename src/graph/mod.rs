@@ -1,4 +1,5 @@
 use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::visit::EdgeRef;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -95,5 +96,83 @@ impl CodeGraph {
             }
         }
         affected
+    }
+
+    /// Find direct callers of a symbol (reverse edges from `symbol`).
+    pub fn find_callers(&self, symbol: &str) -> Vec<&SymbolNode> {
+        let mut callers = Vec::new();
+        if let Some(&idx) = self.node_indices.get(symbol) {
+            for edge in self.graph.edges_directed(idx, petgraph::Direction::Incoming) {
+                let source = edge.source();
+                callers.push(&self.graph[source]);
+            }
+        }
+        callers
+    }
+
+    /// Get all unique file paths in the graph.
+    pub fn all_files(&self) -> Vec<&str> {
+        self.files.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Get unique files affected by changes to the given symbol set.
+    pub fn affected_files(&self, symbols: &[String]) -> Vec<String> {
+        let mut files: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for sym in symbols {
+            let radius = self.blast_radius(sym, 3);
+            for node in radius {
+                files.insert(node.file.clone());
+            }
+        }
+        files.into_iter().collect()
+    }
+
+    /// Find symbols by file path — returns all symbol names in the given file.
+    pub fn symbols_in_file(&self, file: &str) -> Vec<&str> {
+        self.file_to_nodes
+            .get(file)
+            .map(|v| v.iter().map(|s| s.as_str()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Heuristically map a code symbol name to potential test names.
+    ///
+    /// Conventions handled:
+    /// - Rust: `my_module::tests::test_my_fn` or `my_module::tests::my_fn`
+    /// - Python: `test_my_function` in `test_my_module.py`
+    /// - JS/TS: `describe("myFunction")` / `it("should ...")` — maps to `myFunction`
+    /// - Go: `TestMyFunction` in `my_function_test.go`
+    ///
+    /// Returns test name fragments that can be passed to `cargo test` or equivalents.
+    pub fn symbol_to_test_names(&self, symbol: &str) -> Vec<String> {
+        let mut names = Vec::new();
+
+        // Strip path prefix: "src/main.rs::my_fn" -> "my_fn"
+        let base = symbol.rsplit("::").next().unwrap_or(symbol);
+        // Strip file prefix like "src/main.rs::"
+        let base = base.split("::").last().unwrap_or(base);
+
+        // Rust: my_fn -> tests::test_my_fn, tests::my_fn
+        names.push(format!("tests::test_{}", base));
+        names.push(format!("tests::{}", base));
+
+        // Rust: my_fn -> test_my_fn (direct fn name match)
+        names.push(format!("test_{}", base));
+
+        // PascalCase name -> TestName (Go convention)
+        if base.chars().next().map_or(false, |c| c.is_uppercase()) {
+            names.push(format!("Test{}", base));
+        }
+
+        // Module-style: module::tests::test_name
+        if let Some(module) = symbol
+            .rsplitn(2, '/')
+            .next()
+            .and_then(|s| s.rsplit('.').next())
+        {
+            names.push(format!("{}::tests::test_{}", module, base));
+        }
+
+        names
     }
 }

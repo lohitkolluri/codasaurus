@@ -1,0 +1,775 @@
+/* ─── Codasaurus Design System ─── */
+/* Tesla/SpaceX monochrome minimal: no rounded corners, no shadows, no colors except black/white/gray */
+
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f5;
+  --bg-tertiary: #e8e8e8;
+  --text-primary: #000000;
+  --text-secondary: #555555;
+  --text-muted: #999999;
+  --border: #e0e0e0;
+  --accent: #000000;
+  --error: #cc0000;
+  --success: #006600;
+
+  --sidebar-width: 240px;
+  --header-height: 56px;
+
+  --font-body: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+  --font-code: "SF Mono", "Fira Code", monospace;
+}
+
+[data-theme="dark"] {
+  --bg-primary: #000000;
+  --bg-secondary: #111111;
+  --bg-tertiary: #1a1a1a;
+  --text-primary: #ffffff;
+  --text-secondary: #999999;
+  --text-muted: #555555;
+  --border: #222222;
+  --accent: #ffffff;
+  --error: #ff3333;
+  --success: #33cc33;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  font-family: var(--font-body);
+  font-size: 14px;
+  cursor: pointer;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  padding: 8px 20px;
+  transition: background 0.15s, color 0.15s;
+}
+
+button:hover {
+  background: var(--accent);
+  color: var(--bg-primary);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button:hover:disabled {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* Primary button variant */
+button.primary {
+  background: var(--accent);
+  color: var(--bg-primary);
+  border-color: var(--accent);
+}
+
+button.primary:hover {
+  opacity: 0.85;
+}
+
+/* Danger button variant */
+button.danger {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+button.danger:hover {
+  background: var(--error);
+  color: var(--bg-primary);
+}
+
+input,
+select,
+textarea {
+  font-family: var(--font-body);
+  font-size: 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  outline: none;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+}
+
+textarea {
+  font-family: var(--font-code);
+  font-size: 13px;
+  resize: vertical;
+}
+
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+code, pre {
+  font-family: var(--font-code);
+  font-size: 13px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+td {
+  font-size: 14px;
+}
+
+tr:hover td {
+  background: var(--bg-secondary);
+}
+
+/* ─── Layout helpers ─── */
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.app-sidebar {
+  width: var(--sidebar-width);
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+}
+
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.app-content {
+  flex: 1;
+  padding: 32px;
+  overflow-y: auto;
+}
+
+/* ─── Form groups ─── */
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  width: 100%;
+}
+
+/* ─── Cards ─── */
+.card {
+  border: 1px solid var(--border);
+  padding: 24px;
+}
+
+/* ─── Badge inline ─── */
+.badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ─── Page title ─── */
+.page-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 24px;
+}
+
+/* ─── Loading bar ─── */
+@keyframes loading-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+.loading-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background: var(--bg-tertiary);
+  z-index: 9999;
+  overflow: hidden;
+}
+
+.loading-bar::after {
+  content: "";
+  display: block;
+  width: 25%;
+  height: 100%;
+  background: var(--accent);
+  animation: loading-slide 1.2s ease-in-out infinite;
+}
+
+/* ─── Filter bar ─── */
+.filter-bar {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.filter-bar .form-group {
+  margin-bottom: 0;
+}
+
+.filter-bar input,
+.filter-bar select {
+  min-width: 160px;
+}
+
+/* ─── Step indicator dots ─── */
+.step-indicator {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 40px;
+  align-items: center;
+}
+
+.step-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: transparent;
+}
+
+.step-dot.active {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.step-dot.completed {
+  background: var(--accent);
+  border-color: var(--accent);
+  opacity: 0.5;
+}
+
+/* ─── Wizard card ─── */
+.wizard-card {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 48px 0;
+}
+
+.wizard-step-label {
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 32px;
+}
+
+.wizard-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 32px;
+}
+
+/* ─── Radio cards ─── */
+.radio-card {
+  border: 1px solid var(--border);
+  padding: 16px 20px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  margin-bottom: 12px;
+}
+
+.radio-card:hover {
+  border-color: var(--text-secondary);
+}
+
+.radio-card.selected {
+  border-color: var(--accent);
+  border-width: 2px;
+  padding: 15px 19px;
+}
+
+/* ─── Wizard info / success boxes ─── */
+.success-box {
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  border: 1px solid var(--success);
+  padding: 16px 20px;
+  font-size: 14px;
+  color: var(--success);
+  margin-bottom: 16px;
+}
+
+.info-box {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid var(--border);
+  padding: 16px 20px;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.error-box {
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+  border: 1px solid var(--error);
+  padding: 16px 20px;
+  font-size: 14px;
+  color: var(--error);
+  margin-bottom: 16px;
+}
+
+.radio-card label {
+  margin-bottom: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-primary);
+}
+
+.radio-card input[type="radio"] {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.radio-card input[type="radio"]:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--bg-primary);
+}
+
+.radio-card .radio-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  margin-left: 26px;
+}
+
+/* ─── Toggle switch ─── */
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.toggle-track {
+  width: 36px;
+  height: 20px;
+  border: 1px solid var(--border);
+  position: relative;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+
+.toggle-track.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.toggle-knob {
+  width: 16px;
+  height: 16px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  transition: left 0.15s;
+}
+
+.toggle-track.on .toggle-knob {
+  left: 17px;
+  border-color: var(--accent);
+  background: var(--bg-primary);
+}
+
+/* ─── Code snippet ─── */
+.code-snippet {
+  background: var(--bg-secondary);
+  padding: 12px 16px;
+  font-family: var(--font-code);
+  font-size: 13px;
+  overflow-x: auto;
+  line-height: 1.6;
+  margin: 8px 0;
+  white-space: pre;
+}
+
+/* ─── Empty / Error ─── */
+.empty-state,
+.error-state {
+  text-align: center;
+  padding: 64px 24px;
+  color: var(--text-muted);
+}
+
+.error-state {
+  color: var(--error);
+}
+
+/* ─── Severity text colors ─── */
+.severity-blocking { color: var(--error); }
+.severity-warning { color: var(--text-primary); }
+.severity-info { color: var(--text-muted); }
+
+/* ─── Status badge ─── */
+.status-badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+}
+
+.status-badge.passing { border-color: var(--success); color: var(--success); }
+.status-badge.failing { border-color: var(--error); color: var(--error); }
+.status-badge.pending { border-color: var(--text-muted); color: var(--text-muted); }
+.status-badge.in_progress { border-color: var(--text-primary); color: var(--text-primary); }
+
+/* ─── Page content with sidebar ─── */
+.page-with-sidebar {
+  display: flex;
+  height: calc(100vh - var(--header-height));
+}
+
+.content-area {
+  flex: 1;
+  padding: 32px;
+  overflow-y: auto;
+}
+
+/* ─── File tree ─── */
+.file-tree {
+  width: 280px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 16px 0;
+  flex-shrink: 0;
+}
+
+.file-tree-item {
+  padding: 6px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.file-tree-item:hover {
+  background: var(--bg-secondary);
+}
+
+.file-tree-item.active {
+  background: var(--bg-tertiary);
+  font-weight: 600;
+}
+
+.file-tree-item .severity-counts {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.file-tree-children {
+  padding-left: 16px;
+}
+
+/* ─── Findings list ─── */
+.finding-item {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.finding-item:last-child {
+  border-bottom: none;
+}
+
+.finding-location {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.finding-message {
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+/* ─── Sidebar nav ─── */
+.sidebar-nav {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.sidebar-nav li a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  transition: color 0.1s, background 0.1s;
+}
+
+.sidebar-nav li a:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  text-decoration: none;
+}
+
+.sidebar-nav li a.active {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.sidebar-nav li a svg {
+  flex-shrink: 0;
+}
+
+/* ─── Header ─── */
+.top-header {
+  height: var(--header-height);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  background: var(--bg-primary);
+}
+
+.top-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.top-header-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.top-header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.header-user {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.header-btn {
+  background: none;
+  border: none;
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 4px 8px;
+}
+
+.header-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+/* ─── Pagination ─── */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.pagination button {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.pagination .page-num {
+  padding: 6px 12px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+}
+
+.pagination .page-num.active {
+  background: var(--accent);
+  color: var(--bg-primary);
+  border-color: var(--accent);
+}
+
+/* ─── Login page ─── */
+.login-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--bg-secondary);
+}
+
+.login-card {
+  width: 380px;
+  border: 1px solid var(--border);
+  padding: 40px;
+  background: var(--bg-primary);
+}
+
+.login-card h1 {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.login-card .subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 28px;
+}
+
+.login-error {
+  font-size: 13px;
+  color: var(--error);
+  margin-bottom: 12px;
+}
+
+/* ─── Center page (404) ─── */
+.center-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  gap: 12px;
+}
+
+.center-page h1 {
+  font-size: 48px;
+  font-weight: 700;
+}
+
+.center-page p {
+  color: var(--text-muted);
+}
+
+/* ─── Stats row ─── */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+/* ─── Review cards ─── */
+.review-card {
+  border: 1px solid var(--border);
+  padding: 16px 20px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.review-card:hover {
+  border-color: var(--text-secondary);
+}
+
+.review-card h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.review-card .review-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* ─── Danger zone ─── */
+.danger-zone {
+  border: 1px solid var(--error);
+  padding: 20px;
+  margin-top: 32px;
+}
+
+.danger-zone h3 {
+  color: var(--error);
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.danger-zone p {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}

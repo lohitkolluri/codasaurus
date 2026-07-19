@@ -1,13 +1,14 @@
 use anyhow::Result;
-use rusqlite::Connection;
+use sqlx::SqlitePool;
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
+use tokio::runtime::Runtime;
 
 use crate::detectors::Finding;
 
 /// Persistent store for feedback learning
 pub struct LearningStore {
-    conn: Mutex<Connection>,
+    pool: SqlitePool,
+    rt: Runtime,
 }
 
 impl LearningStore {
@@ -19,10 +20,10 @@ impl LearningStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(&path)?;
-        let store = Self {
-            conn: Mutex::new(conn),
-        };
+        let rt = Runtime::new()?;
+        let url = format!("sqlite://{}?mode=rwc", path.display());
+        let pool = rt.block_on(SqlitePool::connect(&url))?;
+        let store = Self { pool, rt };
         store.initialize()?;
         Ok(store)
     }
@@ -31,81 +32,117 @@ impl LearningStore {
         Ok(crate::storage::data_dir().join("learnings.db"))
     }
 
-    fn lock(&self) -> MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap_or_else(|e| {
-            eprintln!("Warning: DB connection mutex poisoned, recovering");
-            e.into_inner()
-        })
-    }
-
     fn initialize(&self) -> Result<()> {
-        let conn = self.lock();
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
-             PRAGMA cache_size = -64000;
-             PRAGMA mmap_size = 268435456;
-             PRAGMA temp_store = MEMORY;
-             PRAGMA busy_timeout = 5000;
-             PRAGMA auto_vacuum = INCREMENTAL;
-             PRAGMA foreign_keys = ON;
-             CREATE TABLE IF NOT EXISTS dismissed_findings (
-                fingerprint TEXT PRIMARY KEY,
-                detector TEXT NOT NULL,
-                file TEXT NOT NULL,
-                line INTEGER NOT NULL,
-                message TEXT NOT NULL,
-                dismissed_at TEXT NOT NULL DEFAULT (datetime('now'))
-             );
-             CREATE TABLE IF NOT EXISTS learned_rules (
-                id TEXT PRIMARY KEY,
-                detector TEXT NOT NULL,
-                file_pattern TEXT,
-                message_pattern TEXT,
-                action TEXT NOT NULL DEFAULT 'ignore',
-                reason TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
-             );
-             CREATE INDEX IF NOT EXISTS idx_dismissed_fingerprint ON dismissed_findings(fingerprint);
-             CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector);",
-        )?;
+        self.rt.block_on(async {
+            sqlx::query("PRAGMA journal_mode = WAL")
+                .execute(&self.pool)
+                .await?;
+            sqlx::query("PRAGMA synchronous = NORMAL")
+                .execute(&self.pool)
+                .await?;
+            sqlx::query("PRAGMA cache_size = -64000")
+                .execute(&self.pool)
+                .await?;
+            sqlx::query("PRAGMA mmap_size = 268435456")
+                .execute(&self.pool)
+                .await?;
+            sqlx::query("PRAGMA temp_store = MEMORY")
+                .execute(&self.pool)
+                .await?;
+            sqlx::query("PRAGMA busy_timeout = 5000")
+                .execute(&self.pool)
+                .await?;
+            sqlx::query("PRAGMA auto_vacuum = INCREMENTAL")
+                .execute(&self.pool)
+                .await?;
+            sqlx::query("PRAGMA foreign_keys = ON")
+                .execute(&self.pool)
+                .await?;
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS dismissed_findings (
+                    fingerprint TEXT PRIMARY KEY,
+                    detector TEXT NOT NULL,
+                    file TEXT NOT NULL,
+                    line INTEGER NOT NULL,
+                    message TEXT NOT NULL,
+                    dismissed_at TEXT NOT NULL DEFAULT (datetime('now'))
+                 )",
+            )
+            .execute(&self.pool)
+            .await?;
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS learned_rules (
+                    id TEXT PRIMARY KEY,
+                    detector TEXT NOT NULL,
+                    file_pattern TEXT,
+                    message_pattern TEXT,
+                    action TEXT NOT NULL DEFAULT 'ignore',
+                    reason TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                 )",
+            )
+            .execute(&self.pool)
+            .await?;
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS idx_dismissed_fingerprint ON dismissed_findings(fingerprint)",
+            )
+            .execute(&self.pool)
+            .await?;
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector)",
+            )
+            .execute(&self.pool)
+            .await
+        })?;
         Ok(())
     }
 
     pub fn dismiss(&self, finding: &Finding) -> Result<()> {
         let fingerprint = finding.fingerprint();
-        let conn = self.lock();
-        conn.execute(
-            "INSERT OR IGNORE INTO dismissed_findings (fingerprint, detector, file, line, message)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![
-                fingerprint,
-                finding.detector,
-                finding.file,
-                finding.line as i64,
-                finding.message
-            ],
-        )?;
+        self.rt.block_on(async {
+            sqlx::query(
+                "INSERT OR IGNORE INTO dismissed_findings (fingerprint, detector, file, line, message)
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(&fingerprint)
+            .bind(&finding.detector)
+            .bind(&finding.file)
+            .bind(finding.line as i64)
+            .bind(&finding.message)
+            .execute(&self.pool)
+            .await
+        })?;
         Ok(())
     }
 
     pub fn add_rule(&self, rule: &crate::learning::LearnedRule) -> Result<()> {
-        let conn = self.lock();
-        conn.execute(
-            "INSERT OR REPLACE INTO learned_rules (id, detector, file_pattern, message_pattern, action, reason)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![
-                rule.id, rule.detector, rule.file_pattern,
-                rule.message_pattern, rule.action.as_str(), rule.reason
-            ],
-        )?;
+        self.rt.block_on(async {
+            sqlx::query(
+                "INSERT OR REPLACE INTO learned_rules (id, detector, file_pattern, message_pattern, action, reason)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&rule.id)
+            .bind(&rule.detector)
+            .bind(&rule.file_pattern)
+            .bind(&rule.message_pattern)
+            .bind(rule.action.as_str())
+            .bind(&rule.reason)
+            .execute(&self.pool)
+            .await
+        })?;
         Ok(())
     }
 
     #[cfg(test)]
     pub fn clear_for_test(&self) -> Result<()> {
-        let conn = self.lock();
-        conn.execute_batch("DELETE FROM dismissed_findings; DELETE FROM learned_rules;")?;
+        self.rt.block_on(async {
+            sqlx::query("DELETE FROM dismissed_findings")
+                .execute(&self.pool)
+                .await?;
+            sqlx::query("DELETE FROM learned_rules")
+                .execute(&self.pool)
+                .await
+        })?;
         Ok(())
     }
 
@@ -116,41 +153,41 @@ impl LearningStore {
             return Ok(Vec::new());
         }
 
-        let conn = self.lock();
-
-        // Query 1: Load all dismissed fingerprints into a HashSet (single query)
-        let mut dismissed_set = std::collections::HashSet::new();
-        {
-            let mut stmt = conn.prepare_cached("SELECT fingerprint FROM dismissed_findings")?;
-            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-            for fp in rows.flatten() {
-                dismissed_set.insert(fp);
+        let (dismissed_set, rules) = self.rt.block_on(async {
+            // Query 1: Load all dismissed fingerprints into a HashSet
+            let mut dismissed_set = std::collections::HashSet::new();
+            {
+                let rows: Vec<(String,)> =
+                    sqlx::query_as("SELECT fingerprint FROM dismissed_findings")
+                        .fetch_all(&self.pool)
+                        .await?;
+                for (fp,) in rows {
+                    dismissed_set.insert(fp);
+                }
             }
-        }
 
-        // Query 2: Load all learned rules into memory (single query)
-        struct Rule {
-            detector: String,
-            file_pattern: Option<String>,
-            message_pattern: Option<String>,
-        }
-        let mut rules: Vec<Rule> = Vec::new();
-        {
-            let mut stmt = conn.prepare_cached(
-                "SELECT detector, file_pattern, message_pattern FROM learned_rules",
-            )?;
-            let rows = stmt.query_map([], |row| {
-                Ok(Rule {
-                    detector: row.get(0)?,
-                    file_pattern: row.get(1)?,
-                    message_pattern: row.get(2)?,
+            // Query 2: Load all learned rules into memory
+            struct Rule {
+                detector: String,
+                file_pattern: Option<String>,
+                message_pattern: Option<String>,
+            }
+            let rules: Vec<Rule> =
+                sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
+                    "SELECT detector, file_pattern, message_pattern FROM learned_rules",
+                )
+                .fetch_all(&self.pool)
+                .await?
+                .into_iter()
+                .map(|(detector, file_pattern, message_pattern)| Rule {
+                    detector,
+                    file_pattern,
+                    message_pattern,
                 })
-            })?;
-            for rule in rows.flatten() {
-                rules.push(rule);
-            }
-        }
-        drop(conn);
+                .collect();
+
+            Ok::<_, anyhow::Error>((dismissed_set, rules))
+        })?;
 
         // In-memory batch check: HashSet membership + rule matching
         Ok(findings

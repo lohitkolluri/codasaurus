@@ -1,11 +1,5 @@
 services:
-  init-data:
-    image: busybox:1.37
-    user: "0:0"
-    command: ["sh", "-c", "mkdir -p /data && chown -R 65532:65532 /data"]
-    volumes:
-      - codasaurus-data:/data
-
+  # ── Codasaurus ──────────────────────────────────────────────
   codasaurus:
     build:
       context: .
@@ -13,13 +7,22 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - GITHUB_APP_ID=${GITHUB_APP_ID:?error}
-      # Use base64-encoded key to avoid PEM newline issues in .env files:
-      - GITHUB_APP_PRIVATE_KEY_B64=${GITHUB_APP_PRIVATE_KEY_B64:?error}
-      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:?error}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - PORT=3000
+      # Database — SQLite stored on persistent volume
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///data/codasaurus.db?mode=rwc}
       - CODASAURUS_DATA_DIR=/data
+      - PORT=3000
+
+      # GitHub App (optional — omit for dashboard-only mode)
+      - GITHUB_APP_ID=${GITHUB_APP_ID:-}
+      # Use base64-encoded key to avoid PEM newline issues in .env files
+      - GITHUB_APP_PRIVATE_KEY_B64=${GITHUB_APP_PRIVATE_KEY_B64:-}
+      - GITHUB_APP_PRIVATE_KEY=${GITHUB_APP_PRIVATE_KEY:-}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
+
+      # LLM Review (optional)
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - CODASAURUS_MODEL=${CODASAURUS_MODEL:-}
+      - CODASAURUS_BASE_URL=${CODASAURUS_BASE_URL:-}
     volumes:
       - codasaurus-data:/data
     depends_on:
@@ -28,7 +31,7 @@ services:
     init: true
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "/codasaurus", "health", "--port", "3000"]
+      test: ["CMD", "codasaurus", "health", "--port", "3000"]
       interval: 30s
       timeout: 5s
       start_period: 15s
@@ -47,5 +50,35 @@ services:
           cpus: "0.25"
           memory: 64M
 
+  # ── Caddy (optional — HTTPS reverse proxy with DuckDNS) ────
+  # Builds Caddy with the DuckDNS DNS challenge module for automatic HTTPS.
+  # Uncomment this block and set DUCKDNS_DOMAIN + DUCKDNS_TOKEN in .env.
+  # caddy:
+  #   build:
+  #     context: docker/caddy
+  #     dockerfile: Dockerfile
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   environment:
+  #     - DUCKDNS_TOKEN=${DUCKDNS_TOKEN:-}
+  #   volumes:
+  #     - ./Caddyfile:/etc/caddy/Caddyfile:ro
+  #     - caddy-data:/data
+  #     - caddy-config:/config
+  #   depends_on:
+  #     - codasaurus
+
+  # ── Init: create data directory with correct permissions ────
+  init-data:
+    image: busybox:1.37
+    user: "0:0"
+    command: ["sh", "-c", "mkdir -p /data && chown -R 65532:65532 /data"]
+    volumes:
+      - codasaurus-data:/data
+
 volumes:
   codasaurus-data:
+  # caddy-data:     # uncomment if using Caddy
+  # caddy-config:   # uncomment if using Caddy

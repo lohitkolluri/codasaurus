@@ -5,6 +5,7 @@ use codasaurus::cli;
 use codasaurus::config;
 use codasaurus::interactive;
 use codasaurus::output;
+use codasaurus::serve;
 use std::io::IsTerminal;
 
 #[derive(Parser)]
@@ -83,6 +84,40 @@ enum Commands {
         config: Option<String>,
     },
 
+    /// Verify command — blast-radius analysis for changed symbols
+    Verify {
+        /// Check staged changes (default)
+        #[arg(long)]
+        staged: bool,
+
+        /// Check diff against a git ref (e.g. --diff origin/main)
+        #[arg(long)]
+        diff: Option<String>,
+
+        /// Run tests for impacted symbols
+        #[arg(long)]
+        run_tests: bool,
+
+        /// Skip confirmation prompts for test execution
+        #[arg(long)]
+        force: bool,
+
+        /// CI mode — JSON output, strict exit codes
+        #[arg(long)]
+        ci: bool,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+
+        /// Path to config file
+        #[arg(long)]
+        config: Option<String>,
+
+        /// Path to verify (file or directory). Default: staged changes
+        path: Option<String>,
+    },
+
     /// Print version information
     Version,
 
@@ -152,22 +187,73 @@ fn main() -> Result<()> {
                     .and_then(|p| p.parse().ok())
                     .unwrap_or(3000)
             });
-            let config = bot::BotConfig {
-                app_id: std::env::var("GITHUB_APP_ID")
-                    .map_err(|_| anyhow::anyhow!("GITHUB_APP_ID required"))?,
-                private_key: resolve_private_key()?,
-                webhook_secret: std::env::var("GITHUB_WEBHOOK_SECRET")
-                    .map_err(|_| anyhow::anyhow!("GITHUB_WEBHOOK_SECRET required"))?,
-                host: host.clone(),
-                port,
-            };
+            let database_url = std::env::var("DATABASE_URL")
+                .unwrap_or_else(|_| "sqlite://codasaurus.db?mode=rwc".to_string());
+
+            // Bot config is optional — only load if env vars are set
+            let bot_config = std::env::var("GITHUB_APP_ID").ok().and_then(|_| {
+                match resolve_private_key() {
+                    Ok(key) => {
+                        Some(bot::BotConfig {
+                            app_id: std::env::var("GITHUB_APP_ID").unwrap(),
+                            private_key: key,
+                            webhook_secret: std::env::var("GITHUB_WEBHOOK_SECRET").unwrap_or_default(),
+                            host: host.clone(),
+                            port,
+                        })
+                    }
+                    Err(e) => {
+                        eprintln!("  Warning: GITHUB_APP_ID set but private key missing: {}", e);
+                        eprintln!("  Running in dashboard-only mode (no GitHub bot)");
+                        None
+                    }
+                }
+            });
+
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(bot::serve(config))?;
+            rt.block_on(serve::serve(&host, port, &database_url, bot_config))?;
         }
         Commands::CheckRun { event_path, config } => {
             let _cfg = config::load(config.as_deref())?;
             codasaurus::action::run_check_run(event_path.clone())?;
         }
+        Commands::Verify {
+            staged,
+            diff,
+            run_tests,
+            force,
+            ci,
+            json,
+            config,
+            path,
+        } => {
+            let cfg = config::load(config.as_deref())?;
+            let opts = codasaurus::verify::VerifyOptions {
+                staged: *staged,
+                diff: diff.clone(),
+                path: path.clone(),
+                run_tests: *run_tests,
+                force: *force,
+                ci: *ci,
+                json: *json,
+                config: &cfg,
+            };
+            let report = codasaurus::verify::run_verify(opts)?;
+
+            codasaurus::evidence::render_report(&report, *json || *ci)?;
+
+            if report.verified && !report.fix_packets.is_empty() {
+                // Verified but with warnings — still exit 0 unless running in CI
+                if *ci {
+                    eprintln!("Warning: {} fix packets generated but all verified.", report.fix_packets.len());
+                }
+            } else if !report.verified {
+                if *ci || *force {
+                    std::process::exit(1);
+                }
+            }
+        }
+
         Commands::Version => {
             println!("codasaurus v{}", env!("CARGO_PKG_VERSION"));
         }

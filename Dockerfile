@@ -1,44 +1,30 @@
-# syntax=docker/dockerfile:1
-# Multi-stage build with cargo-chef dependency caching + distroless runtime
+# Stage 1: Build Svelte SPA
+FROM node:20-alpine AS frontend
+WORKDIR /app/svelte-dashboard
+COPY svelte-dashboard/package*.json ./
+RUN npm ci
+COPY svelte-dashboard/ ./
+RUN npm run build
 
-# Stage 1: Cargo chef with pinned Rust toolchain
-FROM rust:1.85-slim-bookworm AS chef
-RUN cargo install cargo-chef --locked && rm -rf /usr/local/cargo/registry/cache/*
+# Stage 2: Build Rust binary
+FROM rust:1.85-slim-bookworm AS backend
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-
-# Stage 2: Generate dependency recipe from metadata only (no src/ — recipe only needs manifests)
-FROM chef AS planner
-COPY Cargo.toml Cargo.lock ./
-RUN cargo chef prepare --recipe-path recipe.json
-
-# Stage 3: Build dependencies + binary
-FROM chef AS builder
-COPY --from=planner /app/recipe.json recipe.json
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
-    cargo chef cook --release --recipe-path recipe.json
 COPY . .
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,target=/app/target,sharing=locked \
-    cargo build --locked --release --bin codasaurus && \
-    cp /app/target/release/codasaurus /usr/local/bin/codasaurus
+# Copy pre-built Svelte assets so build.rs can skip npm
+COPY --from=frontend /app/svelte-dashboard/dist/ svelte-dashboard/dist/
+# Environment variable tells build.rs the frontend is already built
+ENV CODASAURUS_SKIP_FRONTEND_BUILD=1
+RUN cargo build --release --locked
 
-# Stage 4: Distroless runtime (no apt, no shell)
-FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
-
-LABEL org.opencontainers.image.source="https://github.com/lohitkolluri/codasaurus"
-LABEL org.opencontainers.image.description="Static and AI-powered code review for AI-generated changes"
-LABEL org.opencontainers.image.licenses="MIT"
-LABEL org.opencontainers.image.version="${CODASAURUS_VERSION:-unknown}"
-
-COPY --from=builder /usr/local/bin/codasaurus /codasaurus
-
-ENV PORT=3000
-ENV CODASAURUS_DATA_DIR=/data
+# Stage 3: Runtime
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN groupadd -r codasaurus && useradd -r -g codasaurus codasaurus
+COPY --from=backend /app/target/release/codasaurus /usr/local/bin/codasaurus
+USER codasaurus
 EXPOSE 3000
-USER 65532:65532
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD ["/codasaurus", "health", "--port", "3000"]
-ENTRYPOINT ["/codasaurus"]
-CMD ["serve"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=3s --retries=3 \
+  CMD codasaurus health || exit 1
+ENTRYPOINT ["codasaurus"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "3000"]

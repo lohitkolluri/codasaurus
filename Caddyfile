@@ -1,0 +1,47 @@
+# ───────────────────────────────────────────────
+# Codasaurus — Caddy reverse proxy configuration
+# ───────────────────────────────────────────────
+#
+# Two modes:
+#   1. LOCAL — uncomment the :3000 block and comment the duckdns.org block
+#   2. DUCKDNS — uncomment the duckdns.org block, fill in your domain + token
+#
+# For DuckDNS HTTPS, build Caddy with the duckdns module:
+#   https://caddyserver.com/docs/modules/duckdns
+# Or use the provided docker-compose.yml which handles it automatically.
+#
+
+# ── Local (no TLS, HTTP only) ──
+# :3000 {
+#     reverse_proxy codasaurus:3000
+# }
+
+# ── DuckDNS (automatic HTTPS via Let's Encrypt) ──
+# Replace 'my-codasaurus' with your DuckDNS subdomain:
+my-codasaurus.duckdns.org {
+    reverse_proxy codasaurus:3000
+
+    tls {
+        dns duckdns {env.DUCKDNS_TOKEN}
+    }
+
+    # Security headers
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # gzip compression
+    encode gzip
+
+    # Rate limiting
+    rate_limit {
+        zone dynamic {
+            key {remote_host}
+            events 100
+            window 1m
+        }
+    }
+}
