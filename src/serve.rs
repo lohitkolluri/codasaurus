@@ -18,6 +18,13 @@ use crate::api::{self, AppState};
 use crate::bot;
 use crate::db;
 
+const SYNC_KEYS: &[(&str, &str)] = &[
+    ("GITHUB_APP_ID", "github_app_id"),
+    ("GITHUB_APP_PRIVATE_KEY_B64", "github_private_key"),
+    ("GITHUB_WEBHOOK_SECRET", "github_webhook_secret"),
+    ("OPENROUTER_API_KEY", "openrouter_api_key"),
+];
+
 /// Start the unified server serving API + SPA + webhook on a single port.
 pub async fn serve(
     host: &str,
@@ -26,6 +33,11 @@ pub async fn serve(
     env_bot_config: Option<bot::BotConfig>,
 ) -> Result<()> {
     let pool = crate::db::create_pool(database_url).await?;
+
+    // Sync env vars → DB config so the setup wizard detects them even
+    // after ephemeral storage is wiped (Render free tier, Docker restarts).
+    sync_env_to_db(&pool).await;
+
     println!("  Database connected (SQLite)");
 
     // Try loading bot config from DB (setup wizard may have stored it),
@@ -155,6 +167,32 @@ async fn shutdown_signal() {
         }
         _ = terminate => {
             println!("  Shutting down (SIGTERM)...");
+        }
+    }
+}
+
+/// On startup, copy well-known env vars into the database config table.
+/// This is idempotent — if the DB already has a value and the env var isn't
+/// set, it leaves the DB value alone.  Purpose: Render's free tier has no
+/// persistent disk, so when the container restarts from scratch we still get
+/// the config the wizard wrote last time (because the *next* startup will
+/// have the same env vars the user originally set).
+async fn sync_env_to_db(pool: &db::DbPool) {
+    for (env_key, config_key) in SYNC_KEYS {
+        if let Ok(val) = std::env::var(env_key) {
+            if !val.is_empty() {
+                // Prefer an existing DB value over overwriting it
+                // (env vars win on a fresh container, but once the wizard
+                // stores something, let the DB value take over).
+                if db::config::get_config(pool, config_key)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_none()
+                {
+                    let _ = db::config::set_config(pool, config_key, &val).await;
+                }
+            }
         }
     }
 }
