@@ -2,7 +2,7 @@ use anyhow::Result;
 use axum::{
     http::StatusCode,
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use std::net::SocketAddr;
@@ -64,13 +64,8 @@ pub async fn serve(
 }
 
 fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> Router {
-    // Compose sub-routers as Router<()> before adding fallback. Nesting a
-    // stateful router after .with_state() in Axum 0.8 causes the nested
-    // routes to not match, returning 405 on POST (hits SPA fallback instead).
     let api = api::router().with_state(AppState { pool });
 
-    // Always mount the webhook endpoint. It will gracefully return 401 if
-    // the bot isn't configured (signature verification fails with empty secret).
     let bot_cfg = bot_config.unwrap_or_else(|| bot::BotConfig {
         app_id: String::new(),
         private_key: String::new(),
@@ -78,12 +73,22 @@ fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> 
         host: "0.0.0.0".into(),
         port: 3000,
     });
-    let webhook = bot::webhook_router(bot_cfg);
+    bot::set_bot_config(bot_cfg);
+
+    // Direct POST route — no .nest(), no State/Extension, no state-laden routers.
+    // GitHub sends POST to /webhook/ (with trailing slash). Register both variants
+    // to avoid any Axum trailing-slash normalization issues.
+    let webhook_handler = post(
+        |headers: axum::http::HeaderMap, body: axum::body::Bytes| async move {
+            bot::handle_webhook(headers, body).await
+        },
+    );
 
     let mut app = Router::new()
         .merge(api)
         .route("/health", get(health_handler))
-        .nest("/webhook", webhook);
+        .route("/webhook", webhook_handler.clone())
+        .route("/webhook/", webhook_handler);
 
     // SPA static file serving — acts as catch-all for unmatched routes
     let dist_path = Path::new("svelte-dashboard").join("dist");

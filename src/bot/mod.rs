@@ -1,7 +1,6 @@
 use axum::{
     http::StatusCode,
-    routing::post,
-    Extension, Json, Router,
+    Json,
 };
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -79,13 +78,10 @@ impl WebhookContext {
     }
 }
 
-/// Build the webhook-only router for mounting under `/webhook` in the unified server.
-/// Uses Extension<BotConfig> instead of State to avoid Axum's Router<()>.nest()
-/// state-type mismatch that silently drops routes at runtime.
-pub fn webhook_router(config: BotConfig) -> Router {
-    Router::new()
-        .route("/", post(handle_webhook))
-        .layer(Extension(config))
+static BOT_CONFIG: std::sync::OnceLock<BotConfig> = std::sync::OnceLock::new();
+
+pub fn set_bot_config(config: BotConfig) {
+    let _ = BOT_CONFIG.set(config);
 }
 
 #[derive(Deserialize)]
@@ -116,11 +112,16 @@ struct WebhookPayload {
     repositories_removed: Option<Vec<serde_json::Value>>,
 }
 
-async fn handle_webhook(
-    Extension(config): Extension<BotConfig>,
+pub(crate) async fn handle_webhook(
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    let config = BOT_CONFIG.get().ok_or(StatusCode::INTERNAL_SERVER_ERROR)?.clone();
+
+    let event = headers.get("x-github-event").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let delivery = headers.get("x-github-delivery").and_then(|v| v.to_str().ok()).unwrap_or("");
+    eprintln!("  [webhook] received {event} ({delivery})");
+
     // Signature verification MUST come before delivery dedup — otherwise an
     // attacker who reuses a captured delivery ID bypasses HMAC auth entirely.
     let sig = headers
@@ -128,8 +129,10 @@ async fn handle_webhook(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     if !verify::verify_signature(&config.webhook_secret, &body, sig) {
+        eprintln!("  [webhook] signature verification FAILED for {event}");
         return Err(StatusCode::UNAUTHORIZED);
     }
+    eprintln!("  [webhook] signature verified");
 
     // Replay attack protection: check X-GitHub-Delivery
     let delivery_id = headers
@@ -157,6 +160,14 @@ async fn handle_webhook(
         )
     {
         if payload.pull_request.is_some() {
+            let pr_number = payload.pull_request.as_ref().and_then(|p| p["number"].as_i64()).unwrap_or(0);
+            let repo_full_name = payload
+                .repo
+                .as_ref()
+                .and_then(|r| r["full_name"].as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            eprintln!("  [webhook] dispatching PR #{pr_number} ({repo_full_name}) action={}", payload.action);
             let repo_val = payload.repo.clone();
             let repo_full_name = payload
                 .repo
@@ -245,6 +256,8 @@ async fn handle_webhook(
             payload.installation,
             payload.repositories_added.unwrap_or_default(),
         ));
+    } else {
+        eprintln!("  [webhook] ignoring: {event} action={}", payload.action);
     }
     Ok(Json(serde_json::json!({"status": "ok"})))
 }
