@@ -492,6 +492,14 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
                 let _ = s.set_reviewed_sha(repo_name, pr_number, head_sha);
             }
         }
+        // Persist clean review to local DB
+        save_review_to_db(
+            repo_name, pr_number, &pr_title,
+            pr["user"]["login"].as_str().unwrap_or(""),
+            pr["base"]["ref"].as_str().unwrap_or(""),
+            pr["head"]["ref"].as_str().unwrap_or(""),
+            head_sha, &findings, false,
+        ).await;
         return Ok(());
     }
 
@@ -566,6 +574,20 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
             let _ = s.set_reviewed_sha(repo_name, pr_number, head_sha);
         }
     }
+
+    // Persist review + findings to local DB for dashboard and audit log
+    save_review_to_db(
+        repo_name,
+        pr_number,
+        &pr_title,
+        pr["user"]["login"].as_str().unwrap_or(""),
+        pr["base"]["ref"].as_str().unwrap_or(""),
+        pr["head"]["ref"].as_str().unwrap_or(""),
+        head_sha,
+        &findings,
+        has_blocking,
+    )
+    .await;
 
     // Generate and post LLM summary if API key is available
     if let Some(llm_cfg) = crate::llm::LlmConfig::from_env() {
@@ -1019,4 +1041,76 @@ Keep it under 200 words and professional in tone."#,
     .await?;
 
     Ok(())
+}
+
+async fn save_review_to_db(
+    repo_name: &str,
+    pr_number: i64,
+    pr_title: &str,
+    pr_author: &str,
+    base_branch: &str,
+    head_branch: &str,
+    head_sha: &str,
+    findings: &Findings,
+    has_blocking: bool,
+) {
+    let pool = match crate::bot::CONFIG_POOL.get() {
+        Some(p) => p,
+        None => return,
+    };
+    let repo_id = match crate::db::repos::get_repo_by_full_name(pool, repo_name).await {
+        Ok(Some(r)) => r.id,
+        _ => return,
+    };
+    let review = match crate::db::reviews::create_review(
+        pool,
+        &crate::db::models::ReviewCreate {
+            repo_id,
+            pr_number,
+            pr_title: Some(pr_title.to_string()),
+            pr_author: if pr_author.is_empty() { None } else { Some(pr_author.to_string()) },
+            pr_base_branch: if base_branch.is_empty() { None } else { Some(base_branch.to_string()) },
+            pr_head_branch: if head_branch.is_empty() { None } else { Some(head_branch.to_string()) },
+            pr_head_sha: if head_sha.is_empty() { None } else { Some(head_sha.to_string()) },
+        },
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    for f in &findings.findings {
+        let _ = crate::db::reviews::create_finding(
+            pool,
+            &crate::db::models::FindingCreate {
+                review_id: review.id,
+                fingerprint: None,
+                file_path: f.file.clone(),
+                line_start: if f.line > 0 { Some(f.line as i64) } else { None },
+                line_end: None,
+                column_start: None,
+                column_end: None,
+                severity: f.severity.to_string(),
+                detector: f.detector.clone(),
+                rule_id: None,
+                message: f.message.clone(),
+                suggested_fix: f.suggestion.clone(),
+                code_snippet: f.codemod.clone(),
+                context: None,
+                category: None,
+            },
+        )
+        .await;
+    }
+    let status = if has_blocking { "failed" } else { "passed" };
+    let _ = crate::db::reviews::update_review(
+        pool,
+        review.id,
+        &crate::db::models::ReviewUpdate {
+            status: Some(status.to_string()),
+            summary_json: None,
+            completed_at: Some(chrono::Utc::now().to_rfc3339()),
+        },
+    )
+    .await;
 }

@@ -79,7 +79,7 @@ impl WebhookContext {
 }
 
 static BOT_CONFIG: std::sync::RwLock<Option<BotConfig>> = std::sync::RwLock::new(None);
-static CONFIG_POOL: std::sync::OnceLock<crate::db::DbPool> = std::sync::OnceLock::new();
+pub(crate) static CONFIG_POOL: std::sync::OnceLock<crate::db::DbPool> = std::sync::OnceLock::new();
 
 pub fn set_bot_config(config: BotConfig) {
     *BOT_CONFIG.write().expect("BOT_CONFIG lock poisoned") = Some(config);
