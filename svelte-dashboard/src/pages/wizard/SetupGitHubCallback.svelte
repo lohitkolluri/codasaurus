@@ -8,8 +8,14 @@
   let installUrl = $state("");
 
   onMount(async () => {
-    const params = new URLSearchParams(window.location.search);
-    const code = params.get("code");
+    // The URL is hash-based: /#/setup/github/callback?code=XXX
+    // window.location.search is empty because query params are inside the hash.
+    let code = new URLSearchParams(window.location.search).get("code");
+    if (!code) {
+      const hash = window.location.hash;
+      const qs = hash.includes("?") ? hash.slice(hash.indexOf("?") + 1) : "";
+      code = new URLSearchParams(qs).get("code");
+    }
 
     if (!code) {
       status = "error";
@@ -23,10 +29,10 @@
       installUrl = data.install_url;
       // Try to update the opener tab first
       if (window.opener && !window.opener.closed) {
-        window.opener.location.href = "/setup/github";
+        window.opener.location.href = "/#/setup/github";
       }
       // Always redirect this tab to the setup page so the user sees it
-      window.location.href = "/setup/github";
+      window.location.href = "/#/setup/github";
     } catch (err) {
       status = "error";
       errorMsg = err.message || "Failed to complete GitHub App setup.";
