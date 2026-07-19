@@ -77,7 +77,7 @@ async fn set_setting(
     // Allowlist of writable config keys — prevents arbitrary config writes.
     const ALLOWED_KEYS: &[&str] = &[
         "llm_provider", "openrouter_api_key", "llm_model", "llm_base_url",
-        "default_severity", "public_url",
+        "public_url",
         "hallucinated_imports_enabled", "phantom_deps_enabled",
         "vulnerabilities_enabled", "secrets_enabled",
         "over_engineering_enabled", "boilerplate_enabled",
@@ -121,7 +121,9 @@ async fn get_github_settings(
 
 async fn delete_github_settings(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    crate::api::auth::require_session(&state.pool, &headers).await.map_err(|_| ApiError::unauthorized("Authentication required"))?;
     for key in GITHUB_KEYS {
         sqlx::query("DELETE FROM app_config WHERE key = ?")
             .bind(key)
@@ -133,7 +135,9 @@ async fn delete_github_settings(
 
 async fn rotate_github_credentials(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    crate::api::auth::require_session(&state.pool, &headers).await.map_err(|_| ApiError::unauthorized("Authentication required"))?;
     for key in GITHUB_KEYS {
         sqlx::query("DELETE FROM app_config WHERE key = ?")
             .bind(key)

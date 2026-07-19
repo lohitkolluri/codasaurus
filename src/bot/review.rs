@@ -486,7 +486,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         .await?;
         if !head_sha.is_empty() {
             if let Some(ref s) = state {
-                let _ = s.set_reviewed_sha(repo_name, pr_number, head_sha);
+                if let Err(e) = s.set_reviewed_sha(repo_name, pr_number, head_sha) { eprintln!("Warning: failed to store reviewed SHA: {}", e); };
             }
         }
         // Persist clean review to local DB
@@ -566,7 +566,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     // Record the reviewed commit SHA for incremental review
     if !head_sha.is_empty() {
         if let Some(ref s) = state {
-            let _ = s.set_reviewed_sha(repo_name, pr_number, head_sha);
+            if let Err(e) = s.set_reviewed_sha(repo_name, pr_number, head_sha) { eprintln!("Warning: failed to store reviewed SHA: {}", e); };
         }
     }
 
@@ -1066,7 +1066,7 @@ async fn save_review_to_db(
         Err(_) => return,
     };
     for f in &findings.findings {
-        let _ = crate::db::reviews::create_finding(
+        if let Err(e) = crate::db::reviews::create_finding(
             pool,
             &crate::db::models::FindingCreate {
                 review_id: review.id,
@@ -1086,10 +1086,12 @@ async fn save_review_to_db(
                 category: None,
             },
         )
-        .await;
+        .await {
+            eprintln!("Warning: failed to persist finding '{}': {}", f.detector, e);
+        }
     }
     let status = if has_blocking { "failed" } else { "passed" };
-    let _ = crate::db::reviews::update_review(
+    if let Err(e) = crate::db::reviews::update_review(
         pool,
         review.id,
         &crate::db::models::ReviewUpdate {
@@ -1098,5 +1100,7 @@ async fn save_review_to_db(
             completed_at: Some(chrono::Utc::now().to_rfc3339()),
         },
     )
-    .await;
+    .await {
+        eprintln!("Warning: failed to update review status: {}", e);
+    }
 }

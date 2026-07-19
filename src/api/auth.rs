@@ -1,5 +1,5 @@
 use axum::extract::State;
-use axum::http::header;
+use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -77,6 +77,18 @@ fn set_cookie(token: &str) -> String {
 
 fn clear_cookie() -> String {
     format!("{}=; HttpOnly; Path=/; Max-Age=0", SESSION_COOKIE)
+}
+
+pub(crate) async fn require_session(
+    pool: &crate::db::DbPool,
+    headers: &axum::http::HeaderMap,
+) -> Result<String, StatusCode> {
+    let token = extract_token(headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    let email = db::sessions::get_session(pool, &token)
+        .await
+        .map_err(|_| StatusCode::UNAUTHORIZED)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    Ok(email)
 }
 
 // ---------------------------------------------------------------------------

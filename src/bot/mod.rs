@@ -275,13 +275,11 @@ pub(crate) async fn handle_webhook(
         }
     } else if event == "installation" && payload.action == "created" {
         tokio::spawn(handle_installation_created(
-            config.clone(),
             payload.installation,
             payload.repositories.unwrap_or_default(),
         ));
     } else if event == "installation" && payload.action == "deleted" {
-        // Could mark repos inactive — for now just log
-        eprintln!("  GitHub App uninstalled");
+        tokio::spawn(handle_installation_deleted(payload.installation));
     } else if event == "installation_repositories" && payload.action == "added" {
         tokio::spawn(handle_repos_added(
             payload.installation,
@@ -361,7 +359,6 @@ async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64) {
 }
 
 async fn handle_installation_created(
-    _config: BotConfig,
     installation: Option<InstallationInfo>,
     repos: Vec<serde_json::Value>,
 ) {
@@ -410,6 +407,28 @@ async fn handle_installation_created(
     }
     let count = repos.len();
     println!("  [bot] Synced {} repos from installation", count);
+}
+
+async fn handle_installation_deleted(installation: Option<InstallationInfo>) {
+    let inst_id = match installation {
+        Some(i) => i.id,
+        None => return,
+    };
+    let pool = match bot_db_pool() {
+        Some(p) => p,
+        None => {
+            eprintln!("  [bot] Cannot deactivate repos: DB pool not available");
+            return;
+        }
+    };
+    match sqlx::query("UPDATE repos SET active = 0 WHERE installation_id = ?")
+        .bind(inst_id)
+        .execute(&pool.0)
+        .await
+    {
+        Ok(r) => println!("  [bot] Deactivated {} repos from uninstalled app {}", r.rows_affected(), inst_id),
+        Err(e) => eprintln!("  [bot] Failed to deactivate repos: {}", e),
+    }
 }
 
 async fn handle_repos_added(
@@ -482,7 +501,7 @@ async fn ensure_repo_exists(
     if parts.len() < 2 {
         return;
     }
-    let _ = db::repos::create_repo(
+    if let Err(e) = db::repos::create_repo(
         &pool,
         &RepoCreate {
             github_id,
@@ -494,5 +513,8 @@ async fn ensure_repo_exists(
             private,
         },
     )
-    .await;
+    .await
+    {
+        eprintln!("  [bot] Failed to auto-register repo {}: {}", full_name, e);
+    }
 }

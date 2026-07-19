@@ -73,7 +73,7 @@ pub fn run_verify(opts: VerifyOptions) -> Result<VerifyReport> {
     // Step 7: Run tests (if requested)
     if opts.run_tests || opts.force {
         if !test_names.is_empty() {
-            let executions = run_targeted_tests(&test_names, opts.force, &opts)?;
+            let executions = run_targeted_tests(&test_names, &opts)?;
             report.test_executions = executions;
         }
 
@@ -86,7 +86,7 @@ pub fn run_verify(opts: VerifyOptions) -> Result<VerifyReport> {
                 .iter()
                 .any(|t| t.test_name == module_test);
             if !already_run {
-                let result = run_single_test(&module_test, opts.force, &opts);
+                let result = run_single_test(&module_test);
                 match result {
                     Ok(te) => report.test_executions.push(te),
                     Err(e) => {
@@ -265,7 +265,6 @@ fn extract_module_tests(changed_files: &[String]) -> Vec<String> {
 /// Run targeted tests and collect evidence.
 fn run_targeted_tests(
     test_names: &[String],
-    _force: bool,
     opts: &VerifyOptions,
 ) -> Result<Vec<TestExecution>, anyhow::Error> {
     // Prompt user for approval unless --force
@@ -286,7 +285,7 @@ fn run_targeted_tests(
 
     let mut executions = Vec::new();
     for test_name in test_names {
-        let result = run_single_test(test_name, opts.force, opts);
+        let result = run_single_test(test_name);
         match result {
             Ok(te) => executions.push(te),
             Err(e) => {
@@ -301,8 +300,6 @@ fn run_targeted_tests(
 /// Run a single test and capture evidence.
 fn run_single_test(
     test_name: &str,
-    _force: bool,
-    _opts: &VerifyOptions,
 ) -> Result<TestExecution, String> {
     // Detect test framework from project structure
     let (command, args) = if is_rust_project() {

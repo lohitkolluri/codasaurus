@@ -69,10 +69,6 @@ pub struct CheckConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BehaviorConfig {
-    /// Severity level: "block", "warn", "info"
-    #[serde(default = "default_severity")]
-    pub default_severity: String,
-
     /// Exit with non-zero on any finding
     #[serde(default)]
     pub strict: bool,
@@ -80,10 +76,6 @@ pub struct BehaviorConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RegistryConfig {
-    /// Timeout for registry API calls in milliseconds
-    #[serde(default = "default_timeout")]
-    pub timeout_ms: u64,
-
     /// Cache registry responses for N seconds
     #[serde(default = "default_cache_ttl")]
     pub cache_ttl_secs: u64,
@@ -139,14 +131,6 @@ fn default_false() -> bool {
     false
 }
 
-fn default_severity() -> String {
-    "warn".to_string()
-}
-
-fn default_timeout() -> u64 {
-    5000
-}
-
 fn default_cache_ttl() -> u64 {
     3600
 }
@@ -191,11 +175,9 @@ impl Default for Config {
                 exclude_patterns: default_exclude_patterns(),
             },
             behavior: BehaviorConfig {
-                default_severity: "warn".to_string(),
                 strict: false,
             },
             registry: RegistryConfig {
-                timeout_ms: 5000,
                 cache_ttl_secs: 3600,
             },
             guidelines: GuidelinesConfig::default(),

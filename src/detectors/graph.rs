@@ -1,4 +1,3 @@
-use crate::config::Config;
 use crate::detectors::Finding;
 use crate::graph::CodeGraph;
 use crate::parser::ParsedFile;
@@ -121,7 +120,7 @@ pub fn lock_graph() -> Result<std::sync::MutexGuard<'static, CodeGraph>, String>
         .map_err(|e| format!("code graph mutex poisoned: {}", e))
 }
 
-pub fn detect(parsed_files: &[ParsedFile], _config: &Config) -> Vec<Finding> {
+pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     let mut findings = Vec::new();
 
     populate(parsed_files);

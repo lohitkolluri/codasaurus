@@ -132,7 +132,7 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
     }
 
     // Graph/blast radius detector (always on when graph module is enabled)
-    all.extend(graph::detect(parsed_files, config));
+    all.extend(graph::detect(parsed_files));
 
     all.extend(guidelines::detect(config));
 

@@ -44,7 +44,8 @@ async fn list_repos(State(state): State<AppState>) -> Result<Json<serde_json::Va
 
 /// POST /api/v1/repos/sync — fetch all installations + repos from GitHub and
 /// store them in the local database.  Returns the number of repos synced.
-async fn sync_repos(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+async fn sync_repos(State(state): State<AppState>, headers: axum::http::HeaderMap) -> Result<Json<serde_json::Value>, ApiError> {
+    crate::api::auth::require_session(&state.pool, &headers).await.map_err(|_| ApiError::unauthorized("Authentication required"))?;
     use crate::db::config::get_config;
 
     // Read GitHub credentials from DB config
@@ -220,9 +221,11 @@ async fn get_repo(
 /// PUT /api/v1/repos/:id
 async fn update_repo(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Path(id): Path<i64>,
     Json(body): Json<UpdateRepoBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    crate::api::auth::require_session(&state.pool, &headers).await.map_err(|_| ApiError::unauthorized("Authentication required"))?;
     db::repos::update_repo(&state.pool, id, &body.config_json, body.active).await?;
     Ok(Json(json!({ "status": "ok" })))
 }
@@ -230,8 +233,10 @@ async fn update_repo(
 /// DELETE /api/v1/repos/:id
 async fn delete_repo(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    crate::api::auth::require_session(&state.pool, &headers).await.map_err(|_| ApiError::unauthorized("Authentication required"))?;
     db::repos::delete_repo(&state.pool, id).await?;
     Ok(Json(json!({ "status": "ok" })))
 }
