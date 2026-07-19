@@ -4,7 +4,6 @@ pub mod migrations;
 pub mod models;
 pub mod repos;
 pub mod reviews;
-pub mod sessions;
 pub mod users;
 
 pub use models::*;

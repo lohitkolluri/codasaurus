@@ -105,18 +105,9 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin', 'viewer')),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
-CREATE TABLE IF NOT EXISTS sessions (
-    token TEXT PRIMARY KEY,
-    email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    expires_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 ";
 
-const MIGRATION_VERSION: i64 = 2;
+const MIGRATION_VERSION: i64 = 1;
 
 pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
@@ -140,20 +131,9 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         return Ok(());
     }
 
-    // Wrap DDL in a transaction so partial failures roll back cleanly.
-    sqlx::query("BEGIN").execute(pool).await?;
-    let result = async {
-        for statement in split_sql(SQLITE_SCHEMA) {
-            sqlx::query(&statement).execute(pool).await?;
-        }
-        Ok::<_, sqlx::Error>(())
+    for statement in split_sql(SQLITE_SCHEMA) {
+        sqlx::query(&statement).execute(pool).await?;
     }
-    .await;
-    if result.is_err() {
-        sqlx::query("ROLLBACK").execute(pool).await.ok();
-        return result;
-    }
-    sqlx::query("COMMIT").execute(pool).await?;
 
     // SQLite optimizations
     for pragma in [
