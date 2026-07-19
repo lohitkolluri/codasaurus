@@ -28,10 +28,6 @@
   }
 
   function startSetup() {
-    if (status && status.complete) {
-      push("/login");
-      return;
-    }
     const next = firstIncomplete();
     if (!next) return;
     goToStep(next.key);
@@ -45,7 +41,6 @@
   onMount(async () => {
     try {
       status = await api.get("/api/setup/status");
-      if (status.complete) push("/login");
     } catch (err) {
       error = err.message || "Could not check setup status";
     } finally {
