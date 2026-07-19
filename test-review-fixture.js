@@ -2,7 +2,7 @@
 // Contains intentional issues for testing
 // Triggered: re-test PR webhook after router fix
 // Round 2: State → Extension fix
-// Round 4: DB-backed auto-reload config
+// Round 5: fixed AI prompt + DB persistence
 
 import { useState, useEffect } from 'react';
 import { Chart } from 'chart.js'; // chart.js is not declared in package.json (phantom dep)
