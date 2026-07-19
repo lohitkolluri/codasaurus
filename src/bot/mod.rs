@@ -79,9 +79,35 @@ impl WebhookContext {
 }
 
 static BOT_CONFIG: std::sync::RwLock<Option<BotConfig>> = std::sync::RwLock::new(None);
+static CONFIG_POOL: std::sync::OnceLock<crate::db::DbPool> = std::sync::OnceLock::new();
 
 pub fn set_bot_config(config: BotConfig) {
     *BOT_CONFIG.write().expect("BOT_CONFIG lock poisoned") = Some(config);
+}
+
+pub fn set_config_pool(pool: crate::db::DbPool) {
+    let _ = CONFIG_POOL.set(pool);
+}
+
+async fn reload_bot_config() -> Option<BotConfig> {
+    let pool = CONFIG_POOL.get()?;
+    let app_id = db::config::get_config(pool, "github_app_id").await.ok().flatten()?;
+    let private_key = db::config::get_config(pool, "github_private_key").await.ok().flatten().or_else(|| {
+        std::env::var("GITHUB_APP_PRIVATE_KEY_B64").ok().and_then(|b64| {
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64).ok()
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+        })
+    })?;
+    let webhook_secret = db::config::get_config(pool, "github_webhook_secret").await.ok().flatten()
+        .or_else(|| std::env::var("GITHUB_WEBHOOK_SECRET").ok())
+        .unwrap_or_default();
+    Some(BotConfig {
+        app_id,
+        private_key,
+        webhook_secret,
+        host: "0.0.0.0".into(),
+        port: 3000,
+    })
 }
 
 #[derive(Deserialize)]
@@ -116,11 +142,26 @@ pub(crate) async fn handle_webhook(
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let config = BOT_CONFIG
+    let mut config = BOT_CONFIG
         .read()
         .expect("BOT_CONFIG lock poisoned")
-        .clone()
-        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+        .clone();
+
+    // If the in-memory config has no secret (startup before wizard, or
+    // first deploy on ephemeral storage), try reloading from the DB.
+    // The manifest flow stores credentials there, but the startup cache
+    // was populated before the wizard ran.
+    if config.as_ref().map(|c| c.webhook_secret.is_empty()).unwrap_or(true) {
+        if let Some(reloaded) = reload_bot_config().await {
+            if !reloaded.webhook_secret.is_empty() {
+                // Cache the reloaded config so subsequent requests skip the DB.
+                set_bot_config(reloaded.clone());
+                config = Some(reloaded);
+            }
+        }
+    }
+
+    let config = config.ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let event = headers.get("x-github-event").and_then(|v| v.to_str().ok()).unwrap_or("");
     let delivery = headers.get("x-github-delivery").and_then(|v| v.to_str().ok()).unwrap_or("");
