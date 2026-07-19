@@ -106,7 +106,12 @@ async fn setup_status(
 ) -> Result<Json<SetupStatus>, ApiError> {
     use db::config::get_config;
 
-    let database = std::env::var("DATABASE_URL").is_ok();
+    let database = get_config(&state.pool, "database_provider")
+        .await
+        .ok()
+        .flatten()
+        .is_some()
+        || std::env::var("DATABASE_URL").is_ok();
 
     // Check both DB config and env vars for GitHub. If GITHUB_APP_ID is set
     // in the environment, the bot is already configured at startup — no need
@@ -139,39 +144,73 @@ async fn setup_database(
     State(state): State<AppState>,
     Json(body): Json<DatabaseBody>,
 ) -> Result<Json<SetupResponse>, ApiError> {
-    let url = if body.url.is_empty() {
-        std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| body.url)
-    } else {
-        body.url
-    };
+    let provider = body.provider.to_lowercase();
 
-    if !url.starts_with("postgres://") && !url.starts_with("postgresql://") {
-        return Err(ApiError::bad_request(
-            "Database URL must start with postgres:// or postgresql://",
-        ));
+    match provider.as_str() {
+        "sqlite" => {
+            // SQLite is already connected via DATABASE_URL at startup.
+            // Validate by running a query on the existing pool instead of
+            // creating a new connection (which would use a relative path
+            // from the CWD inside the container).
+            sqlx::query_scalar::<_, i64>("SELECT 1")
+                .fetch_one(&state.pool.0)
+                .await
+                .map_err(|e| ApiError::bad_request(format!("Test query failed: {}", e)))?;
+
+            // Use the DATABASE_URL from env for the stored config so it
+            // matches what the server actually uses at startup, falling
+            // back to the body URL as a reasonable default.
+            let db_url = std::env::var("DATABASE_URL").unwrap_or(body.url);
+
+            // Store config
+            db::config::set_config(&state.pool, "database_provider", "sqlite")
+                .await?;
+            db::config::set_config(&state.pool, "database_url", &db_url)
+                .await?;
+
+            Ok(Json(SetupResponse {
+                status: "ok".into(),
+                message: Some("SQLite connection verified".into()),
+                test_passed: Some(true),
+            }))
+        }
+        "postgres" => {
+            if !body.url.starts_with("postgres://") && !body.url.starts_with("postgresql://") {
+                return Err(ApiError::bad_request(
+                    "Postgres URL must start with postgres:// or postgresql://",
+                ));
+            }
+
+            let db_url = crate::db::normalize_database_url(&body.url);
+
+            // Try connecting
+            let test_pool = sqlx::PgPool::connect(&db_url)
+                .await
+                .map_err(|e| ApiError::bad_request(format!("Cannot connect: {}", e)))?;
+
+            sqlx::query_scalar::<_, i64>("SELECT 1")
+                .fetch_one(&test_pool)
+                .await
+                .map_err(|e| ApiError::bad_request(format!("Test query failed: {}", e)))?;
+
+            test_pool.close().await;
+
+            db::config::set_config(&state.pool, "database_provider", "postgres")
+                .await?;
+            db::config::set_config(&state.pool, "database_url", &db_url)
+                .await?;
+
+            Ok(Json(SetupResponse {
+                status: "ok".into(),
+                message: Some("Postgres connection verified".into()),
+                test_passed: Some(true),
+            }))
+        }
+        other => Err(ApiError::bad_request(format!(
+            "Unsupported database provider: {}. Use 'sqlite' or 'postgres'.",
+            other
+        ))),
     }
-
-    let db_url = crate::db::normalize_database_url(&url);
-
-    let test_pool = sqlx::PgPool::connect(&db_url)
-        .await
-        .map_err(|e| ApiError::bad_request(format!("Cannot connect: {}", e)))?;
-
-    sqlx::query_scalar::<_, i64>("SELECT 1")
-        .fetch_one(&test_pool)
-        .await
-        .map_err(|e| ApiError::bad_request(format!("Test query failed: {}", e)))?;
-
-    test_pool.close().await;
-
-    db::config::set_config(&state.pool, "database_url", &db_url).await?;
-
-    Ok(Json(SetupResponse {
-        status: "ok".into(),
-        message: Some("PostgreSQL connection verified".into()),
-        test_passed: Some(true),
-    }))
 }
 
 /// GET /api/setup/llm — return current LLM config from DB + env vars.
