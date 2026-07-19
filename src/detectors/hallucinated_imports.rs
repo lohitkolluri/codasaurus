@@ -35,28 +35,22 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
             match registry::check_package(registry_name, &package) {
                 Ok(Some(true)) => {} // package exists
                 Ok(Some(false)) => {
-                    let codemod = match registry_name {
-                        "npm" => Some(format!("npm install {}", package)),
-                        "pypi" => Some(format!("pip install {}", package)),
-                        "crates.io" => Some(format!("cargo add {}", package)),
-                        _ => None,
-                    };
                     findings.push(Finding {
-                        detector: "hallucinated-imports".to_string(),
-                        severity: "blocking",
                         file: file.path.clone(),
                         line: import.line,
                         column: import.column,
+                        severity: "blocking",
+                        detector: "hallucinated-imports".to_string(),
                         message: format!(
                             "Package `{}` not found on {}. This may be a hallucinated import.",
                             package, registry_name
                         ),
                         suggestion: Some(format!(
-                            "Check the correct package name on {} and install it with the appropriate package manager.",
-                            registry_name
+                            "Verify the correct package name at https://www.{}.com/package/{} before installing.",
+                            registry_name, package
                         )),
-                        evidence: Some(import.name.clone()),
-                        codemod,
+                        codemod: None,
+                        evidence: None,
                     });
                 }
                 Ok(None) | Err(_) => {
