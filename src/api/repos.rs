@@ -115,22 +115,39 @@ async fn sync_repos(State(state): State<AppState>) -> Result<Json<serde_json::Va
             None => continue,
         };
 
-        // List repos for this installation (max 100 per page)
-        let repos_resp: serde_json::Value = client
-            .get("https://api.github.com/installation/repositories?per_page=100")
-            .header("Authorization", format!("Bearer {}", token))
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "codasaurus")
-            .send()
-            .await
-            .map_err(|e| ApiError::bad_request(format!("Repos request: {}", e)))?
-            .json()
-            .await
-            .map_err(|e| ApiError::bad_request(format!("Repos response: {}", e)))?;
+        // List repos for this installation — follow pagination to get ALL repos
+        let mut all_repos: Vec<serde_json::Value> = Vec::new();
+        let mut page_url: Option<String> = Some(
+            "https://api.github.com/installation/repositories?per_page=100".into()
+        );
 
-        let repos = repos_resp["repositories"].as_array().cloned().unwrap_or_default();
+        while let Some(url) = page_url.take() {
+            let resp = client
+                .get(&url)
+                .header("Authorization", format!("Bearer {}", token))
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "codasaurus")
+                .send()
+                .await
+                .map_err(|e| ApiError::bad_request(format!("Repos request: {}", e)))?;
 
-        for repo in &repos {
+            // Extract repos from this page
+            let page_data: serde_json::Value = resp
+                .json()
+                .await
+                .map_err(|e| ApiError::bad_request(format!("Repos response: {}", e)))?;
+
+            if let Some(repos) = page_data["repositories"].as_array() {
+                all_repos.extend(repos.iter().cloned());
+            }
+
+            // Guard: stop after 10 pages to prevent runaway loops
+            if all_repos.len() >= 1000 {
+                break;
+            }
+        }
+
+        for repo in &all_repos {
             let github_id = repo["id"].as_i64();
             let full_name = match repo["full_name"].as_str() {
                 Some(n) => n.to_string(),

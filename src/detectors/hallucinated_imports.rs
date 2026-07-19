@@ -95,35 +95,23 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
 }
 
 static NPM_BUILTINS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    // Only actual Node.js core/built-in modules. Third-party packages must be
+    // verified against the registry — otherwise phantom_deps has false negatives
+    // for packages like lodash, express, etc. that are NOT built-in.
     HashSet::from([
-        "react",
-        "vue",
-        "express",
-        "lodash",
-        "axios",
-        "typescript",
-        "next",
-        "webpack",
-        "vite",
-        "jest",
-        "mocha",
-        "chai",
-        "moment",
-        "date-fns",
-        "uuid",
-        "node:fs",
-        "node:path",
-        "node:http",
-        "node:crypto",
-        "node:os",
-        "node:stream",
-        "node:buffer",
-        "node:child_process",
-        "node:util",
-        "node:events",
-        "node:url",
-        "node:querystring",
-        "node:assert",
+        "node:assert", "node:async_hooks", "node:buffer", "node:child_process",
+        "node:console", "node:constants", "node:crypto", "node:diagnostics_channel",
+        "node:dns", "node:events", "node:fs", "node:http", "node:https",
+        "node:inspector", "node:module", "node:net", "node:os", "node:path",
+        "node:perf_hooks", "node:process", "node:punycode", "node:querystring",
+        "node:readline", "node:repl", "node:stream", "node:string_decoder",
+        "node:timers", "node:tls", "node:tty", "node:url", "node:util",
+        "node:v8", "node:vm", "node:wasi", "node:worker_threads", "node:zlib",
+        // Without node: prefix (common in older Node.js code)
+        "assert", "buffer", "child_process", "console", "constants", "crypto",
+        "dns", "events", "fs", "http", "https", "module", "net", "os", "path",
+        "punycode", "querystring", "readline", "repl", "stream", "string_decoder",
+        "timers", "tls", "tty", "url", "util", "v8", "vm", "zlib",
     ])
 });
 

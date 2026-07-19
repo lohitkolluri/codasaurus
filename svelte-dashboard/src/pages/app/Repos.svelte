@@ -221,7 +221,7 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     overflow: hidden;
-    background: var(--card-bg);
+    background: var(--bg-primary);
   }
   table {
     width: 100%;

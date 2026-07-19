@@ -194,7 +194,7 @@
     color: var(--text-muted);
   }
   .card {
-    background: var(--card-bg);
+    background: var(--bg-primary);
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 20px;

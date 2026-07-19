@@ -119,6 +119,16 @@ async fn handle_webhook(
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    // Signature verification MUST come before delivery dedup — otherwise an
+    // attacker who reuses a captured delivery ID bypasses HMAC auth entirely.
+    let sig = headers
+        .get("x-hub-signature-256")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if !verify::verify_signature(&config.webhook_secret, &body, sig) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
     // Replay attack protection: check X-GitHub-Delivery
     let delivery_id = headers
         .get("x-github-delivery")
@@ -130,14 +140,6 @@ async fn handle_webhook(
                 return Ok(Json(serde_json::json!({"status": "ok", "duplicate": true})));
             }
         }
-    }
-
-    let sig = headers
-        .get("x-hub-signature-256")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    if !verify::verify_signature(&config.webhook_secret, &body, sig) {
-        return Err(StatusCode::UNAUTHORIZED);
     }
     let event = headers
         .get("x-github-event")

@@ -27,10 +27,12 @@
       const data = await api.post("/api/setup/github/callback", { code });
       status = "success";
       installUrl = data.install_url;
-      // Try to update the opener tab first
-      if (window.opener && !window.opener.closed) {
-        window.opener.location.href = "/#/setup/github";
-      }
+      // Try to update the opener tab (may be cross-origin)
+      try {
+        if (window.opener && !window.opener.closed) {
+          window.opener.location.href = "/#/setup/github";
+        }
+      } catch { /* cross-origin opener — ignore */ }
       // Always redirect this tab to the setup page so the user sees it
       window.location.href = "/#/setup/github";
     } catch (err) {

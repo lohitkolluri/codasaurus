@@ -31,11 +31,16 @@
     return allFindings.filter((f) => f.file_path === selectedFile || f.file === selectedFile);
   });
 
-  let selectedFindings = $derived(fileFindings);
+  $effect(() => {
+    const id = $params?.id;
+    if (!id) return;
+    loadReview(id);
+  });
 
-  onMount(async () => {
+  async function loadReview(id) {
+    loading = true;
+    error = "";
     try {
-      const id = $params.id;
       const data = await api.get(`/api/reviews/${id}`);
       review = data.review ?? null;
       allFindings = data.findings ?? [];
@@ -44,7 +49,11 @@
     } finally {
       loading = false;
     }
-  });
+  }
+
+  function selectFile(path) {
+    selectedFile = path;
+  }
 
   function countSeverity(findings, severity) {
     return findings.filter((f) => f.severity === severity).length;

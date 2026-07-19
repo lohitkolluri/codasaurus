@@ -106,11 +106,15 @@
   async function saveLLM() {
     llmSaving = true; llmMsg = "";
     try {
-      await api.put("/api/settings/llm_provider", { value: llmProvider });
-      if (llmKey) await api.put("/api/settings/openrouter_api_key", { value: llmKey });
-      if (llmModel) await api.put("/api/settings/llm_model", { value: llmModel });
-      if (llmBaseUrl) await api.put("/api/settings/llm_base_url", { value: llmBaseUrl });
-      llmMsg = "Saved";
+      const updates = [
+        api.put("/api/settings/llm_provider", { value: llmProvider }),
+        api.put("/api/settings/openrouter_api_key", { value: llmKey }),
+        api.put("/api/settings/llm_model", { value: llmModel }),
+        api.put("/api/settings/llm_base_url", { value: llmBaseUrl }),
+      ];
+      const results = await Promise.allSettled(updates);
+      const failed = results.filter(r => r.status === "rejected");
+      llmMsg = failed.length === 0 ? "Saved" : `Save failed (${failed.length} errors)`;
     } catch (err) { llmMsg = err.message || "Save failed"; }
     finally { llmSaving = false; }
   }
@@ -118,10 +122,12 @@
   async function saveDetectors() {
     detectorSaving = true; detectorMsg = "";
     try {
-      for (const [key, enabled] of Object.entries(detectorToggles)) {
-        await api.put(`/api/settings/${key}_enabled`, { value: enabled ? "true" : "false" });
-      }
-      detectorMsg = "Saved";
+      const updates = Object.entries(detectorToggles).map(([key, enabled]) =>
+        api.put(`/api/settings/${key}_enabled`, { value: enabled ? "true" : "false" })
+      );
+      const results = await Promise.allSettled(updates);
+      const failed = results.filter(r => r.status === "rejected");
+      detectorMsg = failed.length === 0 ? "Saved" : `Save failed (${failed.length} errors)`;
     } catch (err) { detectorMsg = err.message || "Save failed"; }
     finally { detectorSaving = false; }
   }
