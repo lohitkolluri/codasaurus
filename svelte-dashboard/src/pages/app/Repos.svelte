@@ -13,6 +13,13 @@
   let error = $state("");
   let syncing = $state(false);
   let syncMsg = $state("");
+  let search = $state("");
+
+  let filtered = $derived.by(() => {
+    if (!search) return repos;
+    const q = search.toLowerCase();
+    return repos.filter(r => (r.full_name ?? "").toLowerCase().includes(q));
+  });
 
   onMount(async () => {
     try {
@@ -48,6 +55,16 @@
       repos = await api.get("/api/repos");
     } catch (err) {
       syncMsg = "Toggle failed: " + (err.message || "unknown error");
+    }
+  }
+
+  async function batchToggle(active) {
+    try {
+      await Promise.all(filtered.map(r => api.put(`/api/repos/${r.id}`, { config_json: "", active })));
+      repos = await api.get("/api/repos");
+      syncMsg = `${filtered.length} repos ${active ? "enabled" : "disabled"}`;
+    } catch (err) {
+      syncMsg = "Batch update failed: " + (err.message || "unknown error");
     }
   }
 
@@ -87,6 +104,15 @@
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px">{syncMsg}</p>
       {/if}
 
+      {#if repos.length > 0}
+        <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+          <input type="search" placeholder="Search repos…" bind:value={search}
+            style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:14px;background:var(--bg-primary);color:var(--text-primary)" />
+          <button onclick={() => batchToggle(true)} style="font-size:12px;padding:6px 12px">Enable {filtered.length}</button>
+          <button onclick={() => batchToggle(false)} style="font-size:12px;padding:6px 12px">Disable {filtered.length}</button>
+        </div>
+      {/if}
+
       {#if error}
         <ErrorState message={error} />
       {:else if loading}
@@ -104,7 +130,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each repos as repo}
+            {#each filtered as repo}
               <tr>
                 <td style="font-weight:600;cursor:pointer" onclick={() => openRepo(repo.id)} role="button" tabindex="0">{repo.full_name ?? repo.name ?? repo.id}</td>
                 <td>{repo.default_branch ?? "main"}</td>
