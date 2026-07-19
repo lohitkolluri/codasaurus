@@ -124,11 +124,36 @@ async fn resolve_bot_config(
         });
     }
 
-    // Try loading from DB (setup wizard stores here)
-    let app_id = db::config::get_config(pool, "github_app_id").await.ok()??;
-    let private_key = db::config::get_config(pool, "github_private_key").await.ok()??;
+    // Try loading from DB (setup wizard stores here), with env var fallbacks
+    let app_id = db::config::get_config(pool, "github_app_id")
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| std::env::var("GITHUB_APP_ID").ok())?;
+
+    let private_key = match db::config::get_config(pool, "github_private_key").await {
+        Ok(Some(key)) => key,
+        _ => {
+            // Fall back to base64-encoded env var
+            std::env::var("GITHUB_APP_PRIVATE_KEY_B64")
+                .ok()
+                .and_then(|b64| {
+                    use base64::Engine;
+                    base64::engine::general_purpose::STANDARD
+                        .decode(&b64)
+                        .ok()
+                        .and_then(|bytes| String::from_utf8(bytes).ok())
+                })?
+        }
+    };
+
     let webhook_secret =
-        db::config::get_config(pool, "github_webhook_secret").await.ok()?.unwrap_or_default();
+        db::config::get_config(pool, "github_webhook_secret")
+            .await
+            .ok()
+            .flatten()
+            .or_else(|| std::env::var("GITHUB_WEBHOOK_SECRET").ok())
+            .unwrap_or_default();
 
     Some(bot::BotConfig {
         app_id,
