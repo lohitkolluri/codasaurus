@@ -61,7 +61,7 @@ pub fn recent_commits(count: usize) -> Result<Vec<String>> {
     let output = std::process::Command::new("git")
         .args([
             "log",
-            &format!("-{}", count),
+            &format!("-{count}"),
             "--format=---CODASAURUS_COMMIT_SEP---%n%B",
             "--no-color",
         ])

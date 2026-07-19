@@ -284,7 +284,7 @@ impl VerifyReport {
 pub fn render_report(report: &VerifyReport, json_mode: bool) -> anyhow::Result<()> {
     if json_mode {
         let output = serde_json::to_string_pretty(&report)?;
-        println!("{}", output);
+        println!("{output}");
     } else {
         render_terminal(report);
     }
@@ -444,7 +444,7 @@ fn render_terminal(report: &VerifyReport) {
             .yellow()
             .bold()
     };
-    println!("    {}", verdict);
+    println!("    {verdict}");
     println!();
 }
 
@@ -481,7 +481,7 @@ pub fn execute_command(
 
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("Failed to spawn `{}`: {}", command, e))?;
+        .map_err(|e| format!("Failed to spawn `{command}`: {e}"))?;
 
     // Wait with timeout
     let (exit_status, stdout, stderr) = {
@@ -491,7 +491,7 @@ pub fn execute_command(
                 Ok(Some(status)) => {
                     let output = child
                         .wait_with_output()
-                        .map_err(|e| format!("Failed to collect output: {}", e))?;
+                        .map_err(|e| format!("Failed to collect output: {e}"))?;
                     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                     break (status, stdout, stderr);
@@ -509,7 +509,7 @@ pub fn execute_command(
                     std::thread::sleep(Duration::from_millis(10));
                 }
                 Err(e) => {
-                    return Err(format!("Failed to wait for command: {}", e));
+                    return Err(format!("Failed to wait for command: {e}"));
                 }
             }
         }
@@ -602,7 +602,7 @@ mod tests {
             title: "Wide blast radius".into(),
             description: "Symbol affects 15 callers".into(),
             changed_symbol: "core_util".into(),
-            impacted_callers: (0..15).map(|i| format!("caller_{}", i)).collect(),
+            impacted_callers: (0..15).map(|i| format!("caller_{i}")).collect(),
             impacted_files: vec!["src/util.rs".into()],
             test_evidence: None,
             suggested_fix: None,

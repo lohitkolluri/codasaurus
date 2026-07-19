@@ -31,7 +31,7 @@ static GITHUB_CLIENT: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
     {
         Ok(client) => Some(client),
         Err(e) => {
-            eprintln!("Warning: failed to build GitHub API client: {}", e);
+            eprintln!("Warning: failed to build GitHub API client: {e}");
             None
         }
     }
@@ -111,8 +111,7 @@ async fn fetch_pr_files(
     let mut all_files = Vec::new();
     for page_number in 1..=MAX_PR_FILE_PAGES {
         let url = format!(
-            "https://api.github.com/repos/{}/pulls/{}/files?per_page={}&page={}",
-            repo_name, pr_number, PER_PAGE, page_number
+            "https://api.github.com/repos/{repo_name}/pulls/{pr_number}/files?per_page={PER_PAGE}&page={page_number}"
         );
         let page: Vec<serde_json::Value> = retry_async(
             &RetryConfig::api_default(),
@@ -150,19 +149,14 @@ async fn post_or_update_comment(
     body: &str,
     state: &Option<ReviewState>,
 ) -> Result<i64> {
-    let url = format!(
-        "https://api.github.com/repos/{}/issues/{}/comments",
-        repo_name, pr_number
-    );
+    let url = format!("https://api.github.com/repos/{repo_name}/issues/{pr_number}/comments");
 
     let headers = github_api_headers(auth_header);
 
     if let Some(ref s) = state {
         if let Ok(Some(comment_id)) = s.get_comment_id(repo_name, pr_number) {
-            let update_url = format!(
-                "https://api.github.com/repos/{}/issues/comments/{}",
-                repo_name, comment_id
-            );
+            let update_url =
+                format!("https://api.github.com/repos/{repo_name}/issues/comments/{comment_id}");
             let update_ok = retry_async(
                 &RetryConfig::api_default(),
                 "update_comment",
@@ -183,10 +177,7 @@ async fn post_or_update_comment(
             if update_ok {
                 return Ok(comment_id);
             }
-            eprintln!(
-                "Warning: failed to update comment {} , creating new",
-                comment_id,
-            );
+            eprintln!("Warning: failed to update comment {comment_id} , creating new",);
         }
     }
 
@@ -213,7 +204,7 @@ async fn post_or_update_comment(
     if comment_id > 0 {
         if let Some(ref s) = state {
             if let Err(e) = s.set_comment_id(repo_name, pr_number, comment_id) {
-                eprintln!("Warning: failed to store comment ID: {}", e);
+                eprintln!("Warning: failed to store comment ID: {e}");
             }
         }
     }
@@ -254,15 +245,13 @@ async fn suggest_reviewers(
             let _permit = match sem.acquire().await {
                 Ok(p) => p,
                 Err(e) => {
-                    eprintln!("Warning: semaphore closed: {}", e);
+                    eprintln!("Warning: semaphore closed: {e}");
                     return;
                 }
             };
 
-            let commits_url = format!(
-                "https://api.github.com/repos/{}/commits?path={}&per_page=3",
-                repo, filename
-            );
+            let commits_url =
+                format!("https://api.github.com/repos/{repo}/commits?path={filename}&per_page=3");
             let commits: Vec<serde_json::Value> = match crate::retry::retry_async(
                 &crate::retry::RetryConfig::quick(),
                 "suggest_reviewer_commits",
@@ -342,13 +331,13 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     let client = GITHUB_CLIENT
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("GitHub API client not available (failed to initialize)"))?;
-    let auth_header = format!("Bearer {}", token);
+    let auth_header = format!("Bearer {token}");
 
     let files = match fetch_pr_files(client, repo_name, pr_number, &auth_header).await {
         Ok(f) if !f.is_empty() => f,
         Ok(_) => return Ok(()),
         Err(e) => {
-            eprintln!("Warning: failed to fetch PR files: {}", e);
+            eprintln!("Warning: failed to fetch PR files: {e}");
             return Ok(());
         }
     };
@@ -361,7 +350,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
             let parsed = match crate::parser::parse_unified_diff(filename, patch) {
                 Ok(p) => Some(p),
                 Err(e) => {
-                    eprintln!("Warning: failed to parse file {}: {}", filename, e);
+                    eprintln!("Warning: failed to parse file {filename}: {e}");
                     None
                 }
             };
@@ -382,10 +371,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
 
     // Slop detection — check PR metadata for AI-generation signals
     let pr_author = pr["user"]["login"].as_str().unwrap_or("");
-    let commits_url = format!(
-        "https://api.github.com/repos/{}/pulls/{}/commits",
-        repo_name, pr_number
-    );
+    let commits_url = format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/commits");
     let commit_messages: Vec<String> = match retry_async(
         &RetryConfig::api_default(),
         "fetch_pr_commits",
@@ -475,10 +461,8 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     if findings.is_empty() {
         let body = "✅ No issues found — approved.";
         let review = serde_json::json!({"body": body, "event": "APPROVE"});
-        let approve_url = format!(
-            "https://api.github.com/repos/{}/pulls/{}/reviews",
-            repo_name, pr_number
-        );
+        let approve_url =
+            format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews");
         let _: serde_json::Value = retry_async(
             &RetryConfig::api_default(),
             "approve_review",
@@ -505,7 +489,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         if !head_sha.is_empty() {
             if let Some(ref s) = state {
                 if let Err(e) = s.set_reviewed_sha(repo_name, pr_number, head_sha) {
-                    eprintln!("Warning: failed to store reviewed SHA: {}", e);
+                    eprintln!("Warning: failed to store reviewed SHA: {e}");
                 };
             }
         }
@@ -534,7 +518,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
             "\n👥 **Suggested reviewers:** {}",
             reviewers
                 .iter()
-                .map(|r| format!("@{}", r))
+                .map(|r| format!("@{r}"))
                 .collect::<Vec<_>>()
                 .join(", ")
         );
@@ -551,10 +535,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         "comments": review_comments,
     });
 
-    let review_url = format!(
-        "https://api.github.com/repos/{}/pulls/{}/reviews",
-        repo_name, pr_number
-    );
+    let review_url = format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews");
     let resp = retry_async(
         &RetryConfig::api_default(),
         "post_pr_review",
@@ -586,7 +567,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     if !head_sha.is_empty() {
         if let Some(ref s) = state {
             if let Err(e) = s.set_reviewed_sha(repo_name, pr_number, head_sha) {
-                eprintln!("Warning: failed to store reviewed SHA: {}", e);
+                eprintln!("Warning: failed to store reviewed SHA: {e}");
             };
         }
     }
@@ -620,7 +601,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         )
         .await
         {
-            eprintln!("Warning: failed to generate LLM summary: {}", e);
+            eprintln!("Warning: failed to generate LLM summary: {e}");
         }
     }
 
@@ -637,25 +618,19 @@ fn build_comment_body(finding: &Finding) -> String {
     let explanation = finding_explanation(finding);
     let action = finding_action(finding);
 
-    format!(
-        "**{icon} {title}**\n\n{explanation}\n\n{action}",
-        icon = icon,
-        title = title,
-        explanation = explanation,
-        action = action,
-    )
+    format!("**{icon} {title}**\n\n{explanation}\n\n{action}",)
 }
 
 fn finding_display_title(f: &Finding) -> String {
     match f.detector.as_str() {
         "hallucinated-imports" => {
             let pkg = extract_package_name(&f.message);
-            format!("Package Doesn't Exist — `{}`", pkg)
+            format!("Package Doesn't Exist — `{pkg}`")
         }
         "secrets" => "Credential in Source".into(),
         "phantom-deps" => {
             let pkg = extract_package_name(&f.message);
-            format!("Missing Dependency — `{}`", pkg)
+            format!("Missing Dependency — `{pkg}`")
         }
         "todo-leaks" => "Incomplete Code".into(),
         "vulnerabilities" => {
@@ -664,7 +639,7 @@ fn finding_display_title(f: &Finding) -> String {
                 .as_ref()
                 .and_then(|s| s.split('`').nth(1))
                 .unwrap_or("package");
-            format!("Known Vulnerability — `{}`", pkg)
+            format!("Known Vulnerability — `{pkg}`")
         }
         "over-engineering" => "Unnecessary Abstraction".into(),
         "boilerplate" => "Boilerplate Code".into(),
@@ -680,9 +655,8 @@ fn finding_explanation(f: &Finding) -> String {
         "hallucinated-imports" => {
             let pkg = extract_package_name(&f.message);
             format!(
-                "`{}` doesn't appear to exist on the registry. This import will fail at \
-                 build time or crash at runtime — the package simply isn't available.",
-                pkg
+                "`{pkg}` doesn't appear to exist on the registry. This import will fail at \
+                 build time or crash at runtime — the package simply isn't available."
             )
         }
         "secrets" => "A secret key or token is hardcoded in this file. Since it's committed, \
@@ -692,10 +666,9 @@ fn finding_explanation(f: &Finding) -> String {
         "phantom-deps" => {
             let pkg = extract_package_name(&f.message);
             format!(
-                "`{}` is imported but not declared in the project manifest. It may work \
+                "`{pkg}` is imported but not declared in the project manifest. It may work \
                  locally through hoisting or a global install, but this will break in CI \
-                 or on any fresh environment.",
-                pkg
+                 or on any fresh environment."
             )
         }
         "todo-leaks" => "A `TODO` or `FIXME` marker made it into the commit. These signal \
@@ -725,10 +698,10 @@ fn finding_explanation(f: &Finding) -> String {
 
 fn finding_action(f: &Finding) -> String {
     if let Some(ref s) = f.suggestion {
-        return format!("**💡 Suggestion:** {}", s);
+        return format!("**💡 Suggestion:** {s}");
     }
     if let Some(ref c) = f.codemod {
-        return format!("```suggestion\n{}\n```", c);
+        return format!("```suggestion\n{c}\n```");
     }
     "Please review and address this finding.".into()
 }
@@ -817,16 +790,13 @@ fn evaluate_pre_merge_checks(
         results.push(CheckResult {
             name: "Blocking Issues",
             status: CheckStatus::Fail,
-            details: format!(
-                "{} blocking issues (max allowed: {})",
-                blocking, max_blocking
-            ),
+            details: format!("{blocking} blocking issues (max allowed: {max_blocking})"),
         });
     } else if blocking > 0 {
         results.push(CheckResult {
             name: "Blocking Issues",
             status: CheckStatus::Warning,
-            details: format!("{} blocking issues found", blocking),
+            details: format!("{blocking} blocking issues found"),
         });
     } else {
         results.push(CheckResult {
@@ -842,13 +812,13 @@ fn evaluate_pre_merge_checks(
         results.push(CheckResult {
             name: "Warnings",
             status: CheckStatus::Warning,
-            details: format!("{} warnings (threshold: {})", warnings, max_warnings),
+            details: format!("{warnings} warnings (threshold: {max_warnings})"),
         });
     } else {
         results.push(CheckResult {
             name: "Warnings",
             status: CheckStatus::Pass,
-            details: format!("{} warnings", warnings),
+            details: format!("{warnings} warnings"),
         });
     }
 
@@ -1104,18 +1074,17 @@ async fn generate_and_post_summary(
     let prompt = format!(
         r#"Generate a concise PR review summary (2-3 paragraphs) for the following code review results.
 
-PR Title: {}
-PR Description: {}
+PR Title: {pr_title}
+PR Description: {pr_body}
 
 Findings:
-{}
+{findings_text}
 
 Write a helpful summary that:
 1. Gives an overall assessment
 2. Highlights the most critical issues
 3. Provides actionable advice
-Keep it under 200 words and professional in tone."#,
-        pr_title, pr_body, findings_text
+Keep it under 200 words and professional in tone."#
     );
 
     let output = crate::llm::review_diff(&prompt, llm_cfg, None).await?;
@@ -1139,6 +1108,7 @@ Keep it under 200 words and professional in tone."#,
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn save_review_to_db(
     repo_name: &str,
     pr_number: i64,
@@ -1233,11 +1203,11 @@ async fn save_review_to_db(
     )
     .await
     {
-        eprintln!("Warning: failed to update review status: {}", e);
+        eprintln!("Warning: failed to update review status: {e}");
     }
     crate::db::audit::log_event(
         pool,
-        &format!("review.{}", status),
+        &format!("review.{status}"),
         Some(pr_author),
         Some("review"),
         Some(review.id),

@@ -28,7 +28,7 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                 continue;
             }
 
-            let key = format!("{}:{}", registry_name, package);
+            let key = format!("{registry_name}:{package}");
             if !checked.insert(key) {
                 continue;
             }
@@ -52,7 +52,7 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                         let fixed = vuln
                             .fixed_version
                             .as_ref()
-                            .map(|v| format!(" Upgrade to {}.", v))
+                            .map(|v| format!(" Upgrade to {v}."))
                             .unwrap_or_default();
                         findings.push(Finding {
                             detector: "vulnerabilities".to_string(),
@@ -78,12 +78,10 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                         line: import.line,
                         column: import.column,
                         message: format!(
-                            "Could not check vulnerabilities for `{}` — OSV API error: {}",
-                            package, e
+                            "Could not check vulnerabilities for `{package}` — OSV API error: {e}"
                         ),
                         suggestion: Some(format!(
-                            "Run `cargo audit` or `npm audit` manually to check `{}` for known vulnerabilities.",
-                            package
+                            "Run `cargo audit` or `npm audit` manually to check `{package}` for known vulnerabilities."
                         )),
                         evidence: None,
                         codemod: None,

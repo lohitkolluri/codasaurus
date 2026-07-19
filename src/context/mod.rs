@@ -227,7 +227,7 @@ impl fmt::Display for RepoContext {
             writeln!(f, "### Source Tree")?;
             writeln!(f)?;
             for item in &self.tree_items {
-                writeln!(f, "{}", item)?;
+                writeln!(f, "{item}")?;
             }
         }
 
@@ -288,7 +288,7 @@ pub fn build_repo_context(root: &str, guidelines_override: Option<&str>) -> Opti
         })
         .filter_map(|e| {
             if let Err(err) = &e {
-                eprintln!("Warning: error reading directory entry: {}", err);
+                eprintln!("Warning: error reading directory entry: {err}");
             }
             e.ok()
         });
@@ -320,9 +320,9 @@ pub fn build_repo_context(root: &str, guidelines_override: Option<&str>) -> Opti
             };
             if let Some(p) = parent {
                 let prefix = if entry.file_type().is_dir() {
-                    format!("  📁 {}/", fname)
+                    format!("  📁 {fname}/")
                 } else {
-                    format!("  📄 {}", fname)
+                    format!("  📄 {fname}")
                 };
                 sub_entries.entry(p).or_default().push(prefix);
             }
@@ -432,10 +432,10 @@ fn build_tree_from_accum(
 
     // Directories first, then files
     for dir in &root_dirs {
-        result.push(format!("📁 {}/", dir));
+        result.push(format!("📁 {dir}/"));
     }
     for file in &root_files {
-        result.push(format!("📄 {}", file));
+        result.push(format!("📄 {file}"));
     }
 
     // Sub-items for first 5 directories, if we have room
@@ -446,7 +446,7 @@ fn build_tree_from_accum(
                 if kids.len() > 10 {
                     let remaining = kids.len() - 10;
                     kids.truncate(10);
-                    kids.push(format!("  ... and {} more items", remaining));
+                    kids.push(format!("  ... and {remaining} more items"));
                 }
                 result.extend(kids);
             }
@@ -457,7 +457,7 @@ fn build_tree_from_accum(
     if result.len() > 30 {
         let remaining = result.len() - 30;
         result.truncate(30);
-        result.push(format!("... and {} more entries", remaining));
+        result.push(format!("... and {remaining} more entries"));
     }
 
     result

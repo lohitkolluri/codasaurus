@@ -158,8 +158,7 @@ fn check_deep_nesting(path: &str, lines: &[&str]) -> Option<Finding> {
             line: deepest_line,
             column: 0,
             message: format!(
-                "Deep nesting ({} levels) — AI code often creates unnecessarily nested structures.",
-                max_depth
+                "Deep nesting ({max_depth} levels) — AI code often creates unnecessarily nested structures."
             ),
             suggestion: Some(
                 "Extract nested logic into separate functions to improve readability.".to_string(),
@@ -195,8 +194,7 @@ fn check_unnecessary_factory(path: &str, content: &str) -> Option<Finding> {
             line: 0,
             column: 0,
             message: format!(
-                "Factory/Builder pattern with only {} type(s) — unnecessary complexity.",
-                total_types
+                "Factory/Builder pattern with only {total_types} type(s) — unnecessary complexity."
             ),
             suggestion: Some(
                 "Use constructors directly. Factory/Builder patterns add value with 5+ variants."
@@ -234,8 +232,7 @@ fn check_abstraction_overload(path: &str, content: &str) -> Option<Finding> {
             line: 0,
             column: 0,
             message: format!(
-                "Multiple abstraction layers detected ({}) — AI code often over-abstracts.",
-                count
+                "Multiple abstraction layers detected ({count}) — AI code often over-abstracts."
             ),
             suggestion: Some(
                 "Prefer concrete implementations. Add abstractions only when you have multiple implementations."
@@ -308,8 +305,7 @@ fn check_long_functions(path: &str, content: &str) -> Option<Finding> {
             line,
             column: 0,
             message: format!(
-                "Very long function/method detected ({} lines) — AI code tends to write overly long functions.",
-                count
+                "Very long function/method detected ({count} lines) — AI code tends to write overly long functions."
             ),
             suggestion: Some(
                 "Break this function into smaller, focused functions. Aim for <30 lines per function."
@@ -353,8 +349,7 @@ fn check_repeated_code(path: &str, lines: &[&str]) -> Option<Finding> {
             line: 0,
             column: 0,
             message: format!(
-                "Repeated code blocks found ({} instances) — AI often generates repetitive code.",
-                repeats
+                "Repeated code blocks found ({repeats} instances) — AI often generates repetitive code."
             ),
             suggestion: Some("Extract repeated blocks into reusable functions.".to_string()),
             evidence: None,
@@ -442,7 +437,7 @@ mod tests {
         let mut lines = vec![];
         lines.push("fn foo() {".to_string());
         for i in 0..70 {
-            lines.push(format!("    let x_{} = {};", i, i));
+            lines.push(format!("    let x_{i} = {i};"));
         }
         lines.push("}".to_string());
         let content = lines.join("\n");

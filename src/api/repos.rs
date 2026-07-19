@@ -80,19 +80,19 @@ async fn sync_repos(
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
-        .map_err(|e| ApiError::internal(format!("HTTP client: {}", e)))?;
+        .map_err(|e| ApiError::internal(format!("HTTP client: {e}")))?;
 
     let installations: Vec<serde_json::Value> = client
         .get("https://api.github.com/app/installations")
-        .header("Authorization", format!("Bearer {}", jwt))
+        .header("Authorization", format!("Bearer {jwt}"))
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", "codasaurus")
         .send()
         .await
-        .map_err(|e| ApiError::bad_request(format!("GitHub API: {}", e)))?
+        .map_err(|e| ApiError::bad_request(format!("GitHub API: {e}")))?
         .json()
         .await
-        .map_err(|e| ApiError::bad_request(format!("Invalid response: {}", e)))?;
+        .map_err(|e| ApiError::bad_request(format!("Invalid response: {e}")))?;
 
     let mut total = 0usize;
 
@@ -105,18 +105,17 @@ async fn sync_repos(
         // Get installation token
         let token_resp: serde_json::Value = client
             .post(format!(
-                "https://api.github.com/app/installations/{}/access_tokens",
-                inst_id
+                "https://api.github.com/app/installations/{inst_id}/access_tokens"
             ))
-            .header("Authorization", format!("Bearer {}", jwt))
+            .header("Authorization", format!("Bearer {jwt}"))
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", "codasaurus")
             .send()
             .await
-            .map_err(|e| ApiError::bad_request(format!("Token request: {}", e)))?
+            .map_err(|e| ApiError::bad_request(format!("Token request: {e}")))?
             .json()
             .await
-            .map_err(|e| ApiError::bad_request(format!("Token response: {}", e)))?;
+            .map_err(|e| ApiError::bad_request(format!("Token response: {e}")))?;
 
         let token = match token_resp["token"].as_str() {
             Some(t) => t.to_string(),
@@ -131,18 +130,18 @@ async fn sync_repos(
         while let Some(url) = page_url.take() {
             let resp = client
                 .get(&url)
-                .header("Authorization", format!("Bearer {}", token))
+                .header("Authorization", format!("Bearer {token}"))
                 .header("Accept", "application/vnd.github+json")
                 .header("User-Agent", "codasaurus")
                 .send()
                 .await
-                .map_err(|e| ApiError::bad_request(format!("Repos request: {}", e)))?;
+                .map_err(|e| ApiError::bad_request(format!("Repos request: {e}")))?;
 
             // Extract repos from this page
             let page_data: serde_json::Value = resp
                 .json()
                 .await
-                .map_err(|e| ApiError::bad_request(format!("Repos response: {}", e)))?;
+                .map_err(|e| ApiError::bad_request(format!("Repos response: {e}")))?;
 
             if let Some(repos) = page_data["repositories"].as_array() {
                 all_repos.extend(repos.iter().cloned());
@@ -181,7 +180,7 @@ async fn sync_repos(
             )
             .await
             {
-                eprintln!("  [sync_repos] Failed to save repo: {}", e);
+                eprintln!("  [sync_repos] Failed to save repo: {e}");
             } else {
                 total += 1;
             }
@@ -207,10 +206,10 @@ fn create_jwt(app_id: &str, private_key_pem: &str) -> Result<String, ApiError> {
     });
 
     let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
-        .map_err(|e| ApiError::internal(format!("Invalid PEM: {}", e)))?;
+        .map_err(|e| ApiError::internal(format!("Invalid PEM: {e}")))?;
 
     encode(&Header::new(Algorithm::RS256), &payload, &key)
-        .map_err(|e| ApiError::internal(format!("JWT error: {}", e)))
+        .map_err(|e| ApiError::internal(format!("JWT error: {e}")))
 }
 
 /// GET /api/v1/repos/:id
@@ -220,7 +219,7 @@ async fn get_repo(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let repo = db::repos::get_repo(&state.pool, id)
         .await?
-        .ok_or_else(|| ApiError::not_found(format!("Repo {} not found", id)))?;
+        .ok_or_else(|| ApiError::not_found(format!("Repo {id} not found")))?;
     Ok(Json(json!(repo)))
 }
 

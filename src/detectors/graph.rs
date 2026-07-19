@@ -88,8 +88,8 @@ pub fn populate(files: &[ParsedFile]) {
                             continue;
                         }
                         if word == import_name {
-                            let from_sym = format!("{}::{}", a_path, word);
-                            let to_sym = format!("{}::{}", file_b_path, import_name);
+                            let from_sym = format!("{a_path}::{word}");
+                            let to_sym = format!("{file_b_path}::{import_name}");
                             let edge_key = (from_sym.clone(), to_sym.clone());
                             if seen_edges.insert(edge_key) {
                                 graph.add_symbol(
@@ -117,7 +117,7 @@ pub fn populate(files: &[ParsedFile]) {
 pub fn lock_graph() -> Result<std::sync::MutexGuard<'static, CodeGraph>, String> {
     CODE_GRAPH
         .lock()
-        .map_err(|e| format!("code graph mutex poisoned: {}", e))
+        .map_err(|e| format!("code graph mutex poisoned: {e}"))
 }
 
 pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {

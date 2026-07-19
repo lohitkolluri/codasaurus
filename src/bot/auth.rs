@@ -40,8 +40,8 @@ pub async fn get_installation_token(
 
     let client = GITHUB_CLIENT
         .as_ref()
-        .map_err(|e| anyhow::anyhow!("Failed to build GitHub API client: {}", e))?;
-    let jwt_auth = format!("Bearer {}", jwt);
+        .map_err(|e| anyhow::anyhow!("Failed to build GitHub API client: {e}"))?;
+    let jwt_auth = format!("Bearer {jwt}");
 
     let inst_id = if let Some(iid) = installation_id {
         iid
@@ -85,8 +85,7 @@ pub async fn get_installation_token(
             let c = &client;
             let a = &jwt_auth;
             c.post(format!(
-                "https://api.github.com/app/installations/{}/access_tokens",
-                inst_id
+                "https://api.github.com/app/installations/{inst_id}/access_tokens"
             ))
             .header("Authorization", a)
             .header("Accept", "application/vnd.github+json")

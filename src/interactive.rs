@@ -179,13 +179,13 @@ fn open_in_editor(item: &TuiItem, config: &Config) {
 
     let result = if line > 0 {
         std::process::Command::new(&editor)
-            .arg(format!("{}:{}", file, line))
+            .arg(format!("{file}:{line}"))
             .status()
     } else {
         std::process::Command::new(&editor).arg(file).status()
     };
     if let Err(e) = result {
-        eprintln!("Warning: failed to open editor '{}': {}", editor, e);
+        eprintln!("Warning: failed to open editor '{editor}': {e}");
     }
 }
 
@@ -211,7 +211,7 @@ fn gen_ai_prompt(item: &TuiItem) -> String {
         suggestion = finding
             .suggestion
             .as_ref()
-            .map(|s| format!("\n**Suggested fix:** {}", s))
+            .map(|s| format!("\n**Suggested fix:** {s}"))
             .unwrap_or_default(),
     )
 }
@@ -223,7 +223,7 @@ fn copy_to_clipboard(text: &str) -> bool {
         if let Ok(mut child) = cmd.spawn() {
             if let Some(mut stdin) = child.stdin.take() {
                 if let Err(e) = stdin.write_all(text.as_bytes()) {
-                    eprintln!("Warning: failed to write to clipboard: {}", e);
+                    eprintln!("Warning: failed to write to clipboard: {e}");
                 }
             }
             // stdin is dropped here, sending EOF to the subprocess
@@ -248,7 +248,7 @@ fn copy_to_clipboard(text: &str) -> bool {
     );
 
     if !copied {
-        eprintln!("Prompt (not copied, install pbcopy/xclip/xsel):\n{}", text);
+        eprintln!("Prompt (not copied, install pbcopy/xclip/xsel):\n{text}");
     }
     copied
 }
@@ -256,7 +256,7 @@ fn copy_to_clipboard(text: &str) -> bool {
 fn dismiss_finding(item: &TuiItem) {
     if let Ok(store) = LearningStore::open() {
         if let Err(e) = store.dismiss(&item.finding) {
-            eprintln!("Warning: failed to persist dismissal: {}", e);
+            eprintln!("Warning: failed to persist dismissal: {e}");
         }
     }
 }
@@ -622,7 +622,7 @@ fn render_header(f: &mut Frame, area: Rect, state: &AppState) {
     if dimmed > 0 {
         spans.push(Span::raw("  "));
         spans.push(Span::styled(
-            format!("[{} dismissed]", dimmed),
+            format!("[{dimmed} dismissed]"),
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
@@ -671,7 +671,7 @@ fn render_findings_list(f: &mut Frame, area: Rect, state: &AppState) {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    format!("{}", active_count),
+                    format!("{active_count}"),
                     Style::default().fg(Color::DarkGray),
                 ),
             ])));
@@ -759,7 +759,7 @@ fn build_finding_row<'a>(idx: usize, item: &'a TuiItem, state: &AppState) -> Lis
     ListItem::new(
         Line::from(vec![
             Span::styled(
-                format!(" {} ", sev_char),
+                format!(" {sev_char} "),
                 (if is_dismissing {
                     Style::default().fg(Color::DarkGray)
                 } else {
@@ -872,7 +872,7 @@ fn render_detail_pane(f: &mut Frame, area: Rect, state: &AppState) {
             let display = if ev_line.len() > 60 {
                 format!(" ┊ {}…", ev_line.chars().take(57).collect::<String>())
             } else {
-                format!(" ┊ {}", ev_line)
+                format!(" ┊ {ev_line}")
             };
             lines.push(Line::from(Span::styled(
                 display,
@@ -893,7 +893,7 @@ fn render_detail_pane(f: &mut Frame, area: Rect, state: &AppState) {
                 let display = if sug_line.len() > 60 {
                     format!(" {}", sug_line.chars().take(58).collect::<String>())
                 } else {
-                    format!(" {}", sug_line)
+                    format!(" {sug_line}")
                 };
                 lines.push(Line::from(Span::styled(
                     display,
@@ -909,7 +909,7 @@ fn render_detail_pane(f: &mut Frame, area: Rect, state: &AppState) {
                 Style::default().fg(Color::Rgb(180, 130, 220)),
             )));
             lines.push(Line::from(Span::styled(
-                format!(" $ {}", codemod),
+                format!(" $ {codemod}"),
                 Style::default().fg(Color::Rgb(200, 160, 240)),
             )));
             lines.push(Line::from(""));
@@ -955,7 +955,7 @@ fn render_footer(f: &mut Frame, area: Rect, state: &AppState) {
         state.selected + 1
     };
 
-    let pos_str = format!(" {}/{} ", pos, total);
+    let pos_str = format!(" {pos}/{total} ");
 
     f.render_widget(
         Paragraph::new(Line::from(vec![

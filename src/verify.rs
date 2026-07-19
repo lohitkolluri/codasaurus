@@ -90,10 +90,7 @@ pub fn run_verify(opts: VerifyOptions) -> Result<VerifyReport> {
                 match result {
                     Ok(te) => report.test_executions.push(te),
                     Err(e) => {
-                        eprintln!(
-                            "Warning: test execution failed for '{}': {}",
-                            module_test, e
-                        );
+                        eprintln!("Warning: test execution failed for '{module_test}': {e}");
                     }
                 }
             }
@@ -165,9 +162,9 @@ fn parse_changed_files(files: &[String], config: &Config) -> Vec<parser::ParsedF
         match std::fs::read_to_string(file_path) {
             Ok(content) => match parser::parse_file(file_path, &content) {
                 Ok(pf) => parsed.push(pf),
-                Err(e) => eprintln!("Warning: failed to parse file {}: {}", file_path, e),
+                Err(e) => eprintln!("Warning: failed to parse file {file_path}: {e}"),
             },
-            Err(e) => eprintln!("Warning: failed to read file {}: {}", file_path, e),
+            Err(e) => eprintln!("Warning: failed to read file {file_path}: {e}"),
         }
     }
     parsed
@@ -179,7 +176,7 @@ fn build_verify_graph(
     parsed_files: &[parser::ParsedFile],
 ) -> anyhow::Result<std::sync::MutexGuard<'static, crate::graph::CodeGraph>> {
     code_graph::populate(parsed_files);
-    code_graph::lock_graph().map_err(|e| anyhow::anyhow!("Code graph unavailable: {}", e))
+    code_graph::lock_graph().map_err(|e| anyhow::anyhow!("Code graph unavailable: {e}"))
 }
 
 /// Extract changed symbols from the graph for the given files.
@@ -259,7 +256,7 @@ fn extract_module_tests(changed_files: &[String]) -> Vec<String> {
             .to_string();
         if !module.is_empty() {
             // Rust convention: module-level test
-            tests.insert(format!("{}::", module));
+            tests.insert(format!("{module}::"));
         }
     }
     tests.into_iter().collect()
@@ -273,10 +270,7 @@ fn run_targeted_tests(
     // Prompt user for approval unless --force
     if !opts.force && !opts.ci {
         let test_list = test_names.join(", ");
-        eprintln!(
-            "Codasaurus will run the following tests:\n  {}\nRun tests? [y/N] ",
-            test_list
-        );
+        eprintln!("Codasaurus will run the following tests:\n  {test_list}\nRun tests? [y/N] ");
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).ok();
         let input = input.trim().to_lowercase();
@@ -292,7 +286,7 @@ fn run_targeted_tests(
         match result {
             Ok(te) => executions.push(te),
             Err(e) => {
-                eprintln!("Warning: could not run test '{}': {}", test_name, e);
+                eprintln!("Warning: could not run test '{test_name}': {e}");
             }
         }
     }
@@ -361,8 +355,6 @@ fn build_fix_packets(
             line: changed.line,
             severity: if radius_size > 10 {
                 "warning"
-            } else if radius_size > 5 {
-                "info"
             } else {
                 "info"
             },
@@ -403,7 +395,7 @@ fn build_fix_packets(
                 file: String::new(),
                 line: 0,
                 severity: "info",
-                title: format!("Symbol `{}` is in the blast radius", sym),
+                title: format!("Symbol `{sym}` is in the blast radius"),
                 description: format!(
                     "Symbol `{}` is transitively affected by the changed files, with {} direct callers.",
                     sym,
@@ -431,12 +423,9 @@ fn find_test_evidence<'a>(
     test_executions: &'a [TestExecution],
 ) -> Option<&'a TestExecution> {
     let base_name = changed.name.rsplit("::").next().unwrap_or(&changed.name);
-    for te in test_executions {
-        if te.test_name.contains(base_name) {
-            return Some(te);
-        }
-    }
-    None
+    test_executions
+        .iter()
+        .find(|&te| te.test_name.contains(base_name))
 }
 
 /// Extract changed files from a unified diff.

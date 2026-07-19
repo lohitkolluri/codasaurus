@@ -261,7 +261,7 @@ class User {
 fn test_detects_long_function() {
     let mut lines = vec!["fn process() {".to_string()];
     for i in 0..65 {
-        lines.push(format!("    let x_{} = {};", i, i));
+        lines.push(format!("    let x_{i} = {i};"));
     }
     lines.push("}".to_string());
     let content = lines.join("\n");
@@ -386,8 +386,7 @@ class User {
     // may add "info"/"warning" findings
     assert!(
         by_severity.contains_key("blocking") || by_severity.contains_key("warning"),
-        "should have at least blocking or warning findings, got: {:?}",
-        by_severity
+        "should have at least blocking or warning findings, got: {by_severity:?}"
     );
 }
 

@@ -27,7 +27,7 @@ fn main() {
         println!("cargo:info=Installing Svelte dependencies...");
         let status = Command::new("npm")
             .args(["install"])
-            .current_dir(svelte_dir.as_path())
+            .current_dir(svelte_dir)
             .status()
             .expect("npm install failed");
         if !status.success() {
@@ -39,7 +39,7 @@ fn main() {
     println!("cargo:info=Building Svelte SPA...");
     let status = Command::new("npm")
         .args(["run", "build"])
-        .current_dir(&svelte_dir)
+        .current_dir(svelte_dir)
         .status()
         .expect("npm run build failed");
     if !status.success() {

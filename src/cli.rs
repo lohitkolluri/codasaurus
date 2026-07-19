@@ -35,7 +35,7 @@ pub fn run_check(opts: CheckOptions) -> Result<Findings> {
                 .filter_entry(|e| !util::is_hidden(e.path()))
                 .filter_map(|e| {
                     if let Err(err) = &e {
-                        eprintln!("Warning: error accessing directory entry: {}", err);
+                        eprintln!("Warning: error accessing directory entry: {err}");
                     }
                     e.ok()
                 })
@@ -89,8 +89,7 @@ pub fn run_check(opts: CheckOptions) -> Result<Findings> {
                     Ok(r) => r,
                     Err(e) => {
                         eprintln!(
-                            "Warning: Failed to create async runtime: {}; skipping LLM review",
-                            e
+                            "Warning: Failed to create async runtime: {e}; skipping LLM review"
                         );
                         return Ok(findings);
                     }
@@ -135,7 +134,7 @@ pub fn run_check(opts: CheckOptions) -> Result<Findings> {
                         }
                     }
                     Err(e) => {
-                        eprintln!("LLM review failed: {}", e);
+                        eprintln!("LLM review failed: {e}");
                     }
                 }
             }
@@ -152,7 +151,7 @@ pub async fn run_watch(path: &str, config_path: Option<&str>) -> Result<()> {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    println!("🦕 Codasaurus watching {}... (Ctrl+C to stop)", path);
+    println!("🦕 Codasaurus watching {path}... (Ctrl+C to stop)");
 
     let (tx, rx) = mpsc::channel::<Result<Event, notify::Error>>();
     let mut watcher = RecommendedWatcher::new(tx, Config::default())?;
@@ -167,7 +166,7 @@ pub async fn run_watch(path: &str, config_path: Option<&str>) -> Result<()> {
                 last_check = std::time::Instant::now();
             }
             Ok(Err(e)) => {
-                eprintln!("Watch error: {}", e);
+                eprintln!("Watch error: {e}");
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 // Check if enough time has passed since last change
@@ -178,8 +177,7 @@ pub async fn run_watch(path: &str, config_path: Option<&str>) -> Result<()> {
                             Ok(c) => c,
                             Err(e) => {
                                 eprintln!(
-                                    "Warning: Could not load config file: {}; using defaults",
-                                    e
+                                    "Warning: Could not load config file: {e}; using defaults"
                                 );
                                 crate::config::Config::default()
                             }
@@ -226,9 +224,9 @@ fn collect_parsed_file(
     match std::fs::read_to_string(file_path) {
         Ok(content) => match parser::parse_file(file_path, &content) {
             Ok(parsed) => parsed_files.push(parsed),
-            Err(e) => eprintln!("Warning: failed to parse file {}: {}", file_path, e),
+            Err(e) => eprintln!("Warning: failed to parse file {file_path}: {e}"),
         },
-        Err(e) => eprintln!("Warning: failed to read file {}: {}", file_path, e),
+        Err(e) => eprintln!("Warning: failed to read file {file_path}: {e}"),
     }
 }
 

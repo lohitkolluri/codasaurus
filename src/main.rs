@@ -210,17 +210,14 @@ fn main() -> Result<()> {
                             port,
                         }),
                         Err(e) => {
-                            eprintln!(
-                                "  Warning: GITHUB_APP_ID set but private key missing: {}",
-                                e
-                            );
+                            eprintln!("  Warning: GITHUB_APP_ID set but private key missing: {e}");
                             eprintln!("  Running in dashboard-only mode (no GitHub bot)");
                             None
                         }
                     });
 
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(serve::serve(&host, port, &database_url, bot_config))?;
+            rt.block_on(serve::serve(host, port, &database_url, bot_config))?;
         }
         Commands::CheckRun { event_path, config } => {
             let _cfg = config::load(config.as_deref())?;
@@ -259,10 +256,8 @@ fn main() -> Result<()> {
                         report.fix_packets.len()
                     );
                 }
-            } else if !report.verified {
-                if *ci || *force {
-                    std::process::exit(1);
-                }
+            } else if !report.verified && (*ci || *force) {
+                std::process::exit(1);
             }
         }
 
@@ -270,7 +265,7 @@ fn main() -> Result<()> {
             println!("codasaurus v{}", env!("CARGO_PKG_VERSION"));
         }
         Commands::Health { port, host } => {
-            let url = format!("http://{}:{}/health", host, port);
+            let url = format!("http://{host}:{port}/health");
             let client = reqwest::blocking::Client::builder()
                 .timeout(std::time::Duration::from_secs(5))
                 .connect_timeout(std::time::Duration::from_secs(3))
@@ -286,7 +281,7 @@ fn main() -> Result<()> {
                     std::process::exit(1);
                 }
                 Err(e) => {
-                    eprintln!("Health check error: {} — {}", url, e);
+                    eprintln!("Health check error: {url} — {e}");
                     std::process::exit(1);
                 }
             }
@@ -309,6 +304,6 @@ fn resolve_private_key() -> anyhow::Result<String> {
     use base64::Engine;
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(b64.as_bytes())
-        .map_err(|e| anyhow::anyhow!("Invalid base64 key: {}", e))?;
-    String::from_utf8(decoded).map_err(|e| anyhow::anyhow!("Invalid UTF-8 in decoded key: {}", e))
+        .map_err(|e| anyhow::anyhow!("Invalid base64 key: {e}"))?;
+    String::from_utf8(decoded).map_err(|e| anyhow::anyhow!("Invalid UTF-8 in decoded key: {e}"))
 }

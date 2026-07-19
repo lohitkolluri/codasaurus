@@ -125,7 +125,7 @@ async fn get_review(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let review = db::reviews::get_review(&state.pool, id)
         .await?
-        .ok_or_else(|| ApiError::not_found(format!("Review {} not found", id)))?;
+        .ok_or_else(|| ApiError::not_found(format!("Review {id} not found")))?;
 
     let findings = db::reviews::get_findings_for_review(&state.pool, id).await?;
 
@@ -143,7 +143,7 @@ async fn get_review_findings(
     // Verify the review exists first
     let _review = db::reviews::get_review(&state.pool, id)
         .await?
-        .ok_or_else(|| ApiError::not_found(format!("Review {} not found", id)))?;
+        .ok_or_else(|| ApiError::not_found(format!("Review {id} not found")))?;
 
     let findings = db::reviews::get_findings_for_review(&state.pool, id).await?;
 

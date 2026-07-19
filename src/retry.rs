@@ -78,7 +78,7 @@ where
             }
         }
     }
-    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("retry exhausted for {}", operation)))
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("retry exhausted for {operation}")))
 }
 
 /// Retry a blocking fallible operation with exponential backoff.
@@ -113,7 +113,7 @@ where
             }
         }
     }
-    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("retry exhausted for {}", operation)))
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("retry exhausted for {operation}")))
 }
 
 /// Predicate: is this an error we should retry?

@@ -30,7 +30,7 @@ static CLIENT: LazyLock<Option<reqwest::blocking::Client>> = LazyLock::new(|| {
     {
         Ok(client) => Some(client),
         Err(e) => {
-            eprintln!("Warning: failed to build registry HTTP client: {}", e);
+            eprintln!("Warning: failed to build registry HTTP client: {e}");
             None
         }
     }
@@ -47,7 +47,7 @@ pub fn get_cache_ttl() -> u64 {
 }
 
 pub fn check_package(registry: &str, package: &str) -> Result<Option<bool>> {
-    let cache_key = format!("{}:{}", registry, package);
+    let cache_key = format!("{registry}:{package}");
     let ttl_secs = get_cache_ttl();
     {
         let cache = CACHE.read().unwrap_or_else(|e| {
@@ -126,7 +126,7 @@ mod tests {
         let mut cache = CACHE.write().unwrap();
         // Fill cache beyond max size with varied timestamps so oldest-pick is deterministic
         for i in 0..CACHE_MAX_SIZE + 100 {
-            let key = format!("test:pkg-{}", i);
+            let key = format!("test:pkg-{i}");
             cache.insert(key, (true, Instant::now()));
         }
 

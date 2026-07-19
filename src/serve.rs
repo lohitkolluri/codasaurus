@@ -53,8 +53,8 @@ pub async fn serve(
 
     let app = build_router(pool, bot_config);
 
-    let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
-    println!("  Codasaurus server listening on http://{}", addr);
+    let addr: SocketAddr = format!("{host}:{port}").parse()?;
+    println!("  Codasaurus server listening on http://{addr}");
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app)

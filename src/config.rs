@@ -199,7 +199,7 @@ pub fn load(path: Option<&str>) -> Result<Config> {
             if pb.exists() {
                 Some(pb)
             } else {
-                eprintln!("Warning: config file '{}' not found, using defaults.", p);
+                eprintln!("Warning: config file '{p}' not found, using defaults.");
                 None
             }
         }

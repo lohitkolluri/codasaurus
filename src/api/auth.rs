@@ -61,7 +61,7 @@ fn extract_token(headers: &axum::http::HeaderMap) -> Option<String> {
     let cookie = headers.get(header::COOKIE)?.to_str().ok()?;
     for pair in cookie.split(';') {
         let pair = pair.trim();
-        if let Some(val) = pair.strip_prefix(&format!("{}=", SESSION_COOKIE)) {
+        if let Some(val) = pair.strip_prefix(&format!("{SESSION_COOKIE}=")) {
             return Some(val.to_string());
         }
     }
@@ -69,14 +69,11 @@ fn extract_token(headers: &axum::http::HeaderMap) -> Option<String> {
 }
 
 fn set_cookie(token: &str) -> String {
-    format!(
-        "{}={}; HttpOnly; Path=/; Max-Age={}; SameSite=Lax",
-        SESSION_COOKIE, token, SESSION_MAX_AGE
-    )
+    format!("{SESSION_COOKIE}={token}; HttpOnly; Path=/; Max-Age={SESSION_MAX_AGE}; SameSite=Lax")
 }
 
 fn clear_cookie() -> String {
-    format!("{}=; HttpOnly; Path=/; Max-Age=0", SESSION_COOKIE)
+    format!("{SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0")
 }
 
 pub(crate) async fn require_session(
@@ -102,7 +99,7 @@ async fn login(
 ) -> Result<impl IntoResponse, ApiError> {
     let user = db::users::verify_password(&state.pool, &body.email, &body.password)
         .await
-        .map_err(|e| ApiError::unauthorized(format!("Authentication failed: {}", e)))?
+        .map_err(|e| ApiError::unauthorized(format!("Authentication failed: {e}")))?
         .ok_or_else(|| ApiError::unauthorized("Invalid email or password"))?;
 
     // Create session (non-fatal if fails — user still authenticated for this request)

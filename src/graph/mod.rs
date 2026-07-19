@@ -151,24 +151,20 @@ impl CodeGraph {
         let base = base.split("::").last().unwrap_or(base);
 
         // Rust: my_fn -> tests::test_my_fn, tests::my_fn
-        names.push(format!("tests::test_{}", base));
-        names.push(format!("tests::{}", base));
+        names.push(format!("tests::test_{base}"));
+        names.push(format!("tests::{base}"));
 
         // Rust: my_fn -> test_my_fn (direct fn name match)
-        names.push(format!("test_{}", base));
+        names.push(format!("test_{base}"));
 
         // PascalCase name -> TestName (Go convention)
-        if base.chars().next().map_or(false, |c| c.is_uppercase()) {
-            names.push(format!("Test{}", base));
+        if base.chars().next().is_some_and(|c| c.is_uppercase()) {
+            names.push(format!("Test{base}"));
         }
 
         // Module-style: module::tests::test_name
-        if let Some(module) = symbol
-            .rsplitn(2, '/')
-            .next()
-            .and_then(|s| s.rsplit('.').next())
-        {
-            names.push(format!("{}::tests::test_{}", module, base));
+        if let Some(module) = symbol.rsplit('/').next().and_then(|s| s.rsplit('.').next()) {
+            names.push(format!("{module}::tests::test_{base}"));
         }
 
         names

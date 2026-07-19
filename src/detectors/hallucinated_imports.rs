@@ -42,12 +42,10 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                         severity: "blocking",
                         detector: "hallucinated-imports".to_string(),
                         message: format!(
-                            "Package `{}` not found on {}. This may be a hallucinated import.",
-                            package, registry_name
+                            "Package `{package}` not found on {registry_name}. This may be a hallucinated import."
                         ),
                         suggestion: Some(format!(
-                            "Verify the correct package name at https://www.{}.com/package/{} before installing.",
-                            registry_name, package
+                            "Verify the correct package name at https://www.{registry_name}.com/package/{package} before installing."
                         )),
                         codemod: None,
                         evidence: None,
@@ -62,8 +60,7 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                             line: import.line,
                             column: import.column,
                             message: format!(
-                                "Package `{}` check skipped — registry lookup failed for {}.",
-                                package, registry_name
+                                "Package `{package}` check skipped — registry lookup failed for {registry_name}."
                             ),
                             suggestion: Some(format!(
                                 "Could not verify `{}` on {}. Run `{} {}` manually to confirm.",

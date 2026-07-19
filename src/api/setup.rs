@@ -166,7 +166,7 @@ async fn setup_database(
             sqlx::query_scalar::<_, i64>("SELECT 1")
                 .fetch_one(&state.pool.0)
                 .await
-                .map_err(|e| ApiError::bad_request(format!("Test query failed: {}", e)))?;
+                .map_err(|e| ApiError::bad_request(format!("Test query failed: {e}")))?;
 
             // Use the DATABASE_URL from env for the stored config so it
             // matches what the server actually uses at startup, falling
@@ -195,12 +195,12 @@ async fn setup_database(
             // Try connecting
             let test_pool = sqlx::PgPool::connect(&db_url)
                 .await
-                .map_err(|e| ApiError::bad_request(format!("Cannot connect: {}", e)))?;
+                .map_err(|e| ApiError::bad_request(format!("Cannot connect: {e}")))?;
 
             sqlx::query_scalar::<_, i64>("SELECT 1")
                 .fetch_one(&test_pool)
                 .await
-                .map_err(|e| ApiError::bad_request(format!("Test query failed: {}", e)))?;
+                .map_err(|e| ApiError::bad_request(format!("Test query failed: {e}")))?;
 
             test_pool.close().await;
 
@@ -214,8 +214,7 @@ async fn setup_database(
             }))
         }
         other => Err(ApiError::bad_request(format!(
-            "Unsupported database provider: {}. Use 'sqlite' or 'postgres'.",
-            other
+            "Unsupported database provider: {other}. Use 'sqlite' or 'postgres'."
         ))),
     }
 }
@@ -316,7 +315,7 @@ async fn test_llm_connection(
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()
-        .map_err(|e| ApiError::internal(format!("Failed to build HTTP client: {}", e)))?;
+        .map_err(|e| ApiError::internal(format!("Failed to build HTTP client: {e}")))?;
 
     let (url, model_name) = match provider {
         "openrouter" => (
@@ -330,7 +329,7 @@ async fn test_llm_connection(
                 base_url.trim_end_matches('/')
             };
             (
-                format!("{}/v1/chat/completions", base),
+                format!("{base}/v1/chat/completions"),
                 model.unwrap_or("qwen2.5-coder:7b"),
             )
         }
@@ -340,14 +339,13 @@ async fn test_llm_connection(
             }
             let base = base_url.trim_end_matches('/');
             (
-                format!("{}/chat/completions", base),
+                format!("{base}/chat/completions"),
                 model.unwrap_or("default"),
             )
         }
         _ => {
             return Err(ApiError::bad_request(format!(
-                "Unknown provider: {}",
-                provider
+                "Unknown provider: {provider}"
             )))
         }
     };
@@ -359,7 +357,7 @@ async fn test_llm_connection(
     }));
 
     if !api_key.is_empty() {
-        req = req.header("Authorization", format!("Bearer {}", api_key));
+        req = req.header("Authorization", format!("Bearer {api_key}"));
     }
 
     match req.send().await {
@@ -388,7 +386,7 @@ async fn resolve_public_url(state: &AppState, headers: &axum::http::HeaderMap) -
         } else {
             "https"
         };
-        return format!("{}://{}", scheme, host);
+        return format!("{scheme}://{host}");
     }
     "http://localhost:3000".to_string()
 }
@@ -443,7 +441,7 @@ async fn github_manifest_page(
     let manifest = build_manifest(&public_url);
 
     let manifest_json = serde_json::to_string(&manifest)
-        .map_err(|e| ApiError::internal(format!("Failed to serialize manifest: {}", e)))?;
+        .map_err(|e| ApiError::internal(format!("Failed to serialize manifest: {e}")))?;
 
     // HTML page that auto-submits the manifest form to GitHub.
     // This matches GitHub's documented POST form flow exactly.
@@ -505,7 +503,7 @@ async fn setup_github(
     let now = chrono::Utc::now();
     let claims = jsonwebtoken::Header::default();
     let payload = jsonwebtoken::EncodingKey::from_rsa_pem(body.private_key.as_bytes())
-        .map_err(|e| ApiError::bad_request(format!("Invalid private key PEM: {}", e)))?;
+        .map_err(|e| ApiError::bad_request(format!("Invalid private key PEM: {e}")))?;
 
     let token = jsonwebtoken::encode(
         &claims,
@@ -516,20 +514,20 @@ async fn setup_github(
         }),
         &payload,
     )
-    .map_err(|e| ApiError::bad_request(format!("Failed to encode JWT: {}", e)))?;
+    .map_err(|e| ApiError::bad_request(format!("Failed to encode JWT: {e}")))?;
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|e| ApiError::internal(format!("Failed to build HTTP client: {}", e)))?;
+        .map_err(|e| ApiError::internal(format!("Failed to build HTTP client: {e}")))?;
 
     let resp = client
         .get("https://api.github.com/app")
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .header("User-Agent", "codasaurus")
         .send()
         .await
-        .map_err(|e| ApiError::bad_request(format!("GitHub API request failed: {}", e)))?;
+        .map_err(|e| ApiError::bad_request(format!("GitHub API request failed: {e}")))?;
 
     let test_passed = resp.status().is_success();
     if !test_passed {
@@ -612,7 +610,7 @@ async fn github_callback_page(
         const r = await fetch('/api/setup/github/callback', {{
           method: 'POST',
           headers: {{ 'Content-Type': 'application/json' }},
-          body: JSON.stringify({{"code": "{}"}})
+          body: JSON.stringify({{"code": "{code}"}})
         }});
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || 'Request failed');
@@ -639,8 +637,7 @@ async fn github_callback_page(
     }})();
   </script>
 </body>
-</html>"#,
-        code
+</html>"#
     );
 
     (
@@ -658,7 +655,7 @@ async fn github_callback(
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
-        .map_err(|e| ApiError::internal(format!("Failed to build HTTP client: {}", e)))?;
+        .map_err(|e| ApiError::internal(format!("Failed to build HTTP client: {e}")))?;
 
     let resp = client
         .post(format!(
@@ -668,21 +665,20 @@ async fn github_callback(
         .header("User-Agent", "codasaurus")
         .send()
         .await
-        .map_err(|e| ApiError::bad_request(format!("GitHub API request failed: {}", e)))?;
+        .map_err(|e| ApiError::bad_request(format!("GitHub API request failed: {e}")))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_else(|_| "unknown error".into());
         return Err(ApiError::bad_request(format!(
-            "GitHub manifest conversion failed (HTTP {}): {}",
-            status, text
+            "GitHub manifest conversion failed (HTTP {status}): {text}"
         )));
     }
 
     let data: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| ApiError::bad_request(format!("Invalid GitHub response: {}", e)))?;
+        .map_err(|e| ApiError::bad_request(format!("Invalid GitHub response: {e}")))?;
 
     let app_id = data["id"]
         .as_i64()
@@ -724,7 +720,7 @@ async fn github_callback(
         port,
     });
 
-    let install_url = format!("https://github.com/apps/{}/installations/new", slug);
+    let install_url = format!("https://github.com/apps/{slug}/installations/new");
 
     Ok(Json(GithubCallbackResponse {
         status: "ok".into(),

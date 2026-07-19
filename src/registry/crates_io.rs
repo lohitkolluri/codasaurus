@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 
 pub fn check(package: &str) -> Result<Option<bool>> {
-    let url = format!("https://crates.io/api/v1/crates/{}", package);
+    let url = format!("https://crates.io/api/v1/crates/{package}");
     let client = super::CLIENT
         .as_ref()
         .context("registry HTTP client not available (failed to initialize)")?;

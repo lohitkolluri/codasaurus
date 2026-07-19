@@ -54,9 +54,9 @@ async fn manage_url(State(state): State<AppState>) -> Result<Json<serde_json::Va
         .flatten();
 
         let url = if let Some(iid) = install_id {
-            format!("https://github.com/settings/installations/{}", iid)
+            format!("https://github.com/settings/installations/{iid}")
         } else {
-            format!("https://github.com/apps/{}/installations/new", slug)
+            format!("https://github.com/apps/{slug}/installations/new")
         };
 
         return Ok(Json(json!({ "url": url })));

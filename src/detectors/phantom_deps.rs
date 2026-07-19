@@ -54,9 +54,9 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
 
             if !declared.contains(&package) {
                 let codemod = match registry {
-                    "npm" => Some(format!("npm install {}", package)),
-                    "pypi" => Some(format!("pip install {}", package)),
-                    "crates.io" => Some(format!("cargo add {}", package)),
+                    "npm" => Some(format!("npm install {package}")),
+                    "pypi" => Some(format!("pip install {package}")),
+                    "crates.io" => Some(format!("cargo add {package}")),
                     _ => None,
                 };
                 findings.push(Finding {
@@ -66,12 +66,10 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                     line: import.line,
                     column: import.column,
                     message: format!(
-                        "Package `{}` is used but not declared in your dependency file.",
-                        package
+                        "Package `{package}` is used but not declared in your dependency file."
                     ),
                     suggestion: Some(format!(
-                        "Add `{}` to your package manager's dependency file.",
-                        package
+                        "Add `{package}` to your package manager's dependency file."
                     )),
                     evidence: Some(import.name.clone()),
                     codemod,

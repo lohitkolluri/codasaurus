@@ -170,20 +170,20 @@ pub fn format_guidelines_section(files: &[GuidelineFile]) -> String {
             }
 
             if checklist_count > 0 {
-                let _ = writeln!(out, "- **{} checklist items**", checklist_count);
+                let _ = writeln!(out, "- **{checklist_count} checklist items**");
             }
             if req_count > 0 {
-                let _ = writeln!(out, "- **{} required files**", req_count);
+                let _ = writeln!(out, "- **{req_count} required files**");
             }
             if commit_count > 0 {
-                let _ = writeln!(out, "- **{} commit rules**", commit_count);
+                let _ = writeln!(out, "- **{commit_count} commit rules**");
             }
             if branch_count > 0 {
-                let _ = writeln!(out, "- **{} branch patterns**", branch_count);
+                let _ = writeln!(out, "- **{branch_count} branch patterns**");
             }
 
             for text in checklist_items {
-                let _ = writeln!(out, "  - [ ] {}", text);
+                let _ = writeln!(out, "  - [ ] {text}");
             }
             out.push('\n');
         }
@@ -204,7 +204,7 @@ pub fn format_guidelines_section(files: &[GuidelineFile]) -> String {
             } else {
                 gf.content.clone()
             };
-            let _ = write!(out, "```\n{}\n```\n\n", truncated);
+            let _ = write!(out, "```\n{truncated}\n```\n\n");
         }
     }
 

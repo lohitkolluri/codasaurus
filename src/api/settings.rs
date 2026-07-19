@@ -92,7 +92,7 @@ async fn set_setting(
         "guidelines_enabled",
     ];
     if !ALLOWED_KEYS.contains(&key.as_str()) {
-        return Err(ApiError::bad_request(format!("Unknown setting: {}", key)));
+        return Err(ApiError::bad_request(format!("Unknown setting: {key}")));
     }
     db::config::set_config(&state.pool, &key, &body.value).await?;
 

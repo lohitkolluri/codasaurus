@@ -61,7 +61,7 @@ pub fn detect(config: &Config) -> Vec<Finding> {
                         file: gf.path.to_string_lossy().to_string(),
                         line: 0,
                         column: 0,
-                        message: format!("Guideline checklist item: {}", text),
+                        message: format!("Guideline checklist item: {text}"),
                         suggestion: None,
                         evidence: None,
                         codemod: None,
@@ -76,8 +76,8 @@ pub fn detect(config: &Config) -> Vec<Finding> {
                             file: gf.path.to_string_lossy().to_string(),
                             line: 0,
                             column: 0,
-                            message: format!("Required file `{}` not found.", path),
-                            suggestion: Some(format!("Create `{}` or update the contributing guidelines if this file is no longer required.", path)),
+                            message: format!("Required file `{path}` not found."),
+                            suggestion: Some(format!("Create `{path}` or update the contributing guidelines if this file is no longer required.")),
                             evidence: None,
                             codemod: None,
                         });
@@ -146,10 +146,9 @@ fn check_branch_pattern(gf: &GuidelineFile, pattern: &str, findings: &mut Vec<Fi
             line: 0,
             column: 0,
             message: format!(
-                "Current branch '{}' doesn't match guideline pattern: {}",
-                branch, pattern
+                "Current branch '{branch}' doesn't match guideline pattern: {pattern}"
             ),
-            suggestion: Some(format!("Rename branch to match '{}'", pattern)),
+            suggestion: Some(format!("Rename branch to match '{pattern}'")),
             evidence: None,
             codemod: None,
         });

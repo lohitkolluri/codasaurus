@@ -46,8 +46,8 @@ pub fn run_check_run(event_path: Option<String>) -> Result<()> {
         .pool_max_idle_per_host(5)
         .build()
         .context("Failed to build reqwest HTTP client")?;
-    let repo_api = format!("https://api.github.com/repos/{}", repo_full_name);
-    let auth_header = format!("Bearer {}", token);
+    let repo_api = format!("https://api.github.com/repos/{repo_full_name}");
+    let auth_header = format!("Bearer {token}");
 
     let files = fetch_pr_files(&client, &repo_api, pr_number, &auth_header)?;
 
@@ -72,7 +72,7 @@ pub fn run_check_run(event_path: Option<String>) -> Result<()> {
     };
 
     // Create the check run in "in_progress" status
-    let check_run_url = format!("{}/check-runs", repo_api);
+    let check_run_url = format!("{repo_api}/check-runs");
     let check_run: serde_json::Value = retry_blocking(
         &RetryConfig::api_default(),
         "create_check_run",
@@ -102,7 +102,7 @@ pub fn run_check_run(event_path: Option<String>) -> Result<()> {
                     r.json::<serde_json::Value>()
                         .context("Failed to parse check run creation response")
                 })
-                .map_err(|e| anyhow::anyhow!("{:#}", e))
+                .map_err(|e| anyhow::anyhow!("{e:#}"))
         },
     )?;
 
@@ -140,15 +140,12 @@ pub fn run_check_run(event_path: Option<String>) -> Result<()> {
     let annotations: Vec<serde_json::Value> = all_annotations.into_iter().take(50).collect();
 
     // Update the check run with completed status and annotations
-    let mut summary = format!(
-        "{} blocking, {} warnings, {} info",
-        blocking, warnings, infos
-    );
+    let mut summary = format!("{blocking} blocking, {warnings} warnings, {infos} info");
     if truncated {
         summary.push_str(" (annotations truncated to 50 — GitHub API limit)");
     }
 
-    let update_url = format!("{}/check-runs/{}", repo_api, check_run_id);
+    let update_url = format!("{repo_api}/check-runs/{check_run_id}");
     retry_blocking(
         &RetryConfig::api_default(),
         "update_check_run",
@@ -178,7 +175,7 @@ pub fn run_check_run(event_path: Option<String>) -> Result<()> {
                     r.error_for_status()
                         .context("GitHub rejected check run update")
                 })
-                .map_err(|e| anyhow::anyhow!("{:#}", e))
+                .map_err(|e| anyhow::anyhow!("{e:#}"))
         },
     )?;
 
@@ -219,7 +216,7 @@ fn fetch_pr_files(
                         r.json::<Vec<serde_json::Value>>()
                             .context("Failed to parse PR files response as JSON")
                     })
-                    .map_err(|e| anyhow::anyhow!("{:#}", e))
+                    .map_err(|e| anyhow::anyhow!("{e:#}"))
             },
         )?;
         let is_last_page = page_files.len() < PR_FILES_PER_PAGE;

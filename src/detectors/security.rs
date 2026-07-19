@@ -87,7 +87,7 @@ pub fn detect_secrets(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                             "Remove this {} and use environment variables instead.",
                             pattern.name
                         )),
-                        evidence: Some(format!("`{}`", masked)),
+                        evidence: Some(format!("`{masked}`")),
                         codemod: None,
                     });
                 }
@@ -175,7 +175,7 @@ fn mask_value(value: &str) -> String {
     if len <= 8 {
         return "***".to_string();
     }
-    format!("*** ({} chars)", len)
+    format!("*** ({len} chars)")
 }
 
 struct SecretPattern {

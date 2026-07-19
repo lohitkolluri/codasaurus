@@ -45,7 +45,7 @@ pub fn normalize_database_url(raw: &str) -> String {
                     _ => c.to_string(),
                 })
                 .collect();
-            return format!("{}{}{}", prefix, encoded, after_at);
+            return format!("{prefix}{encoded}{after_at}");
         }
     }
     raw.to_string()

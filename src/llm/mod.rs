@@ -201,16 +201,16 @@ pub struct IssueContext {
 impl fmt::Display for ReviewContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(repo) = &self.repo {
-            writeln!(f, "Repository: {}", repo)?;
+            writeln!(f, "Repository: {repo}")?;
         }
         if let Some(branch) = &self.branch {
-            writeln!(f, "Branch: {}", branch)?;
+            writeln!(f, "Branch: {branch}")?;
         }
         if let Some(title) = &self.pr_title {
-            writeln!(f, "PR Title: {}", title)?;
+            writeln!(f, "PR Title: {title}")?;
         }
         if let Some(body) = &self.pr_description {
-            writeln!(f, "PR Description: {}", body)?;
+            writeln!(f, "PR Description: {body}")?;
         }
         if !self.linked_issues.is_empty() {
             writeln!(f, "\nLinked Issues:")?;
@@ -218,7 +218,7 @@ impl fmt::Display for ReviewContext {
                 writeln!(f, "  #{}: {}", issue.number, issue.title)?;
                 if let Some(body) = &issue.body {
                     let preview: String = body.chars().take(200).collect();
-                    writeln!(f, "    {}", preview)?;
+                    writeln!(f, "    {preview}")?;
                 }
             }
         }
@@ -226,7 +226,7 @@ impl fmt::Display for ReviewContext {
             writeln!(f, "\nRelated PRs: {}", self.related_prs.join(", "))?;
         }
         if let Some(ctx) = &self.repo_context {
-            writeln!(f, "\n{}", ctx)?;
+            writeln!(f, "\n{ctx}")?;
         }
         Ok(())
     }
@@ -324,7 +324,7 @@ RULES:
     let status = resp.status();
     if !status.is_success() {
         let error_text = resp.text().await.unwrap_or_default();
-        bail!("LLM API returned {}: {}", status, error_text);
+        bail!("LLM API returned {status}: {error_text}");
     }
 
     let resp_json: serde_json::Value = resp.json().await?;
@@ -370,7 +370,7 @@ pub fn build_review_prompt(diff: &str, context: Option<&ReviewContext>) -> Strin
             if ctx_str.trim().is_empty() {
                 String::new()
             } else {
-                format!("---\n\nContext:\n{}\n", ctx_str)
+                format!("---\n\nContext:\n{ctx_str}\n")
             }
         }
         None => String::new(),
@@ -385,22 +385,20 @@ Only report issues you are highly confident about.
 
 Diff:
 ```
-{}
-```"#,
-            truncated
+{truncated}
+```"#
         )
     } else {
         format!(
-            r#"{}Review the diff below.
+            r#"{context_section}Review the diff below.
 
 Focus on security, logic bugs, API misuse, and edge cases.
 Only report issues you are highly confident about.
 
 Diff:
 ```
-{}
-```"#,
-            context_section, truncated
+{truncated}
+```"#
         )
     }
 }

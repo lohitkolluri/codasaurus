@@ -148,15 +148,14 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
                 match store.filter_findings(&all.findings) {
                     Ok(filtered) => return Findings { findings: filtered },
                     Err(e) => {
-                        eprintln!("Warning: learning store filter_findings failed: {}; returning all unfiltered findings", e);
+                        eprintln!("Warning: learning store filter_findings failed: {e}; returning all unfiltered findings");
                     }
                 }
             }
         }
         Err(e) => {
             eprintln!(
-                "Warning: LEARNING_STORE mutex poisoned: {}; returning all unfiltered findings",
-                e
+                "Warning: LEARNING_STORE mutex poisoned: {e}; returning all unfiltered findings"
             );
         }
     }
@@ -190,11 +189,11 @@ pub fn is_excluded(path: &str, patterns: &[String]) -> bool {
             if path_lower.starts_with(p) {
                 return true;
             }
-            if path_lower.contains(&format!("/{}/", dir)) {
+            if path_lower.contains(&format!("/{dir}/")) {
                 return true;
             }
             // Also match if the path has a trailing slash
-            if path_lower.ends_with(&format!("/{}", dir)) {
+            if path_lower.ends_with(&format!("/{dir}")) {
                 return true;
             }
         }

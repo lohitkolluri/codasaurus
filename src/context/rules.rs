@@ -170,11 +170,11 @@ fn dedup_rules(rules: &mut Vec<ExtractedRule>) {
     let mut seen = std::collections::HashSet::new();
     rules.retain(|r| {
         let key = match r {
-            ExtractedRule::ChecklistItem { text, .. } => format!("ci:{}", text),
-            ExtractedRule::FileRequired { path } => format!("fr:{}", path),
-            ExtractedRule::BranchPattern { pattern } => format!("bp:{}", pattern),
-            ExtractedRule::CommitRule { description } => format!("cr:{}", description),
-            ExtractedRule::SectionRule { heading, .. } => format!("sr:{}", heading),
+            ExtractedRule::ChecklistItem { text, .. } => format!("ci:{text}"),
+            ExtractedRule::FileRequired { path } => format!("fr:{path}"),
+            ExtractedRule::BranchPattern { pattern } => format!("bp:{pattern}"),
+            ExtractedRule::CommitRule { description } => format!("cr:{description}"),
+            ExtractedRule::SectionRule { heading, .. } => format!("sr:{heading}"),
         };
         seen.insert(key)
     });

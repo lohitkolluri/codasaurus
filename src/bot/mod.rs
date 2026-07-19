@@ -230,7 +230,7 @@ pub(crate) async fn handle_webhook(
                     let token = match get_installation_token(&cfg, inst_id).await {
                         Ok(t) => t,
                         Err(e) => {
-                            eprintln!("  Auth error: {}", e);
+                            eprintln!("  Auth error: {e}");
                             return;
                         }
                     };
@@ -245,7 +245,7 @@ pub(crate) async fn handle_webhook(
                         repositories_added: None,
                     };
                     if let Err(e) = review_pr(&token, &repo_full_name, &wrapped).await {
-                        eprintln!("  Review error: {}", e);
+                        eprintln!("  Review error: {e}");
                     }
                 })
                 .await;
@@ -306,7 +306,7 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64) {
         let token = match get_installation_token(&ctx.cfg, ctx.inst_id).await {
             Ok(t) => t,
             Err(e) => {
-                eprintln!("  Auth error: {}", e);
+                eprintln!("  Auth error: {e}");
                 return;
             }
         };
@@ -317,7 +317,7 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64) {
         let pr_data = match fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await {
             Ok(data) => data,
             Err(e) => {
-                eprintln!("  Failed to fetch PR #{}: {}", pr_number, e);
+                eprintln!("  Failed to fetch PR #{pr_number}: {e}");
                 return;
             }
         };
@@ -332,7 +332,7 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64) {
             repositories_added: None,
         };
         if let Err(e) = review_pr(&token, &ctx.repo_full_name, &wrapped).await {
-            eprintln!("  Review error: {}", e);
+            eprintln!("  Review error: {e}");
         }
     })
     .await;
@@ -343,7 +343,7 @@ async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64) {
         let token = match get_installation_token(&ctx.cfg, ctx.inst_id).await {
             Ok(t) => t,
             Err(e) => {
-                eprintln!("  Auth error: {}", e);
+                eprintln!("  Auth error: {e}");
                 return;
             }
         };
@@ -362,7 +362,7 @@ async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64) {
         Full per-finding dismissal will be available in a future release.";
         let _ = client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", token))
+            .header("Authorization", format!("Bearer {token}"))
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", USER_AGENT)
             .json(&serde_json::json!({"body": body}))
@@ -403,7 +403,7 @@ async fn handle_installation_created(
         let private = repo["private"].as_bool().unwrap_or(false);
 
         if let Err(e) = db::repos::create_repo(
-            &pool,
+            pool,
             &RepoCreate {
                 github_id,
                 full_name,
@@ -416,7 +416,7 @@ async fn handle_installation_created(
         )
         .await
         {
-            eprintln!("  [bot] Failed to save repo: {}", e);
+            eprintln!("  [bot] Failed to save repo: {e}");
         }
     }
     let count = repos.len();
@@ -430,7 +430,7 @@ async fn handle_installation_created(
         )
         .await;
     }
-    println!("  [bot] Synced {} repos from installation", count);
+    println!("  [bot] Synced {count} repos from installation");
 }
 
 async fn handle_installation_deleted(installation: Option<InstallationInfo>) {
@@ -465,7 +465,7 @@ async fn handle_installation_deleted(installation: Option<InstallationInfo>) {
             )
             .await;
         }
-        Err(e) => eprintln!("  [bot] Failed to deactivate repos: {}", e),
+        Err(e) => eprintln!("  [bot] Failed to deactivate repos: {e}"),
     }
 }
 
@@ -494,7 +494,7 @@ async fn handle_repos_added(installation: Option<InstallationInfo>, repos: Vec<s
         let private = repo["private"].as_bool().unwrap_or(false);
 
         if let Err(e) = db::repos::create_repo(
-            &pool,
+            pool,
             &RepoCreate {
                 github_id,
                 full_name,
@@ -507,7 +507,7 @@ async fn handle_repos_added(installation: Option<InstallationInfo>, repos: Vec<s
         )
         .await
         {
-            eprintln!("  [bot] Failed to save repo: {}", e);
+            eprintln!("  [bot] Failed to save repo: {e}");
         }
     }
     println!("  [bot] Synced {} added repos", repos.len());
@@ -525,7 +525,7 @@ async fn ensure_repo_exists(
         None => return,
     };
     // Check if repo already exists
-    if let Ok(Some(_)) = db::repos::get_repo_by_full_name(&pool, full_name).await {
+    if let Ok(Some(_)) = db::repos::get_repo_by_full_name(pool, full_name).await {
         return; // already exists
     }
     let inst = inst_id.unwrap_or(0);
@@ -542,7 +542,7 @@ async fn ensure_repo_exists(
         return;
     }
     if let Err(e) = db::repos::create_repo(
-        &pool,
+        pool,
         &RepoCreate {
             github_id,
             full_name: full_name.to_string(),
@@ -555,6 +555,6 @@ async fn ensure_repo_exists(
     )
     .await
     {
-        eprintln!("  [bot] Failed to auto-register repo {}: {}", full_name, e);
+        eprintln!("  [bot] Failed to auto-register repo {full_name}: {e}");
     }
 }

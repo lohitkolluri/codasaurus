@@ -11,7 +11,7 @@ pub async fn create_session(pool: &DbPool, email: &str) -> Result<String, sqlx::
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let input = format!("{}:{}", email, now);
+    let input = format!("{email}:{now}");
     let token = hex::encode(Sha256::digest(input.as_bytes()));
 
     sqlx::query(

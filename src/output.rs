@@ -4,7 +4,7 @@ use colored::*;
 pub fn render(findings: &Findings, json_mode: bool) -> anyhow::Result<()> {
     if json_mode {
         let output = serde_json::to_string_pretty(&findings)?;
-        println!("{}", output);
+        println!("{output}");
     } else {
         render_terminal(findings);
     }
