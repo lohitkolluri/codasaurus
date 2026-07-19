@@ -440,7 +440,7 @@ async fn github_manifest_page(
   <div class="card">
     <p style="font-size:14px;margin:0 0 8px">Redirecting to GitHub to create your app…</p>
     <div class="spinner"></div>
-    <form id="f" method="post" action="https://github.com/settings/apps/new" target="_blank">
+    <form id="f" method="post" action="https://github.com/settings/apps/new">
       <input type="hidden" name="manifest" value='{}'>
     </form>
   </div>
