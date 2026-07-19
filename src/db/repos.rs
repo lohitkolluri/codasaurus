@@ -52,7 +52,7 @@ pub async fn update_repo(
     active: bool,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE repos SET config_json = ?, active = ?, updated_at = datetime('now') WHERE id = ?",
+        "UPDATE repos SET config_json = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
     )
     .bind(config_json)
     .bind(active)

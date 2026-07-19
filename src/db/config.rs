@@ -12,8 +12,8 @@ pub async fn get_config(pool: &DbPool, key: &str) -> Result<Option<String>, sqlx
 
 pub async fn set_config(pool: &DbPool, key: &str, value: &str) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO app_config (key, value, updated_at) VALUES (?, ?, datetime('now'))
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
+        "INSERT INTO app_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
     )
     .bind(key)
     .bind(value)
