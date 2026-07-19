@@ -14,9 +14,7 @@ pub fn router() -> Router<AppState> {
         .route("/manage-url", get(manage_url))
 }
 
-async fn install_url(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+async fn install_url(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
     let slug = db::config::get_config(&state.pool, "github_app_slug")
         .await
         .ok()
@@ -40,9 +38,7 @@ async fn install_url(
     })))
 }
 
-async fn manage_url(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+async fn manage_url(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
     let slug = db::config::get_config(&state.pool, "github_app_slug")
         .await
         .ok()
@@ -50,7 +46,7 @@ async fn manage_url(
 
     if let Some(slug) = slug {
         let install_id: Option<i64> = sqlx::query_scalar(
-            "SELECT installation_id FROM repos WHERE installation_id IS NOT NULL LIMIT 1"
+            "SELECT installation_id FROM repos WHERE installation_id IS NOT NULL LIMIT 1",
         )
         .fetch_optional(&state.pool.0)
         .await

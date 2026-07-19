@@ -1,7 +1,6 @@
 /// Cross-database compatible schema for both SQLite and PostgreSQL.
 /// The SQLite schema is active; PostgreSQL schema is defined as a constant
 /// for future use once the runtime driver registration is resolved.
-
 use sqlx::SqlitePool;
 
 /// Active SQLite schema.
@@ -128,13 +127,12 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    let exists: bool = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM schema_version WHERE version = ?",
-    )
-    .bind(MIGRATION_VERSION)
-    .fetch_one(pool)
-    .await?
-        > 0;
+    let exists: bool =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM schema_version WHERE version = ?")
+            .bind(MIGRATION_VERSION)
+            .fetch_one(pool)
+            .await?
+            > 0;
 
     if exists {
         return Ok(());

@@ -90,7 +90,11 @@ pub fn detect(config: &Config) -> Vec<Finding> {
                         file: gf.path.to_string_lossy().to_string(),
                         line: 0,
                         column: 0,
-                        message: format!("Guideline section: {} — {}", heading, text.chars().take(200).collect::<String>()),
+                        message: format!(
+                            "Guideline section: {} — {}",
+                            heading,
+                            text.chars().take(200).collect::<String>()
+                        ),
                         suggestion: None,
                         evidence: None,
                         codemod: None,

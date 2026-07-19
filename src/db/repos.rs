@@ -14,7 +14,10 @@ pub async fn get_repo(pool: &DbPool, id: i64) -> Result<Option<Repo>, sqlx::Erro
         .await
 }
 
-pub async fn get_repo_by_full_name(pool: &DbPool, full_name: &str) -> Result<Option<Repo>, sqlx::Error> {
+pub async fn get_repo_by_full_name(
+    pool: &DbPool,
+    full_name: &str,
+) -> Result<Option<Repo>, sqlx::Error> {
     sqlx::query_as::<_, Repo>("SELECT * FROM repos WHERE full_name = ?")
         .bind(full_name)
         .fetch_optional(&pool.0)

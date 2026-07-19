@@ -149,12 +149,11 @@ async fn me(State(state): State<AppState>, headers: axum::http::HeaderMap) -> Js
         .unwrap_or(false);
 
     if any_admin {
-        let email: String = sqlx::query_scalar(
-            "SELECT email FROM users WHERE role = 'admin' ORDER BY id LIMIT 1",
-        )
-        .fetch_one(&state.pool.0)
-        .await
-        .unwrap_or_default();
+        let email: String =
+            sqlx::query_scalar("SELECT email FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")
+                .fetch_one(&state.pool.0)
+                .await
+                .unwrap_or_default();
 
         Json(MeResponse {
             authenticated: false,
@@ -179,5 +178,8 @@ async fn logout(
     if let Some(token) = extract_token(&headers) {
         let _ = db::sessions::delete_session(&state.pool, &token).await;
     }
-    ([(header::SET_COOKIE, clear_cookie())], Json(json!({ "status": "ok" })))
+    (
+        [(header::SET_COOKIE, clear_cookie())],
+        Json(json!({ "status": "ok" })),
+    )
 }

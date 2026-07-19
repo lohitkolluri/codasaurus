@@ -47,9 +47,7 @@ pub async fn fetch_pull_request(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("GitHub API client not available (failed to initialize)"))?;
     let auth_header = format!("Bearer {token}");
-    let url = format!(
-        "https://api.github.com/repos/{repo_name}/pulls/{pr_number}"
-    );
+    let url = format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}");
     retry_async(
         &RetryConfig::api_default(),
         "fetch_pull_request",
@@ -429,7 +427,8 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
 
     let mut review_comments: Vec<serde_json::Value> = Vec::new();
     let mut has_blocking = false;
-    let mut seen_detectors: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut seen_detectors: std::collections::HashSet<(String, String)> =
+        std::collections::HashSet::new();
 
     // Merge vulnerability findings on the same (file, line) to avoid spam.
     // One package with 9 CVEs → one inline comment, not nine.
@@ -447,12 +446,18 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         if f.severity == "blocking" {
             has_blocking = true;
         }
-        if f.line == 0 { continue; }
-        if review_comments.len() >= MAX_INLINE_COMMENTS { break; }
+        if f.line == 0 {
+            continue;
+        }
+        if review_comments.len() >= MAX_INLINE_COMMENTS {
+            break;
+        }
 
         // Dedup: only 1 inline comment per (file, detector) pair.
         let key = (f.file.clone(), f.detector.clone());
-        if !seen_detectors.insert(key) { continue; }
+        if !seen_detectors.insert(key) {
+            continue;
+        }
 
         let comment_body = build_comment_body(f);
         let comment = serde_json::json!({
@@ -499,27 +504,28 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         .await?;
         if !head_sha.is_empty() {
             if let Some(ref s) = state {
-                if let Err(e) = s.set_reviewed_sha(repo_name, pr_number, head_sha) { eprintln!("Warning: failed to store reviewed SHA: {}", e); };
+                if let Err(e) = s.set_reviewed_sha(repo_name, pr_number, head_sha) {
+                    eprintln!("Warning: failed to store reviewed SHA: {}", e);
+                };
             }
         }
         // Persist clean review to local DB
         save_review_to_db(
-            repo_name, pr_number, &pr_title,
+            repo_name,
+            pr_number,
+            &pr_title,
             pr["user"]["login"].as_str().unwrap_or(""),
             pr["base"]["ref"].as_str().unwrap_or(""),
             pr["head"]["ref"].as_str().unwrap_or(""),
-            head_sha, &findings, false,
-        ).await;
+            head_sha,
+            &findings,
+            false,
+        )
+        .await;
         return Ok(());
     }
 
-    let mut body = build_review_body(
-        &findings,
-        has_blocking,
-        &pr_title,
-        &pr_body,
-        &config,
-    );
+    let mut body = build_review_body(&findings, has_blocking, &pr_title, &pr_body, &config);
 
     // Append suggested reviewers
     if !reviewers.is_empty() {
@@ -579,7 +585,9 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     // Record the reviewed commit SHA for incremental review
     if !head_sha.is_empty() {
         if let Some(ref s) = state {
-            if let Err(e) = s.set_reviewed_sha(repo_name, pr_number, head_sha) { eprintln!("Warning: failed to store reviewed SHA: {}", e); };
+            if let Err(e) = s.set_reviewed_sha(repo_name, pr_number, head_sha) {
+                eprintln!("Warning: failed to store reviewed SHA: {}", e);
+            };
         }
     }
 
@@ -628,7 +636,10 @@ fn build_comment_body(finding: &Finding) -> String {
     let title = finding_display_title(finding);
     let impact = finding_impact(finding);
 
-    let mut body = format!("**{} {}**\n\n{}\n\n{}", icon, title, finding.message, impact);
+    let mut body = format!(
+        "**{} {}**\n\n{}\n\n{}",
+        icon, title, finding.message, impact
+    );
 
     if let Some(ref s) = finding.suggestion {
         let _ = write!(body, "\n\n**💡 Suggestion:** {}", s);
@@ -845,7 +856,11 @@ fn build_review_body(
                     "warning" => "🟡",
                     _ => "🔵",
                 };
-                let line_cell = if f.line > 0 { f.line.to_string() } else { "—".into() };
+                let line_cell = if f.line > 0 {
+                    f.line.to_string()
+                } else {
+                    "—".into()
+                };
                 let short_msg = summarize_message(&f.message, 80);
                 let _ = writeln!(
                     body,
@@ -885,7 +900,11 @@ fn build_review_body(
                     "warning" => "🟡",
                     _ => "🔵",
                 };
-                let _ = writeln!(body, "| `{pkg}` | `{cve_id}` | {icon} {s} |", s = f.severity);
+                let _ = writeln!(
+                    body,
+                    "| `{pkg}` | `{cve_id}` | {icon} {s} |",
+                    s = f.severity
+                );
             }
         }
         let _ = writeln!(body);
@@ -898,7 +917,11 @@ fn build_review_body(
         let _ = writeln!(body, "| Check | Status | Details |");
         let _ = writeln!(body, "| --- | :---: | --- |");
         for check in &checks {
-            let _ = writeln!(body, "| {} | {} | {} |", check.name, check.status, check.details);
+            let _ = writeln!(
+                body,
+                "| {} | {} | {} |",
+                check.name, check.status, check.details
+            );
         }
         let _ = writeln!(body);
     }
@@ -920,7 +943,10 @@ fn build_review_body(
 
     let _ = writeln!(body, "---");
     let _ = writeln!(body);
-    let _ = writeln!(body, "<sub>🦕 Reviewed by [Codasaurus](https://github.com/lohitkolluri/codasaurus)</sub>");
+    let _ = writeln!(
+        body,
+        "<sub>🦕 Reviewed by [Codasaurus](https://github.com/lohitkolluri/codasaurus)</sub>"
+    );
     let _ = writeln!(body);
 
     body
@@ -928,12 +954,21 @@ fn build_review_body(
 
 fn build_verified_list(findings: &Findings) -> Vec<String> {
     let detector_set: std::collections::HashSet<&str> = findings
-        .findings.iter().map(|f| f.detector.as_str()).collect();
+        .findings
+        .iter()
+        .map(|f| f.detector.as_str())
+        .collect();
 
     let clean_names: [(&str, &str); 10] = [
-        ("hallucinated-imports", "All imports resolve to real packages"),
+        (
+            "hallucinated-imports",
+            "All imports resolve to real packages",
+        ),
         ("secrets", "No hardcoded credentials detected"),
-        ("phantom-deps", "All dependencies are declared in the manifest"),
+        (
+            "phantom-deps",
+            "All dependencies are declared in the manifest",
+        ),
         ("todo-leaks", "No leftover TODO or FIXME markers"),
         ("vulnerabilities", "No known CVEs in dependencies"),
         ("over-engineering", "No unnecessary abstraction detected"),
@@ -952,7 +987,10 @@ fn build_verified_list(findings: &Findings) -> Vec<String> {
 
 fn build_unverified_list(findings: &Findings) -> Vec<String> {
     let detector_set: std::collections::HashSet<&str> = findings
-        .findings.iter().map(|f| f.detector.as_str()).collect();
+        .findings
+        .iter()
+        .map(|f| f.detector.as_str())
+        .collect();
 
     let fail_names: [(&str, &str); 10] = [
         ("hallucinated-imports", "Nonesistent package imports found"),
@@ -1067,10 +1105,26 @@ async fn save_review_to_db(
             repo_id,
             pr_number,
             pr_title: Some(pr_title.to_string()),
-            pr_author: if pr_author.is_empty() { None } else { Some(pr_author.to_string()) },
-            pr_base_branch: if base_branch.is_empty() { None } else { Some(base_branch.to_string()) },
-            pr_head_branch: if head_branch.is_empty() { None } else { Some(head_branch.to_string()) },
-            pr_head_sha: if head_sha.is_empty() { None } else { Some(head_sha.to_string()) },
+            pr_author: if pr_author.is_empty() {
+                None
+            } else {
+                Some(pr_author.to_string())
+            },
+            pr_base_branch: if base_branch.is_empty() {
+                None
+            } else {
+                Some(base_branch.to_string())
+            },
+            pr_head_branch: if head_branch.is_empty() {
+                None
+            } else {
+                Some(head_branch.to_string())
+            },
+            pr_head_sha: if head_sha.is_empty() {
+                None
+            } else {
+                Some(head_sha.to_string())
+            },
         },
     )
     .await
@@ -1085,7 +1139,11 @@ async fn save_review_to_db(
                 review_id: review.id,
                 fingerprint: None,
                 file_path: f.file.clone(),
-                line_start: if f.line > 0 { Some(f.line as i64) } else { None },
+                line_start: if f.line > 0 {
+                    Some(f.line as i64)
+                } else {
+                    None
+                },
                 line_end: None,
                 column_start: None,
                 column_end: None,
@@ -1099,7 +1157,8 @@ async fn save_review_to_db(
                 category: None,
             },
         )
-        .await {
+        .await
+        {
             eprintln!("Warning: failed to persist finding '{}': {}", f.detector, e);
         }
     }
@@ -1113,13 +1172,23 @@ async fn save_review_to_db(
             completed_at: Some(chrono::Utc::now().to_rfc3339()),
         },
     )
-    .await {
+    .await
+    {
         eprintln!("Warning: failed to update review status: {}", e);
     }
-    crate::db::audit::log_event(pool, &format!("review.{}", status), Some(pr_author), Some("review"), Some(review.id)).await;
+    crate::db::audit::log_event(
+        pool,
+        &format!("review.{}", status),
+        Some(pr_author),
+        Some("review"),
+        Some(review.id),
+    )
+    .await;
 }
 
-fn merge_vulnerability_findings(findings: &[crate::detectors::Finding]) -> Vec<crate::detectors::Finding> {
+fn merge_vulnerability_findings(
+    findings: &[crate::detectors::Finding],
+) -> Vec<crate::detectors::Finding> {
     use crate::detectors::Finding;
     use std::collections::BTreeMap;
 
@@ -1141,10 +1210,19 @@ fn merge_vulnerability_findings(findings: &[crate::detectors::Finding]) -> Vec<c
             result.extend(group.into_iter().cloned());
             continue;
         }
-        let max_sev: &str = group.iter().map(|f| f.severity).max_by_key(|s| match *s {
-            "blocking" => 3, "warning" => 2, _ => 1,
-        }).unwrap_or("info");
-        let cve_list: Vec<&str> = group.iter().filter_map(|f| f.message.split(':').next()).collect();
+        let max_sev: &str = group
+            .iter()
+            .map(|f| f.severity)
+            .max_by_key(|s| match *s {
+                "blocking" => 3,
+                "warning" => 2,
+                _ => 1,
+            })
+            .unwrap_or("info");
+        let cve_list: Vec<&str> = group
+            .iter()
+            .filter_map(|f| f.message.split(':').next())
+            .collect();
         let count = group.len();
         result.push(Finding {
             file,
@@ -1156,7 +1234,12 @@ fn merge_vulnerability_findings(findings: &[crate::detectors::Finding]) -> Vec<c
                 _ => "info",
             },
             detector: "vulnerabilities".into(),
-            message: format!("{} known CVE{}: {}", count, if count == 1 { "" } else { "s" }, cve_list.join(", ")),
+            message: format!(
+                "{} known CVE{}: {}",
+                count,
+                if count == 1 { "" } else { "s" },
+                cve_list.join(", ")
+            ),
             suggestion: group.first().and_then(|f| f.suggestion.clone()),
             codemod: None,
             evidence: None,

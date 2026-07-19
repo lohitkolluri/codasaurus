@@ -1,5 +1,4 @@
 /// Shared utility functions for the codasaurus codebase.
-
 use std::path::Path;
 
 /// Check if a file or directory should be hidden from analysis.

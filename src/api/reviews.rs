@@ -58,14 +58,13 @@ async fn list_reviews(
     // Enrich each review with its repo name
     let mut enriched: Vec<serde_json::Value> = Vec::new();
     for r in &reviews {
-        let repo_name: Option<String> = sqlx::query_scalar(
-            "SELECT full_name FROM repos WHERE id = ?",
-        )
-        .bind(r.repo_id)
-        .fetch_optional(&state.pool.0)
-        .await
-        .ok()
-        .flatten();
+        let repo_name: Option<String> =
+            sqlx::query_scalar("SELECT full_name FROM repos WHERE id = ?")
+                .bind(r.repo_id)
+                .fetch_optional(&state.pool.0)
+                .await
+                .ok()
+                .flatten();
         let name = repo_name.clone().unwrap_or_default();
         let mut v = serde_json::to_value(r).unwrap_or_default();
         if let Some(obj) = v.as_object_mut() {
@@ -92,13 +91,11 @@ async fn count_reviews(
 ) -> Result<i64, ApiError> {
     let count = match (repo_id, status) {
         (Some(rid), Some(st)) => {
-            sqlx::query_scalar(
-                "SELECT COUNT(*) FROM reviews WHERE repo_id = ? AND status = ?",
-            )
-            .bind(rid)
-            .bind(st)
-            .fetch_one(&pool.0)
-            .await?
+            sqlx::query_scalar("SELECT COUNT(*) FROM reviews WHERE repo_id = ? AND status = ?")
+                .bind(rid)
+                .bind(st)
+                .fetch_one(&pool.0)
+                .await?
         }
         (Some(rid), None) => {
             sqlx::query_scalar("SELECT COUNT(*) FROM reviews WHERE repo_id = ?")

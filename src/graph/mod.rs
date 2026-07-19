@@ -102,7 +102,10 @@ impl CodeGraph {
     pub fn find_callers(&self, symbol: &str) -> Vec<&SymbolNode> {
         let mut callers = Vec::new();
         if let Some(&idx) = self.node_indices.get(symbol) {
-            for edge in self.graph.edges_directed(idx, petgraph::Direction::Incoming) {
+            for edge in self
+                .graph
+                .edges_directed(idx, petgraph::Direction::Incoming)
+            {
                 let source = edge.source();
                 callers.push(&self.graph[source]);
             }

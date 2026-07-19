@@ -70,7 +70,7 @@ pub fn recent_commits(count: usize) -> Result<Vec<String>> {
     let raw = String::from_utf8(output.stdout)?;
     let commits: Vec<String> = raw
         .split("---CODASAURUS_COMMIT_SEP---")
-        .skip(1)  // first item is empty (before first separator)
+        .skip(1) // first item is empty (before first separator)
         .map(|c| c.trim().to_string())
         .filter(|c| !c.is_empty())
         .collect();

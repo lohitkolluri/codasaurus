@@ -194,9 +194,8 @@ fn fetch_pr_files(
     let mut files = Vec::new();
 
     for page in 1..=MAX_PR_FILE_PAGES {
-        let url = format!(
-            "{repo_api}/pulls/{pr_number}/files?per_page={PR_FILES_PER_PAGE}&page={page}"
-        );
+        let url =
+            format!("{repo_api}/pulls/{pr_number}/files?per_page={PR_FILES_PER_PAGE}&page={page}");
         let page_files: Vec<serde_json::Value> = retry_blocking(
             &RetryConfig::api_default(),
             "fetch_pr_files_page",

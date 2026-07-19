@@ -90,7 +90,10 @@ pub fn run_verify(opts: VerifyOptions) -> Result<VerifyReport> {
                 match result {
                     Ok(te) => report.test_executions.push(te),
                     Err(e) => {
-                        eprintln!("Warning: test execution failed for '{}': {}", module_test, e);
+                        eprintln!(
+                            "Warning: test execution failed for '{}': {}",
+                            module_test, e
+                        );
                     }
                 }
             }
@@ -298,9 +301,7 @@ fn run_targeted_tests(
 }
 
 /// Run a single test and capture evidence.
-fn run_single_test(
-    test_name: &str,
-) -> Result<TestExecution, String> {
+fn run_single_test(test_name: &str) -> Result<TestExecution, String> {
     // Detect test framework from project structure
     let (command, args) = if is_rust_project() {
         if test_name.ends_with("::") {

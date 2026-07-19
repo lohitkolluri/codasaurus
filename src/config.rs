@@ -174,9 +174,7 @@ impl Default for Config {
                 guidelines: true,
                 exclude_patterns: default_exclude_patterns(),
             },
-            behavior: BehaviorConfig {
-                strict: false,
-            },
+            behavior: BehaviorConfig { strict: false },
             registry: RegistryConfig {
                 cache_ttl_secs: 3600,
             },

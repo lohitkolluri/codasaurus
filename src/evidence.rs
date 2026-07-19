@@ -164,7 +164,8 @@ impl FixPacket {
                 te.command,
                 te.output_hash,
             ),
-            None => "## Test Evidence\n- Tests were not executed (use --run-tests to enable).\n".to_string(),
+            None => "## Test Evidence\n- Tests were not executed (use --run-tests to enable).\n"
+                .to_string(),
         };
 
         format!(
@@ -198,7 +199,10 @@ impl FixPacket {
             callers = self.impacted_callers.join(", "),
             files = self.impacted_files.join(", "),
             evidence = evidence_block,
-            suggested = self.suggested_fix.as_deref().unwrap_or("No automatic fix available."),
+            suggested = self
+                .suggested_fix
+                .as_deref()
+                .unwrap_or("No automatic fix available."),
         )
     }
 }
@@ -271,7 +275,8 @@ impl VerifyReport {
         self.tests_failed = self.test_executions.iter().filter(|t| !t.passed).count();
         self.changed_file_count = self.changed_files.len();
         self.impacted_file_count = self.impacted_files.len();
-        self.verified = self.tests_failed == 0 && !self.fix_packets.iter().any(|f| f.severity == "error");
+        self.verified =
+            self.tests_failed == 0 && !self.fix_packets.iter().any(|f| f.severity == "error");
     }
 }
 
@@ -299,22 +304,33 @@ fn render_terminal(report: &VerifyReport) {
     println!("  {} changes", "Changes:".bold().underline());
     println!("    {} files changed", report.changed_file_count);
     println!("    {} symbols extracted", report.changed_symbols.len());
-    println!("    {} symbols in blast radius", report.impacted_symbols.len());
+    println!(
+        "    {} symbols in blast radius",
+        report.impacted_symbols.len()
+    );
     println!("    {} impacted files", report.impacted_file_count);
     println!();
 
     // Test summary
     println!("  {}", "Tests:".bold().underline());
     if report.test_executions.is_empty() {
-        println!("    {} No tests executed (use --run-tests to enable)", "⚠".yellow());
+        println!(
+            "    {} No tests executed (use --run-tests to enable)",
+            "⚠".yellow()
+        );
     } else {
-        println!("    {} passed, {} failed, {} skipped",
+        println!(
+            "    {} passed, {} failed, {} skipped",
             report.tests_passed.to_string().green(),
             report.tests_failed.to_string().red(),
             report.tests_skipped,
         );
         for te in &report.test_executions {
-            let icon = if te.passed { "✓".green() } else { "✗".red() };
+            let icon = if te.passed {
+                "✓".green()
+            } else {
+                "✗".red()
+            };
             println!("    {} {} ({}ms)", icon, te.test_name, te.duration_ms);
         }
     }
@@ -322,11 +338,26 @@ fn render_terminal(report: &VerifyReport) {
 
     // Findings
     if report.fix_packets.is_empty() {
-        println!("  {}  No issues found — blast radius is clean", "✓".green().bold());
+        println!(
+            "  {}  No issues found — blast radius is clean",
+            "✓".green().bold()
+        );
     } else {
-        let errors = report.fix_packets.iter().filter(|f| f.severity == "error").count();
-        let warnings = report.fix_packets.iter().filter(|f| f.severity == "warning").count();
-        let infos = report.fix_packets.iter().filter(|f| f.severity == "info").count();
+        let errors = report
+            .fix_packets
+            .iter()
+            .filter(|f| f.severity == "error")
+            .count();
+        let warnings = report
+            .fix_packets
+            .iter()
+            .filter(|f| f.severity == "warning")
+            .count();
+        let infos = report
+            .fix_packets
+            .iter()
+            .filter(|f| f.severity == "info")
+            .count();
 
         let mut summary_parts = vec![];
         if errors > 0 {
@@ -338,7 +369,11 @@ fn render_terminal(report: &VerifyReport) {
         if infos > 0 {
             summary_parts.push(format!("{} infos", infos.to_string().cyan().bold()));
         }
-        println!("  {} — {}", "Findings".bold().underline(), summary_parts.join(", "));
+        println!(
+            "  {} — {}",
+            "Findings".bold().underline(),
+            summary_parts.join(", ")
+        );
         println!();
 
         for fp in &report.fix_packets {
@@ -353,19 +388,40 @@ fn render_terminal(report: &VerifyReport) {
                 String::new()
             };
 
-            println!("    {} {} [{}]", sev_char, fp.title.dimmed(), format!("{}{}", fp.file, location).dimmed());
+            println!(
+                "    {} {} [{}]",
+                sev_char,
+                fp.title.dimmed(),
+                format!("{}{}", fp.file, location).dimmed()
+            );
             println!("      {}", fp.description);
 
             if !fp.impacted_callers.is_empty() {
-                println!("      {} {}", "→".blue().bold(), format!("Blast radius: {} callers, {} files",
-                    fp.impacted_callers.len(),
-                    fp.impacted_files.len(),
-                ).blue());
+                println!(
+                    "      {} {}",
+                    "→".blue().bold(),
+                    format!(
+                        "Blast radius: {} callers, {} files",
+                        fp.impacted_callers.len(),
+                        fp.impacted_files.len(),
+                    )
+                    .blue()
+                );
             }
 
             if let Some(ref te) = fp.test_evidence {
-                let status = if te.passed { "PASS".green() } else { "FAIL".red() };
-                println!("      {} {} — {} ({}ms)", "Test:".bold(), te.test_name, status, te.duration_ms);
+                let status = if te.passed {
+                    "PASS".green()
+                } else {
+                    "FAIL".red()
+                };
+                println!(
+                    "      {} {} — {} ({}ms)",
+                    "Test:".bold(),
+                    te.test_name,
+                    status,
+                    te.duration_ms
+                );
             }
 
             if let Some(ref _prompt) = fp.agent_prompt {
@@ -380,9 +436,13 @@ fn render_terminal(report: &VerifyReport) {
     let verdict = if report.verified {
         "✓ Verified — blast radius is clean".green().bold()
     } else if report.tests_failed > 0 {
-        "✗ Tests failed — changes may break existing behavior".red().bold()
+        "✗ Tests failed — changes may break existing behavior"
+            .red()
+            .bold()
     } else {
-        "⚠ Needs review — findings require attention".yellow().bold()
+        "⚠ Needs review — findings require attention"
+            .yellow()
+            .bold()
     };
     println!("    {}", verdict);
     println!();
@@ -392,7 +452,11 @@ fn truncate_output(s: &str, max_bytes: usize) -> String {
     if s.len() <= max_bytes {
         s.to_string()
     } else {
-        format!("{}... [truncated {} bytes]", &s[..max_bytes], s.len() - max_bytes)
+        format!(
+            "{}... [truncated {} bytes]",
+            &s[..max_bytes],
+            s.len() - max_bytes
+        )
     }
 }
 
@@ -415,7 +479,9 @@ pub fn execute_command(
         cmd.current_dir(dir);
     }
 
-    let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn `{}`: {}", command, e))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn `{}`: {}", command, e))?;
 
     // Wait with timeout
     let (exit_status, stdout, stderr) = {
@@ -423,7 +489,9 @@ pub fn execute_command(
         loop {
             match child.try_wait() {
                 Ok(Some(status)) => {
-                    let output = child.wait_with_output().map_err(|e| format!("Failed to collect output: {}", e))?;
+                    let output = child
+                        .wait_with_output()
+                        .map_err(|e| format!("Failed to collect output: {}", e))?;
                     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                     break (status, stdout, stderr);
@@ -436,11 +504,7 @@ pub fn execute_command(
                         let _ = child.wait();
                         let stdout = String::new();
                         let stderr = format!("Command timed out after {}ms", timeout.as_millis());
-                        break (
-                            killed_exit_status(),
-                            stdout,
-                            stderr,
-                        );
+                        break (killed_exit_status(), stdout, stderr);
                     }
                     std::thread::sleep(Duration::from_millis(10));
                 }
@@ -559,14 +623,16 @@ mod tests {
 
     #[test]
     fn test_execute_command_failure() {
-        let result = execute_command("sh", &["-c", "exit 42"], Duration::from_secs(5), None).unwrap();
+        let result =
+            execute_command("sh", &["-c", "exit 42"], Duration::from_secs(5), None).unwrap();
         assert!(!result.passed);
         assert_eq!(result.exit_code, 42);
     }
 
     #[test]
     fn test_execute_command_timeout() {
-        let result = execute_command("sh", &["-c", "sleep 10"], Duration::from_millis(50), None).unwrap();
+        let result =
+            execute_command("sh", &["-c", "sleep 10"], Duration::from_millis(50), None).unwrap();
         assert!(!result.passed);
         assert!(result.stderr.contains("timed out"));
     }
@@ -587,8 +653,22 @@ mod tests {
         let mut report = VerifyReport::new(Some("origin/main".into()));
         report.changed_files = vec!["src/main.rs".into()];
         report.test_executions = vec![
-            TestExecution::new("passing_test".into(), "".into(), 0, "".into(), "".into(), Duration::from_millis(1)),
-            TestExecution::new("failing_test".into(), "".into(), 1, "".into(), "".into(), Duration::from_millis(1)),
+            TestExecution::new(
+                "passing_test".into(),
+                "".into(),
+                0,
+                "".into(),
+                "".into(),
+                Duration::from_millis(1),
+            ),
+            TestExecution::new(
+                "failing_test".into(),
+                "".into(),
+                1,
+                "".into(),
+                "".into(),
+                Duration::from_millis(1),
+            ),
         ];
         report.fix_packets = vec![FixPacket {
             file: "src/lib.rs".into(),

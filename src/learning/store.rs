@@ -172,19 +172,18 @@ impl LearningStore {
                 file_pattern: Option<String>,
                 message_pattern: Option<String>,
             }
-            let rules: Vec<Rule> =
-                sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
-                    "SELECT detector, file_pattern, message_pattern FROM learned_rules",
-                )
-                .fetch_all(&self.pool)
-                .await?
-                .into_iter()
-                .map(|(detector, file_pattern, message_pattern)| Rule {
-                    detector,
-                    file_pattern,
-                    message_pattern,
-                })
-                .collect();
+            let rules: Vec<Rule> = sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
+                "SELECT detector, file_pattern, message_pattern FROM learned_rules",
+            )
+            .fetch_all(&self.pool)
+            .await?
+            .into_iter()
+            .map(|(detector, file_pattern, message_pattern)| Rule {
+                detector,
+                file_pattern,
+                message_pattern,
+            })
+            .collect();
 
             Ok::<_, anyhow::Error>((dismissed_set, rules))
         })?;

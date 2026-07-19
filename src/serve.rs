@@ -68,7 +68,11 @@ fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> 
 
     bot::set_config_pool(pool);
 
-    if bot_config.as_ref().map(|c| c.webhook_secret.is_empty()).unwrap_or(true) {
+    if bot_config
+        .as_ref()
+        .map(|c| c.webhook_secret.is_empty())
+        .unwrap_or(true)
+    {
         eprintln!("  ⚠ Webhook secret is empty — all GitHub events will return 401");
         eprintln!("  → Run the setup wizard to configure your GitHub App");
     } else {
@@ -166,13 +170,12 @@ async fn resolve_bot_config(
         }
     };
 
-    let webhook_secret =
-        db::config::get_config(pool, "github_webhook_secret")
-            .await
-            .ok()
-            .flatten()
-            .or_else(|| std::env::var("GITHUB_WEBHOOK_SECRET").ok())
-            .unwrap_or_default();
+    let webhook_secret = db::config::get_config(pool, "github_webhook_secret")
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| std::env::var("GITHUB_WEBHOOK_SECRET").ok())
+        .unwrap_or_default();
 
     Some(bot::BotConfig {
         app_id,

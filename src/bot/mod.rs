@@ -1,7 +1,4 @@
-use axum::{
-    http::StatusCode,
-    Json,
-};
+use axum::{http::StatusCode, Json};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::sync::Mutex;
@@ -95,14 +92,27 @@ fn bot_db_pool() -> Option<&'static crate::db::DbPool> {
 
 async fn reload_bot_config() -> Option<BotConfig> {
     let pool = CONFIG_POOL.get()?;
-    let app_id = db::config::get_config(pool, "github_app_id").await.ok().flatten()?;
-    let private_key = db::config::get_config(pool, "github_private_key").await.ok().flatten().or_else(|| {
-        std::env::var("GITHUB_APP_PRIVATE_KEY_B64").ok().and_then(|b64| {
-            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64).ok()
-                .and_then(|bytes| String::from_utf8(bytes).ok())
-        })
-    })?;
-    let webhook_secret = db::config::get_config(pool, "github_webhook_secret").await.ok().flatten()
+    let app_id = db::config::get_config(pool, "github_app_id")
+        .await
+        .ok()
+        .flatten()?;
+    let private_key = db::config::get_config(pool, "github_private_key")
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| {
+            std::env::var("GITHUB_APP_PRIVATE_KEY_B64")
+                .ok()
+                .and_then(|b64| {
+                    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64)
+                        .ok()
+                        .and_then(|bytes| String::from_utf8(bytes).ok())
+                })
+        })?;
+    let webhook_secret = db::config::get_config(pool, "github_webhook_secret")
+        .await
+        .ok()
+        .flatten()
         .or_else(|| std::env::var("GITHUB_WEBHOOK_SECRET").ok())
         .unwrap_or_default();
     Some(BotConfig {
@@ -143,16 +153,17 @@ pub(crate) async fn handle_webhook(
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let mut config = BOT_CONFIG
-        .read()
-        .expect("BOT_CONFIG lock poisoned")
-        .clone();
+    let mut config = BOT_CONFIG.read().expect("BOT_CONFIG lock poisoned").clone();
 
     // If the in-memory config has no secret (startup before wizard, or
     // first deploy on ephemeral storage), try reloading from the DB.
     // The manifest flow stores credentials there, but the startup cache
     // was populated before the wizard ran.
-    if config.as_ref().map(|c| c.webhook_secret.is_empty()).unwrap_or(true) {
+    if config
+        .as_ref()
+        .map(|c| c.webhook_secret.is_empty())
+        .unwrap_or(true)
+    {
         if let Some(reloaded) = reload_bot_config().await {
             if !reloaded.webhook_secret.is_empty() {
                 // Cache the reloaded config so subsequent requests skip the DB.
@@ -216,27 +227,28 @@ pub(crate) async fn handle_webhook(
                     ensure_repo_exists(&repo_full_name, inst_id, &repo_val).await;
                 }
                 let _ = timeout(Duration::from_secs(300), async move {
-                let token = match get_installation_token(&cfg, inst_id).await {
-                    Ok(t) => t,
-                    Err(e) => {
-                        eprintln!("  Auth error: {}", e);
-                        return;
+                    let token = match get_installation_token(&cfg, inst_id).await {
+                        Ok(t) => t,
+                        Err(e) => {
+                            eprintln!("  Auth error: {}", e);
+                            return;
+                        }
+                    };
+                    let wrapped = WebhookPayload {
+                        action: String::new(),
+                        pull_request: pr,
+                        repo: None,
+                        installation: None,
+                        comment: None,
+                        issue: None,
+                        repositories: None,
+                        repositories_added: None,
+                    };
+                    if let Err(e) = review_pr(&token, &repo_full_name, &wrapped).await {
+                        eprintln!("  Review error: {}", e);
                     }
-                };
-                let wrapped = WebhookPayload {
-                    action: String::new(),
-                    pull_request: pr,
-                    repo: None,
-                    installation: None,
-                    comment: None,
-                    issue: None,
-                    repositories: None,
-                    repositories_added: None,
-                };
-                if let Err(e) = review_pr(&token, &repo_full_name, &wrapped).await {
-                    eprintln!("  Review error: {}", e);
-                }
-                }).await;
+                })
+                .await;
             });
         }
     } else if event == "issue_comment" && payload.action == "created" {
@@ -291,71 +303,73 @@ pub(crate) async fn handle_webhook(
 
 async fn spawn_review(ctx: WebhookContext, pr_number: i64) {
     let _ = timeout(Duration::from_secs(300), async move {
-    let token = match get_installation_token(&ctx.cfg, ctx.inst_id).await {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("  Auth error: {}", e);
+        let token = match get_installation_token(&ctx.cfg, ctx.inst_id).await {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("  Auth error: {}", e);
+                return;
+            }
+        };
+        if pr_number <= 0 || ctx.repo_full_name == "unknown" {
+            eprintln!("  Ignoring review command without a valid repository and PR number");
             return;
         }
-    };
-    if pr_number <= 0 || ctx.repo_full_name == "unknown" {
-        eprintln!("  Ignoring review command without a valid repository and PR number");
-        return;
-    }
-    let pr_data = match fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await {
-        Ok(data) => data,
-        Err(e) => {
-            eprintln!("  Failed to fetch PR #{}: {}", pr_number, e);
-            return;
+        let pr_data = match fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await {
+            Ok(data) => data,
+            Err(e) => {
+                eprintln!("  Failed to fetch PR #{}: {}", pr_number, e);
+                return;
+            }
+        };
+        let wrapped = WebhookPayload {
+            action: String::new(),
+            pull_request: Some(pr_data),
+            repo: None,
+            installation: None,
+            comment: None,
+            issue: None,
+            repositories: None,
+            repositories_added: None,
+        };
+        if let Err(e) = review_pr(&token, &ctx.repo_full_name, &wrapped).await {
+            eprintln!("  Review error: {}", e);
         }
-    };
-    let wrapped = WebhookPayload {
-        action: String::new(),
-        pull_request: Some(pr_data),
-        repo: None,
-        installation: None,
-        comment: None,
-        issue: None,
-        repositories: None,
-        repositories_added: None,
-    };
-    if let Err(e) = review_pr(&token, &ctx.repo_full_name, &wrapped).await {
-        eprintln!("  Review error: {}", e);
-    }
-    }).await;
+    })
+    .await;
 }
 
 async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64) {
     let _ = timeout(Duration::from_secs(120), async move {
-    let token = match get_installation_token(&ctx.cfg, ctx.inst_id).await {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("  Auth error: {}", e);
-            return;
-        }
-    };
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
-    let url = format!(
-        "https://api.github.com/repos/{}/issues/{}/comments",
-        ctx.repo_full_name, pr_number
-    );
-    let body = "👋 Codasaurus ignore is now available as a placeholder. \
+        let token = match get_installation_token(&ctx.cfg, ctx.inst_id).await {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("  Auth error: {}", e);
+                return;
+            }
+        };
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        let url = format!(
+            "https://api.github.com/repos/{}/issues/{}/comments",
+            ctx.repo_full_name, pr_number
+        );
+        let body = "👋 Codasaurus ignore is now available as a placeholder. \
         To dismiss specific findings, use `@codasaurus-bot dismiss <fingerprint>` \
         or reply to an inline comment with `@codasaurus-bot ignore`. \
         Full per-finding dismissal will be available in a future release.";
-    let _ = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", USER_AGENT)
-        .json(&serde_json::json!({"body": body}))
-        .send()
-        .await;
-    }).await;
+        let _ = client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", USER_AGENT)
+            .json(&serde_json::json!({"body": body}))
+            .send()
+            .await;
+    })
+    .await;
 }
 
 async fn handle_installation_created(
@@ -407,7 +421,14 @@ async fn handle_installation_created(
     }
     let count = repos.len();
     if let Some(p) = bot_db_pool() {
-        crate::db::audit::log_event(p, "installation.created", None, Some("installation"), Some(inst_id)).await;
+        crate::db::audit::log_event(
+            p,
+            "installation.created",
+            None,
+            Some("installation"),
+            Some(inst_id),
+        )
+        .await;
     }
     println!("  [bot] Synced {} repos from installation", count);
 }
@@ -430,17 +451,25 @@ async fn handle_installation_deleted(installation: Option<InstallationInfo>) {
         .await
     {
         Ok(r) => {
-            println!("  [bot] Deactivated {} repos from uninstalled app {}", r.rows_affected(), inst_id);
-            crate::db::audit::log_event(pool, "installation.deleted", None, Some("installation"), Some(inst_id)).await;
+            println!(
+                "  [bot] Deactivated {} repos from uninstalled app {}",
+                r.rows_affected(),
+                inst_id
+            );
+            crate::db::audit::log_event(
+                pool,
+                "installation.deleted",
+                None,
+                Some("installation"),
+                Some(inst_id),
+            )
+            .await;
         }
         Err(e) => eprintln!("  [bot] Failed to deactivate repos: {}", e),
     }
 }
 
-async fn handle_repos_added(
-    installation: Option<InstallationInfo>,
-    repos: Vec<serde_json::Value>,
-) {
+async fn handle_repos_added(installation: Option<InstallationInfo>, repos: Vec<serde_json::Value>) {
     let inst_id = match installation {
         Some(i) => i.id,
         None => return,
@@ -501,8 +530,13 @@ async fn ensure_repo_exists(
     }
     let inst = inst_id.unwrap_or(0);
     let github_id = repo_val.as_ref().and_then(|r| r["id"].as_i64());
-    let default_branch = repo_val.as_ref().and_then(|r| r["default_branch"].as_str().map(String::from));
-    let private = repo_val.as_ref().and_then(|r| r["private"].as_bool()).unwrap_or(false);
+    let default_branch = repo_val
+        .as_ref()
+        .and_then(|r| r["default_branch"].as_str().map(String::from));
+    let private = repo_val
+        .as_ref()
+        .and_then(|r| r["private"].as_bool())
+        .unwrap_or(false);
     let parts: Vec<&str> = full_name.splitn(2, '/').collect();
     if parts.len() < 2 {
         return;

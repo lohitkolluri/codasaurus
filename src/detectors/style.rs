@@ -326,8 +326,7 @@ fn check_long_functions(path: &str, content: &str) -> Option<Finding> {
 fn check_repeated_code(path: &str, lines: &[&str]) -> Option<Finding> {
     // O(n) detection via HashMap of 3-line block fingerprints instead of O(n²) sliding window.
     // Uses a hash of the text content to avoid borrowing slices into the source.
-    let mut blocks: std::collections::HashMap<u64, Vec<usize>> =
-        std::collections::HashMap::new();
+    let mut blocks: std::collections::HashMap<u64, Vec<usize>> = std::collections::HashMap::new();
     use std::hash::{Hash, Hasher};
 
     let mut i = 0;

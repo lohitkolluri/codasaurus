@@ -194,11 +194,10 @@ pub async fn get_stats(pool: &DbPool) -> Result<serde_json::Value, sqlx::Error> 
         .fetch_one(&pool.0)
         .await?;
 
-    let total_reviews_today: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM reviews WHERE date(created_at) = CURRENT_DATE",
-    )
-    .fetch_one(&pool.0)
-    .await?;
+    let total_reviews_today: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM reviews WHERE date(created_at) = CURRENT_DATE")
+            .fetch_one(&pool.0)
+            .await?;
 
     let pass_rate: Option<f64> = sqlx::query_scalar(
         "SELECT AVG(CASE WHEN status = 'passed' THEN 100.0 WHEN status = 'failed' THEN 0.0 ELSE NULL END) FROM reviews",

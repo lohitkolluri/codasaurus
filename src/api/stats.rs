@@ -60,7 +60,8 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
         })
         .collect();
 
-    if let Some(obj) = core.as_object_mut() {        obj.insert("recent_activity".into(), json!(activity));
+    if let Some(obj) = core.as_object_mut() {
+        obj.insert("recent_activity".into(), json!(activity));
     }
     Ok(Json(core))
 }

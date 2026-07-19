@@ -154,7 +154,10 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
             }
         }
         Err(e) => {
-            eprintln!("Warning: LEARNING_STORE mutex poisoned: {}; returning all unfiltered findings", e);
+            eprintln!(
+                "Warning: LEARNING_STORE mutex poisoned: {}; returning all unfiltered findings",
+                e
+            );
         }
     }
 

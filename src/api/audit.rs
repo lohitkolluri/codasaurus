@@ -41,8 +41,7 @@ async fn list_audit(
     let offset = params.offset.unwrap_or(0).max(0);
     let event_type = params.event_type.as_deref();
 
-    let entries =
-        db::audit::list_audit_entries(&state.pool, event_type, limit, offset).await?;
+    let entries = db::audit::list_audit_entries(&state.pool, event_type, limit, offset).await?;
 
     // Total count (matching filter)
     let total: i64 = match event_type {

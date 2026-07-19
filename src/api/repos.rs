@@ -44,8 +44,13 @@ async fn list_repos(State(state): State<AppState>) -> Result<Json<serde_json::Va
 
 /// POST /api/v1/repos/sync — fetch all installations + repos from GitHub and
 /// store them in the local database.  Returns the number of repos synced.
-async fn sync_repos(State(state): State<AppState>, headers: axum::http::HeaderMap) -> Result<Json<serde_json::Value>, ApiError> {
-    crate::api::auth::require_session(&state.pool, &headers).await.map_err(|_| ApiError::unauthorized("Authentication required"))?;
+async fn sync_repos(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    crate::api::auth::require_session(&state.pool, &headers)
+        .await
+        .map_err(|_| ApiError::unauthorized("Authentication required"))?;
     use crate::db::config::get_config;
 
     // Read GitHub credentials from DB config
@@ -62,7 +67,9 @@ async fn sync_repos(State(state): State<AppState>, headers: axum::http::HeaderMa
         .or_else(|| {
             std::env::var("GITHUB_APP_PRIVATE_KEY_B64")
                 .ok()
-                .and_then(|b64| base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64).ok())
+                .and_then(|b64| {
+                    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64).ok()
+                })
                 .and_then(|bytes| String::from_utf8(bytes).ok())
         })
         .ok_or_else(|| ApiError::bad_request("No GitHub App private key configured"))?;
@@ -118,9 +125,8 @@ async fn sync_repos(State(state): State<AppState>, headers: axum::http::HeaderMa
 
         // List repos for this installation — follow pagination to get ALL repos
         let mut all_repos: Vec<serde_json::Value> = Vec::new();
-        let mut page_url: Option<String> = Some(
-            "https://api.github.com/installation/repositories?per_page=100".into()
-        );
+        let mut page_url: Option<String> =
+            Some("https://api.github.com/installation/repositories?per_page=100".into());
 
         while let Some(url) = page_url.take() {
             let resp = client
@@ -225,7 +231,9 @@ async fn update_repo(
     Path(id): Path<i64>,
     Json(body): Json<UpdateRepoBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    crate::api::auth::require_session(&state.pool, &headers).await.map_err(|_| ApiError::unauthorized("Authentication required"))?;
+    crate::api::auth::require_session(&state.pool, &headers)
+        .await
+        .map_err(|_| ApiError::unauthorized("Authentication required"))?;
     db::repos::update_repo(&state.pool, id, &body.config_json, body.active).await?;
     Ok(Json(json!({ "status": "ok" })))
 }
@@ -236,7 +244,9 @@ async fn delete_repo(
     headers: axum::http::HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    crate::api::auth::require_session(&state.pool, &headers).await.map_err(|_| ApiError::unauthorized("Authentication required"))?;
+    crate::api::auth::require_session(&state.pool, &headers)
+        .await
+        .map_err(|_| ApiError::unauthorized("Authentication required"))?;
     db::repos::delete_repo(&state.pool, id).await?;
     Ok(Json(json!({ "status": "ok" })))
 }

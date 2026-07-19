@@ -76,12 +76,11 @@ impl ReviewState {
     pub fn get_comment_id(&self, repo: &str, pr_number: i64) -> Result<Option<i64>> {
         let key = format!("{}/{}", repo, pr_number);
         self.rt.block_on(async {
-            let result: Option<(i64,)> = sqlx::query_as(
-                "SELECT comment_id FROM review_comments WHERE repo_pr = ?",
-            )
-            .bind(&key)
-            .fetch_optional(&self.pool)
-            .await?;
+            let result: Option<(i64,)> =
+                sqlx::query_as("SELECT comment_id FROM review_comments WHERE repo_pr = ?")
+                    .bind(&key)
+                    .fetch_optional(&self.pool)
+                    .await?;
             Ok(result.map(|r| r.0))
         })
     }
@@ -90,12 +89,11 @@ impl ReviewState {
     pub fn get_reviewed_sha(&self, repo: &str, pr_number: i64) -> Result<Option<String>> {
         let key = format!("{}/{}", repo, pr_number);
         self.rt.block_on(async {
-            let result: Option<(String,)> = sqlx::query_as(
-                "SELECT head_sha FROM reviewed_commits WHERE repo_pr = ?",
-            )
-            .bind(&key)
-            .fetch_optional(&self.pool)
-            .await?;
+            let result: Option<(String,)> =
+                sqlx::query_as("SELECT head_sha FROM reviewed_commits WHERE repo_pr = ?")
+                    .bind(&key)
+                    .fetch_optional(&self.pool)
+                    .await?;
             Ok(result.map(|r| r.0))
         })
     }
@@ -104,13 +102,11 @@ impl ReviewState {
     pub fn set_reviewed_sha(&self, repo: &str, pr_number: i64, sha: &str) -> Result<()> {
         let key = format!("{}/{}", repo, pr_number);
         self.rt.block_on(async {
-            sqlx::query(
-                "INSERT OR REPLACE INTO reviewed_commits (repo_pr, head_sha) VALUES (?, ?)",
-            )
-            .bind(&key)
-            .bind(sha)
-            .execute(&self.pool)
-            .await
+            sqlx::query("INSERT OR REPLACE INTO reviewed_commits (repo_pr, head_sha) VALUES (?, ?)")
+                .bind(&key)
+                .bind(sha)
+                .execute(&self.pool)
+                .await
         })?;
         Ok(())
     }

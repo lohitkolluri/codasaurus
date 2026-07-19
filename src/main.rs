@@ -187,28 +187,37 @@ fn main() -> Result<()> {
                     .and_then(|p| p.parse().ok())
                     .unwrap_or(3000)
             });
-            let database_url = std::env::var("DATABASE_URL")
-                .unwrap_or_else(|_| format!("sqlite://{}?mode=rwc", codasaurus::storage::data_dir().join("codasaurus.db").display()));
+            let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+                format!(
+                    "sqlite://{}?mode=rwc",
+                    codasaurus::storage::data_dir()
+                        .join("codasaurus.db")
+                        .display()
+                )
+            });
 
             // Bot config is optional — only load if env vars are set
-            let bot_config = std::env::var("GITHUB_APP_ID").ok().and_then(|_| {
-                match resolve_private_key() {
-                    Ok(key) => {
-                        Some(bot::BotConfig {
+            let bot_config =
+                std::env::var("GITHUB_APP_ID")
+                    .ok()
+                    .and_then(|_| match resolve_private_key() {
+                        Ok(key) => Some(bot::BotConfig {
                             app_id: std::env::var("GITHUB_APP_ID").unwrap(),
                             private_key: key,
-                            webhook_secret: std::env::var("GITHUB_WEBHOOK_SECRET").unwrap_or_default(),
+                            webhook_secret: std::env::var("GITHUB_WEBHOOK_SECRET")
+                                .unwrap_or_default(),
                             host: host.clone(),
                             port,
-                        })
-                    }
-                    Err(e) => {
-                        eprintln!("  Warning: GITHUB_APP_ID set but private key missing: {}", e);
-                        eprintln!("  Running in dashboard-only mode (no GitHub bot)");
-                        None
-                    }
-                }
-            });
+                        }),
+                        Err(e) => {
+                            eprintln!(
+                                "  Warning: GITHUB_APP_ID set but private key missing: {}",
+                                e
+                            );
+                            eprintln!("  Running in dashboard-only mode (no GitHub bot)");
+                            None
+                        }
+                    });
 
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(serve::serve(&host, port, &database_url, bot_config))?;
@@ -245,7 +254,10 @@ fn main() -> Result<()> {
             if report.verified && !report.fix_packets.is_empty() {
                 // Verified but with warnings — still exit 0 unless running in CI
                 if *ci {
-                    eprintln!("Warning: {} fix packets generated but all verified.", report.fix_packets.len());
+                    eprintln!(
+                        "Warning: {} fix packets generated but all verified.",
+                        report.fix_packets.len()
+                    );
                 }
             } else if !report.verified {
                 if *ci || *force {

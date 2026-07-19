@@ -229,9 +229,9 @@ fn extract_osv_vuln(v: &serde_json::Value) -> Option<OsvVulnerability> {
         .and_then(|r| r.get("events"))
         .and_then(|e| e.as_array())
         .and_then(|events| {
-            events.iter().find_map(|e| {
-                e["fixed"].as_str().map(|s| s.to_string())
-            })
+            events
+                .iter()
+                .find_map(|e| e["fixed"].as_str().map(|s| s.to_string()))
         });
 
     Some(OsvVulnerability {

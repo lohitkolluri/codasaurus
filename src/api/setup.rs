@@ -84,7 +84,10 @@ pub fn router() -> Router<AppState> {
         .route("/github/manifest-page", get(github_manifest_page))
         .route("/github/manifest-url", get(github_manifest_url))
         .route("/github", post(setup_github))
-        .route("/github/callback", get(github_callback_page).post(github_callback))
+        .route(
+            "/github/callback",
+            get(github_callback_page).post(github_callback),
+        )
         .route("/admin", post(setup_admin))
 }
 
@@ -102,9 +105,7 @@ pub struct SetupStatus {
 }
 
 /// GET /api/v1/setup/status — check which setup steps have been completed.
-async fn setup_status(
-    State(state): State<AppState>,
-) -> Result<Json<SetupStatus>, ApiError> {
+async fn setup_status(State(state): State<AppState>) -> Result<Json<SetupStatus>, ApiError> {
     use db::config::get_config;
 
     let database = get_config(&state.pool, "database_provider")
@@ -124,20 +125,29 @@ async fn setup_status(
         .is_some()
         || std::env::var("GITHUB_APP_ID").is_ok();
 
-    let llm = get_config(&state.pool, "llm_provider").await.ok().flatten().is_some()
+    let llm = get_config(&state.pool, "llm_provider")
+        .await
+        .ok()
+        .flatten()
+        .is_some()
         || std::env::var("OPENROUTER_API_KEY").is_ok();
 
-    let admin: bool = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM users WHERE role = 'admin'",
-    )
-    .fetch_one(&state.pool.0)
-    .await
-    .map(|count| count > 0)
-    .unwrap_or(false);
+    let admin: bool =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+            .fetch_one(&state.pool.0)
+            .await
+            .map(|count| count > 0)
+            .unwrap_or(false);
 
     let complete = database && llm && github && admin;
 
-    Ok(Json(SetupStatus { database, llm, github, admin, complete }))
+    Ok(Json(SetupStatus {
+        database,
+        llm,
+        github,
+        admin,
+        complete,
+    }))
 }
 
 /// POST /api/v1/setup/database
@@ -164,10 +174,8 @@ async fn setup_database(
             let db_url = std::env::var("DATABASE_URL").unwrap_or(body.url);
 
             // Store config
-            db::config::set_config(&state.pool, "database_provider", "sqlite")
-                .await?;
-            db::config::set_config(&state.pool, "database_url", &db_url)
-                .await?;
+            db::config::set_config(&state.pool, "database_provider", "sqlite").await?;
+            db::config::set_config(&state.pool, "database_url", &db_url).await?;
 
             Ok(Json(SetupResponse {
                 status: "ok".into(),
@@ -196,10 +204,8 @@ async fn setup_database(
 
             test_pool.close().await;
 
-            db::config::set_config(&state.pool, "database_provider", "postgres")
-                .await?;
-            db::config::set_config(&state.pool, "database_url", &db_url)
-                .await?;
+            db::config::set_config(&state.pool, "database_provider", "postgres").await?;
+            db::config::set_config(&state.pool, "database_url", &db_url).await?;
 
             Ok(Json(SetupResponse {
                 status: "ok".into(),
@@ -221,24 +227,36 @@ async fn get_llm_config(
     use db::config::get_config;
 
     let provider = get_config(&state.pool, "llm_provider")
-        .await.ok().flatten()
+        .await
+        .ok()
+        .flatten()
         .or_else(|| {
-            if std::env::var("OPENROUTER_API_KEY").is_ok() { Some("openrouter".into()) }
-            else if std::env::var("CODASAURUS_BASE_URL").is_ok() { Some("custom".into()) }
-            else { None }
+            if std::env::var("OPENROUTER_API_KEY").is_ok() {
+                Some("openrouter".into())
+            } else if std::env::var("CODASAURUS_BASE_URL").is_ok() {
+                Some("custom".into())
+            } else {
+                None
+            }
         });
 
     let api_key = get_config(&state.pool, "openrouter_api_key")
-        .await.ok().flatten()
+        .await
+        .ok()
+        .flatten()
         .or_else(|| std::env::var("OPENROUTER_API_KEY").ok())
         .map(|_| "••••••••".to_string()); // never expose full key
 
     let model = get_config(&state.pool, "llm_model")
-        .await.ok().flatten()
+        .await
+        .ok()
+        .flatten()
         .or_else(|| std::env::var("CODASAURUS_MODEL").ok());
 
     let base_url = get_config(&state.pool, "llm_base_url")
-        .await.ok().flatten()
+        .await
+        .ok()
+        .flatten()
         .or_else(|| std::env::var("CODASAURUS_BASE_URL").ok());
 
     Ok(Json(json!({
@@ -311,25 +329,34 @@ async fn test_llm_connection(
             } else {
                 base_url.trim_end_matches('/')
             };
-            (format!("{}/v1/chat/completions", base), model.unwrap_or("qwen2.5-coder:7b"))
+            (
+                format!("{}/v1/chat/completions", base),
+                model.unwrap_or("qwen2.5-coder:7b"),
+            )
         }
         "custom" => {
             if base_url.is_empty() {
                 return Ok(Some(false));
             }
             let base = base_url.trim_end_matches('/');
-            (format!("{}/chat/completions", base), model.unwrap_or("default"))
+            (
+                format!("{}/chat/completions", base),
+                model.unwrap_or("default"),
+            )
         }
-        _ => return Err(ApiError::bad_request(format!("Unknown provider: {}", provider))),
+        _ => {
+            return Err(ApiError::bad_request(format!(
+                "Unknown provider: {}",
+                provider
+            )))
+        }
     };
 
-    let mut req = client
-        .post(&url)
-        .json(&json!({
-            "model": model_name,
-            "messages": [{"role": "user", "content": "Say 'ok' and nothing else."}],
-            "max_tokens": 10,
-        }));
+    let mut req = client.post(&url).json(&json!({
+        "model": model_name,
+        "messages": [{"role": "user", "content": "Say 'ok' and nothing else."}],
+        "max_tokens": 10,
+    }));
 
     if !api_key.is_empty() {
         req = req.header("Authorization", format!("Bearer {}", api_key));
@@ -343,10 +370,7 @@ async fn test_llm_connection(
 
 /// Resolve the public-facing URL for the GitHub App manifest.
 /// Checks DB config → `PUBLIC_URL` env var → auto-detects from request Host header.
-async fn resolve_public_url(
-    state: &AppState,
-    headers: &axum::http::HeaderMap,
-) -> String {
+async fn resolve_public_url(state: &AppState, headers: &axum::http::HeaderMap) -> String {
     if let Some(url) = db::config::get_config(&state.pool, "public_url")
         .await
         .ok()
@@ -358,10 +382,7 @@ async fn resolve_public_url(
         return url;
     }
     // Auto-detect from request Host header
-    if let Some(host) = headers
-        .get("host")
-        .and_then(|v| v.to_str().ok())
-    {
+    if let Some(host) = headers.get("host").and_then(|v| v.to_str().ok()) {
         let scheme = if host.starts_with("localhost") || host.starts_with("127.") {
             "http"
         } else {
@@ -521,8 +542,7 @@ async fn setup_github(
     // Store credentials
     db::config::set_config(&state.pool, "github_app_id", &body.app_id).await?;
     db::config::set_config(&state.pool, "github_private_key", &body.private_key).await?;
-    db::config::set_config(&state.pool, "github_webhook_secret", &body.webhook_secret)
-        .await?;
+    db::config::set_config(&state.pool, "github_webhook_secret", &body.webhook_secret).await?;
 
     Ok(Json(SetupResponse {
         status: "ok".into(),
@@ -551,7 +571,8 @@ async fn github_callback_page(
                     r#"<html><body style="font:14px sans-serif;padding:40px">
                         <p>Missing authorization code from GitHub.</p>
                         <a href="/#/setup/github">Back to setup</a>
-                    </body></html>"#.into(),
+                    </body></html>"#
+                        .into(),
                 ),
             );
         }
@@ -622,7 +643,11 @@ async fn github_callback_page(
         code
     );
 
-    (StatusCode::OK, [(header::CONTENT_TYPE, "text/html; charset=utf-8")], Html(html))
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        Html(html),
+    )
 }
 
 /// POST /api/v1/setup/github/callback
@@ -647,10 +672,7 @@ async fn github_callback(
 
     if !resp.status().is_success() {
         let status = resp.status();
-        let text = resp
-            .text()
-            .await
-            .unwrap_or_else(|_| "unknown error".into());
+        let text = resp.text().await.unwrap_or_else(|_| "unknown error".into());
         return Err(ApiError::bad_request(format!(
             "GitHub manifest conversion failed (HTTP {}): {}",
             status, text
@@ -683,15 +705,17 @@ async fn github_callback(
 
     db::config::set_config(&state.pool, "github_app_id", &app_id).await?;
     db::config::set_config(&state.pool, "github_private_key", &pem).await?;
-    db::config::set_config(&state.pool, "github_webhook_secret", &webhook_secret)
-        .await?;
+    db::config::set_config(&state.pool, "github_webhook_secret", &webhook_secret).await?;
     db::config::set_config(&state.pool, "github_app_name", &app_name).await?;
     db::config::set_config(&state.pool, "github_app_slug", &slug).await?;
 
     // Update the in-memory bot config so the webhook handler picks up the
     // new credentials immediately without requiring a server restart.
     let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
-    let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(3000);
+    let port: u16 = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(3000);
     bot::set_bot_config(bot::BotConfig {
         app_id: app_id.clone(),
         private_key: pem,

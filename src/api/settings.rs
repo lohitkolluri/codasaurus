@@ -1,5 +1,5 @@
 use axum::extract::{Path, State};
-use axum::routing::{get, post, put, delete};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
@@ -44,9 +44,7 @@ pub fn router() -> Router<AppState> {
 // ---------------------------------------------------------------------------
 
 /// GET /api/v1/settings
-async fn get_settings(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+async fn get_settings(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
     let entries = db::config::get_all_config(&state.pool).await?;
 
     let sensitive_keys: &[&str] = &[
@@ -76,12 +74,21 @@ async fn set_setting(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     // Allowlist of writable config keys — prevents arbitrary config writes.
     const ALLOWED_KEYS: &[&str] = &[
-        "llm_provider", "openrouter_api_key", "llm_model", "llm_base_url",
-        "public_url", "default_severity",
-        "hallucinated_imports_enabled", "phantom_deps_enabled",
-        "vulnerabilities_enabled", "secrets_enabled",
-        "over_engineering_enabled", "boilerplate_enabled",
-        "todo_leaks_enabled", "stale_api_enabled", "graph_enabled",
+        "llm_provider",
+        "openrouter_api_key",
+        "llm_model",
+        "llm_base_url",
+        "public_url",
+        "default_severity",
+        "hallucinated_imports_enabled",
+        "phantom_deps_enabled",
+        "vulnerabilities_enabled",
+        "secrets_enabled",
+        "over_engineering_enabled",
+        "boilerplate_enabled",
+        "todo_leaks_enabled",
+        "stale_api_enabled",
+        "graph_enabled",
         "guidelines_enabled",
     ];
     if !ALLOWED_KEYS.contains(&key.as_str()) {
@@ -123,26 +130,34 @@ async fn delete_github_settings(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    crate::api::auth::require_session(&state.pool, &headers).await.map_err(|_| ApiError::unauthorized("Authentication required"))?;
+    crate::api::auth::require_session(&state.pool, &headers)
+        .await
+        .map_err(|_| ApiError::unauthorized("Authentication required"))?;
     for key in GITHUB_KEYS {
         sqlx::query("DELETE FROM app_config WHERE key = ?")
             .bind(key)
             .execute(&state.pool.0)
             .await?;
     }
-    Ok(Json(json!({ "status": "ok", "message": "GitHub App configuration removed" })))
+    Ok(Json(
+        json!({ "status": "ok", "message": "GitHub App configuration removed" }),
+    ))
 }
 
 async fn rotate_github_credentials(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    crate::api::auth::require_session(&state.pool, &headers).await.map_err(|_| ApiError::unauthorized("Authentication required"))?;
+    crate::api::auth::require_session(&state.pool, &headers)
+        .await
+        .map_err(|_| ApiError::unauthorized("Authentication required"))?;
     for key in GITHUB_KEYS {
         sqlx::query("DELETE FROM app_config WHERE key = ?")
             .bind(key)
             .execute(&state.pool.0)
             .await?;
     }
-    Ok(Json(json!({ "status": "ok", "message": "Credentials cleared. Re-run the manifest flow to set up a new GitHub App." })))
+    Ok(Json(
+        json!({ "status": "ok", "message": "Credentials cleared. Re-run the manifest flow to set up a new GitHub App." }),
+    ))
 }
