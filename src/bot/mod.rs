@@ -17,6 +17,8 @@ mod verify;
 use self::auth::get_installation_token;
 use self::review::{fetch_pull_request, review_pr};
 
+use crate::db::{self, repos::create_repo, models::RepoCreate};
+
 static USER_AGENT: &str = concat!("codasaurus/", env!("CARGO_PKG_VERSION"));
 
 /// Tracks recently processed webhook delivery IDs to prevent replay attacks.
@@ -103,6 +105,13 @@ struct WebhookPayload {
     comment: Option<serde_json::Value>,
     #[serde(rename = "issue")]
     issue: Option<serde_json::Value>,
+    /// Sent in `installation.created` event
+    repositories: Option<Vec<serde_json::Value>>,
+    /// Sent in `installation_repositories.added` event
+    #[serde(rename = "repositories_added")]
+    repositories_added: Option<Vec<serde_json::Value>>,
+    #[serde(rename = "repositories_removed")]
+    repositories_removed: Option<Vec<serde_json::Value>>,
 }
 
 async fn handle_webhook(
@@ -162,6 +171,9 @@ async fn handle_webhook(
                     installation: None,
                     comment: None,
                     issue: None,
+                    repositories: None,
+                    repositories_added: None,
+                    repositories_removed: None,
                 };
                 if let Err(e) = review_pr(&token, &ctx.repo_full_name, &wrapped).await {
                     eprintln!("  Review error: {}", e);
@@ -203,6 +215,20 @@ async fn handle_webhook(
                 }
             }
         }
+    } else if event == "installation" && payload.action == "created" {
+        tokio::spawn(handle_installation_created(
+            config.clone(),
+            payload.installation,
+            payload.repositories.unwrap_or_default(),
+        ));
+    } else if event == "installation" && payload.action == "deleted" {
+        // Could mark repos inactive — for now just log
+        eprintln!("  GitHub App uninstalled");
+    } else if event == "installation_repositories" && payload.action == "added" {
+        tokio::spawn(handle_repos_added(
+            payload.installation,
+            payload.repositories_added.unwrap_or_default(),
+        ));
     }
     Ok(Json(serde_json::json!({"status": "ok"})))
 }
@@ -234,6 +260,9 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64) {
         installation: None,
         comment: None,
         issue: None,
+        repositories: None,
+        repositories_added: None,
+        repositories_removed: None,
     };
     if let Err(e) = review_pr(&token, &ctx.repo_full_name, &wrapped).await {
         eprintln!("  Review error: {}", e);
@@ -272,4 +301,114 @@ async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64) {
         .send()
         .await;
     }).await;
+}
+
+async fn handle_installation_created(
+    _config: BotConfig,
+    installation: Option<InstallationInfo>,
+    repos: Vec<serde_json::Value>,
+) {
+    let inst_id = match installation {
+        Some(i) => i.id,
+        None => return,
+    };
+    let db_url = match std::env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            eprintln!("  [bot] DATABASE_URL not set, skipping repo sync");
+            return;
+        }
+    };
+    let pool = match db::create_pool(&db_url).await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("  [bot] Failed to connect to DB: {}", e);
+            return;
+        }
+    };
+    for repo in &repos {
+        let github_id = repo["id"].as_i64();
+        let full_name = match repo["full_name"].as_str() {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        let parts: Vec<&str> = full_name.splitn(2, '/').collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let owner = parts[0].to_string();
+        let name = parts[1].to_string();
+        let default_branch = repo["default_branch"].as_str().map(|s| s.to_string());
+        let private = repo["private"].as_bool().unwrap_or(false);
+
+        if let Err(e) = db::repos::create_repo(
+            &pool,
+            &RepoCreate {
+                github_id,
+                full_name,
+                owner,
+                name,
+                default_branch,
+                installation_id: inst_id,
+                private,
+            },
+        )
+        .await
+        {
+            eprintln!("  [bot] Failed to save repo: {}", e);
+        }
+    }
+    let count = repos.len();
+    println!("  [bot] Synced {} repos from installation", count);
+}
+
+async fn handle_repos_added(
+    installation: Option<InstallationInfo>,
+    repos: Vec<serde_json::Value>,
+) {
+    let inst_id = match installation {
+        Some(i) => i.id,
+        None => return,
+    };
+    let db_url = match std::env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => return,
+    };
+    let pool = match db::create_pool(&db_url).await {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    for repo in &repos {
+        let github_id = repo["id"].as_i64();
+        let full_name = match repo["full_name"].as_str() {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        let parts: Vec<&str> = full_name.splitn(2, '/').collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let owner = parts[0].to_string();
+        let name = parts[1].to_string();
+        let default_branch = repo["default_branch"].as_str().map(|s| s.to_string());
+        let private = repo["private"].as_bool().unwrap_or(false);
+
+        if let Err(e) = db::repos::create_repo(
+            &pool,
+            &RepoCreate {
+                github_id,
+                full_name,
+                owner,
+                name,
+                default_branch,
+                installation_id: inst_id,
+                private,
+            },
+        )
+        .await
+        {
+            eprintln!("  [bot] Failed to save repo: {}", e);
+        }
+    }
+    println!("  [bot] Synced {} added repos", repos.len());
 }
