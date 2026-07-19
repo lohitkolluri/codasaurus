@@ -31,13 +31,4 @@ pub mod github {
 
     /// Maximum number of pages to fetch when listing PR files (30 * 100 = 3000 files max).
     pub const MAX_PR_FILE_PAGES: usize = 30;
-
-    /// Maximum comment body size in bytes (GitHub's limit is ~65536).
-    pub const MAX_COMMENT_BYTES: usize = 64000;
-
-    /// Maximum number of inline comments to post in a single review.
-    pub const MAX_INLINE_COMMENTS: usize = 300;
-
-    /// Maximum number of files to suggest unique reviewers for.
-    pub const MAX_REVIEWER_FILES: usize = 50;
 }

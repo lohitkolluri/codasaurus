@@ -95,7 +95,7 @@
         </div>
 
         {#if msg}
-          <p style="font-size:13px;color:var(--success);margin-bottom:12px">{msg}</p>
+          <p style="font-size:13px;margin-bottom:12px;color:{msg.includes('fail') || msg.includes('Failed') ? 'var(--error)' : 'var(--success)'}">{msg}</p>
         {/if}
 
         <div class="danger-zone">

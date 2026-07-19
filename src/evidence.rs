@@ -1,6 +1,27 @@
+/// Create an ExitStatus representing a killed/timed-out process.
+fn killed_exit_status() -> std::process::ExitStatus {
+    if cfg!(unix) {
+        #[cfg(unix)]
+        return std::process::ExitStatus::from_raw(-1);
+    }
+    // Windows: run "cmd /c exit 1" to get a non-zero exit status.
+    std::process::Command::new("cmd")
+        .args(["/c", "exit", "1"])
+        .status()
+        .unwrap_or_else(|_| {
+            // On locked-down systems where cmd may be unavailable,
+            // use "exit 1" as a string argument to a minimal shell.
+            std::process::Command::new("powershell")
+                .args(["-Command", "exit 1"])
+                .status()
+                .unwrap_or(std::process::ExitStatus::from_raw(1))
+        })
+}
+
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fmt;
+#[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 use std::time::Duration;
 
@@ -416,7 +437,7 @@ pub fn execute_command(
                         let stdout = String::new();
                         let stderr = format!("Command timed out after {}ms", timeout.as_millis());
                         break (
-                            std::process::ExitStatus::from_raw(-1),
+                            killed_exit_status(),
                             stdout,
                             stderr,
                         );

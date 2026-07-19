@@ -19,7 +19,6 @@ clap = { version = "4", features = ["derive", "env"] }
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-thiserror = "2"
 toml = "0.8"
 url = "2"
 
@@ -63,7 +62,6 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # Password hashing
 argon2 = "0.5"
-password-hash = "0.5"
 
 # JWT generation (for GitHub App auth)
 jsonwebtoken = { version = "9", features = ["use_pem"] }

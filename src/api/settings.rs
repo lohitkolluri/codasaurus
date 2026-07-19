@@ -74,6 +74,19 @@ async fn set_setting(
     Path(key): Path<String>,
     Json(body): Json<SetSettingBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    // Allowlist of writable config keys — prevents arbitrary config writes.
+    const ALLOWED_KEYS: &[&str] = &[
+        "llm_provider", "openrouter_api_key", "llm_model", "llm_base_url",
+        "default_severity", "public_url",
+        "hallucinated_imports_enabled", "phantom_deps_enabled",
+        "vulnerabilities_enabled", "secrets_enabled",
+        "over_engineering_enabled", "boilerplate_enabled",
+        "todo_leaks_enabled", "stale_api_enabled", "graph_enabled",
+        "guidelines_enabled",
+    ];
+    if !ALLOWED_KEYS.contains(&key.as_str()) {
+        return Err(ApiError::bad_request(format!("Unknown setting: {}", key)));
+    }
     db::config::set_config(&state.pool, &key, &body.value).await?;
 
     Ok(Json(json!({ "status": "ok", "key": key })))

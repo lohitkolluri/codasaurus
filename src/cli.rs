@@ -61,6 +61,10 @@ pub fn run_check(opts: CheckOptions) -> Result<Findings> {
         for file_path in &changed_files {
             collect_parsed_file(file_path, &mut parsed_files, opts.config);
         }
+    } else {
+        anyhow::bail!(
+            "No input specified. Use --staged, --diff <ref>, or provide a file/directory path."
+        );
     }
 
     // Cross-file detectors need one coherent view of the changed set: running

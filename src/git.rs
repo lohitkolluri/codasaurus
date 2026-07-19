@@ -59,13 +59,18 @@ pub fn current_branch() -> Result<String> {
 /// Get recent commit messages (up to `count`)
 pub fn recent_commits(count: usize) -> Result<Vec<String>> {
     let output = std::process::Command::new("git")
-        .args(["log", &format!("-{}", count), "--format=%B", "--no-color"])
+        .args([
+            "log",
+            &format!("-{}", count),
+            "--format=---CODASAURUS_COMMIT_SEP---%n%B",
+            "--no-color",
+        ])
         .output()
         .context("Failed to get recent commits")?;
-
     let raw = String::from_utf8(output.stdout)?;
     let commits: Vec<String> = raw
-        .split("\n\n")
+        .split("---CODASAURUS_COMMIT_SEP---")
+        .skip(1)  // first item is empty (before first separator)
         .map(|c| c.trim().to_string())
         .filter(|c| !c.is_empty())
         .collect();

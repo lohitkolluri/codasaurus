@@ -17,7 +17,7 @@ mod verify;
 use self::auth::get_installation_token;
 use self::review::{fetch_pull_request, review_pr};
 
-use crate::db::{self, repos::create_repo, models::RepoCreate};
+use crate::db::{self, models::RepoCreate};
 
 static USER_AGENT: &str = concat!("codasaurus/", env!("CARGO_PKG_VERSION"));
 
@@ -111,6 +111,7 @@ struct WebhookPayload {
     #[serde(rename = "repositories_added")]
     repositories_added: Option<Vec<serde_json::Value>>,
     #[serde(rename = "repositories_removed")]
+    #[allow(dead_code)]
     repositories_removed: Option<Vec<serde_json::Value>>,
 }
 

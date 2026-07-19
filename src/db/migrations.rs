@@ -131,9 +131,20 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         return Ok(());
     }
 
-    for statement in split_sql(SQLITE_SCHEMA) {
-        sqlx::query(&statement).execute(pool).await?;
+    // Wrap DDL in a transaction so partial failures roll back cleanly.
+    sqlx::query("BEGIN").execute(pool).await?;
+    let result = async {
+        for statement in split_sql(SQLITE_SCHEMA) {
+            sqlx::query(&statement).execute(pool).await?;
+        }
+        Ok::<_, sqlx::Error>(())
     }
+    .await;
+    if result.is_err() {
+        sqlx::query("ROLLBACK").execute(pool).await.ok();
+        return result;
+    }
+    sqlx::query("COMMIT").execute(pool).await?;
 
     // SQLite optimizations
     for pragma in [

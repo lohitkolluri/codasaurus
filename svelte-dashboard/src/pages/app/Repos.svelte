@@ -13,6 +13,7 @@
   let error = $state("");
   let syncing = $state(false);
   let syncMsg = $state("");
+  let syncError = $state(false);
   let search = $state("");
 
   let filtered = $derived.by(() => {
@@ -34,12 +35,14 @@
   async function syncRepos() {
     syncing = true;
     syncMsg = "";
+    syncError = false;
     try {
       const data = await api.post("/api/repos/sync");
       syncMsg = `Synced ${data.synced} repos`;
       repos = await api.get("/api/repos");
     } catch (err) {
       syncMsg = "Sync failed: " + (err.message || "unknown error");
+      syncError = true;
     } finally {
       syncing = false;
     }
@@ -55,38 +58,48 @@
       repos = await api.get("/api/repos");
     } catch (err) {
       syncMsg = "Toggle failed: " + (err.message || "unknown error");
+      syncError = true;
     }
   }
 
   async function batchToggle(active) {
+    syncError = false;
     try {
-      await Promise.all(filtered.map(r => api.put(`/api/repos/${r.id}`, { config_json: "", active })));
+      // Chunk into batches of 20 to avoid overwhelming the server
+      const chunk = (arr, size) => {
+        const result = [];
+        for (let i = 0; i < arr.length; i += size) result.push(arr.slice(i, i + size));
+        return result;
+      };
+      for (const batch of chunk(filtered, 20)) {
+        await Promise.all(batch.map(r => api.put(`/api/repos/${r.id}`, { config_json: "", active })));
+      }
       repos = await api.get("/api/repos");
       syncMsg = `${filtered.length} repos ${active ? "enabled" : "disabled"}`;
     } catch (err) {
       syncMsg = "Batch update failed: " + (err.message || "unknown error");
+      syncError = true;
     }
   }
 
   async function installRepo() {
+    const popup = window.open("", "_blank");
     try {
       const data = await api.get("/api/github/install-url");
-      if (data.url) {
-        window.open(data.url, "_blank");
-      }
+      if (data.url && popup) popup.location.href = data.url;
     } catch (err) {
       error = err.message || "Failed to get install URL";
+      popup?.close();
     }
   }
 
   async function manageRepos() {
+    const popup = window.open("", "_blank");
     try {
       const data = await api.get("/api/github/manage-url");
-      if (data.url) {
-        window.open(data.url, "_blank");
-      }
+      if (data.url && popup) popup.location.href = data.url;
     } catch {
-      // fallback to install URL
+      if (popup) popup.close();
       installRepo();
     }
   }
@@ -114,7 +127,7 @@
       </div>
 
       {#if syncMsg}
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px">{syncMsg}</p>
+        <p style="font-size:13px;margin-bottom:8px;color:{syncError ? 'var(--error)' : 'var(--success)'}">{syncMsg}</p>
       {/if}
 
       {#if repos.length > 0}
