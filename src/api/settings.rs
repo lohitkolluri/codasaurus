@@ -49,9 +49,20 @@ async fn get_settings(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let entries = db::config::get_all_config(&state.pool).await?;
 
+    let sensitive_keys: &[&str] = &[
+        "openrouter_api_key",
+        "github_private_key",
+        "github_webhook_secret",
+    ];
+
     let mut map = serde_json::Map::new();
     for entry in entries {
-        map.insert(entry.key, json!(entry.value));
+        let value = if sensitive_keys.contains(&entry.key.as_str()) {
+            "••••••••".to_string()
+        } else {
+            entry.value
+        };
+        map.insert(entry.key, json!(value));
     }
 
     Ok(Json(serde_json::Value::Object(map)))
@@ -74,8 +85,15 @@ async fn get_github_settings(
     let app_id = db::config::get_config(&state.pool, "github_app_id")
         .await
         .ok()
-        .flatten();
+        .flatten()
+        .or_else(|| std::env::var("GITHUB_APP_ID").ok());
+
     let app_name = db::config::get_config(&state.pool, "github_app_name")
+        .await
+        .ok()
+        .flatten();
+
+    let slug = db::config::get_config(&state.pool, "github_app_slug")
         .await
         .ok()
         .flatten();
@@ -83,6 +101,7 @@ async fn get_github_settings(
     Ok(Json(json!({
         "app_id": app_id,
         "app_name": app_name,
+        "slug": slug,
         "configured": app_id.is_some(),
     })))
 }
@@ -91,7 +110,10 @@ async fn delete_github_settings(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     for key in GITHUB_KEYS {
-        db::config::set_config(&state.pool, key, "").await?;
+        sqlx::query("DELETE FROM app_config WHERE key = ?")
+            .bind(key)
+            .execute(&state.pool.0)
+            .await?;
     }
     Ok(Json(json!({ "status": "ok", "message": "GitHub App configuration removed" })))
 }

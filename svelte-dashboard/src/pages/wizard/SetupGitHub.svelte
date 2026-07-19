@@ -5,8 +5,6 @@
 
   let configured = $state(false);
   let checking = $state(true);
-  let manifestUrl = $state("");
-
   onMount(async () => {
     try {
       const status = await api.get("/api/setup/status");
@@ -19,15 +17,9 @@
   });
 
   async function openManifest() {
-    try {
-      const data = await api.get("/api/setup/github/manifest-url");
-      if (data.url) {
-        manifestUrl = data.url;
-        window.open(data.url, "_blank");
-      }
-    } catch (err) {
-      // ignore
-    }
+    // Opens a page that auto-submits the manifest to GitHub via POST form.
+    // This is the officially documented flow — GET with ?manifest= is unreliable.
+    window.open("/api/setup/github/manifest-page", "_blank");
   }
 
   function handleNext() {

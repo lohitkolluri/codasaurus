@@ -379,6 +379,7 @@ dependencies = [
  "sqlx",
  "subtle",
  "tempfile",
+ "thiserror",
  "tokio",
  "toml",
  "tower-http",

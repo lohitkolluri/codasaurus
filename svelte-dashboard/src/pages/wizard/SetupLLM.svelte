@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from "svelte";
   import { push } from "svelte-spa-router";
   import { api } from "../../stores/api.js";
 
@@ -17,6 +18,19 @@
     custom: { model: "", baseUrl: "" },
     disabled: { model: "", baseUrl: "" },
   };
+
+  onMount(async () => {
+    try {
+      const cfg = await api.get("/api/setup/llm");
+      if (cfg.provider) provider = cfg.provider;
+      if (cfg.api_key) apiKey = cfg.api_key;
+      if (cfg.model) model = cfg.model;
+      if (cfg.base_url) baseUrl = cfg.base_url;
+      if (cfg.provider) configured = true;
+    } catch {
+      // no saved config — use defaults
+    }
+  });
 
   function handleProviderChange(val) {
     provider = val;

@@ -45,9 +45,16 @@
     <div class="app-content">
       <LoadingSpinner loading={loading} />
 
-      <div style="margin-bottom:20px;display:flex;justify-content:space-between;align-items:center">
-        <p style="color:var(--text-muted);font-size:13px">{repos.length} repo(s) configured</p>
-        <button onclick={installRepo}>Install New Repo</button>
+      <div class="page-toolbar">
+        <div>
+          <p class="eyebrow">Workspace</p>
+          <h1 class="page-title">Repositories</h1>
+          <p class="page-description">Manage the codebases Codasaurus reviews for your team.</p>
+        </div>
+        <div class="toolbar-actions">
+          <span class="toolbar-count">{repos.length} configured</span>
+          <button class="primary" onclick={installRepo}>Install repository</button>
+        </div>
       </div>
 
       {#if error}

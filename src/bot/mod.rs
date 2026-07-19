@@ -10,6 +10,11 @@ mod auth;
 mod review;
 mod verify;
 
+use self::auth::get_installation_token;
+use self::review::{fetch_pull_request, review_pr};
+
+static USER_AGENT: &str = concat!("codasaurus/", env!("CARGO_PKG_VERSION"));
+
 #[derive(Clone)]
 pub struct BotConfig {
     pub app_id: String,
@@ -17,6 +22,28 @@ pub struct BotConfig {
     pub webhook_secret: String,
     pub host: String,
     pub port: u16,
+}
+
+#[derive(Clone)]
+struct WebhookContext {
+    cfg: BotConfig,
+    inst_id: Option<i64>,
+    repo_full_name: String,
+}
+
+impl WebhookContext {
+    fn from_payload(cfg: BotConfig, payload: &WebhookPayload) -> Self {
+        Self {
+            inst_id: payload.installation.as_ref().map(|i| i.id),
+            repo_full_name: payload
+                .repo
+                .as_ref()
+                .and_then(|r| r["full_name"].as_str())
+                .unwrap_or("unknown")
+                .to_string(),
+            cfg,
+        }
+    }
 }
 
 /// Build the webhook-only router for mounting under `/webhook` in the unified server.
@@ -64,38 +91,34 @@ async fn handle_webhook(
         .unwrap_or("");
     let payload: WebhookPayload =
         serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
+
     if event == "pull_request"
         && matches!(
             payload.action.as_str(),
             "opened" | "reopened" | "synchronize" | "ready_for_review"
         )
     {
-        if let Some(pr) = payload.pull_request {
-            let cfg = config.clone();
-            let inst_id = payload.installation.as_ref().map(|i| i.id);
-            let repo_name = payload
-                .repo
-                .as_ref()
-                .and_then(|r| r["full_name"].as_str())
-                .unwrap_or("unknown")
-                .to_string();
+        if payload.pull_request.is_some() {
+            let pr = payload.pull_request.as_ref().cloned();
+            let ctx = WebhookContext::from_payload(config.clone(), &payload);
             tokio::spawn(async move {
-                let token = auth::get_installation_token(&cfg, inst_id).await;
-                match token {
-                    Ok(t) => {
-                        let wrapped = WebhookPayload {
-                            action: String::new(),
-                            pull_request: Some(pr),
-                            repo: None,
-                            installation: None,
-                            comment: None,
-                            issue: None,
-                        };
-                        if let Err(e) = review::review_pr(&t, &repo_name, &wrapped).await {
-                            eprintln!("  Review error: {}", e);
-                        }
+                let token = match get_installation_token(&ctx.cfg, ctx.inst_id).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        eprintln!("  Auth error: {}", e);
+                        return;
                     }
-                    Err(e) => eprintln!("  Auth error: {}", e),
+                };
+                let wrapped = WebhookPayload {
+                    action: String::new(),
+                    pull_request: pr,
+                    repo: None,
+                    installation: None,
+                    comment: None,
+                    issue: None,
+                };
+                if let Err(e) = review_pr(&token, &ctx.repo_full_name, &wrapped).await {
+                    eprintln!("  Review error: {}", e);
                 }
             });
         }
@@ -112,7 +135,7 @@ async fn handle_webhook(
         let is_ignore_cmd = comment_body.contains("@codasaurus-bot ignore")
             || comment_body.contains("@codasaurus ignore");
 
-        if is_review_cmd {
+        if is_review_cmd || is_ignore_cmd {
             let is_pr = payload
                 .issue
                 .as_ref()
@@ -120,112 +143,82 @@ async fn handle_webhook(
                 .is_some();
 
             if is_pr {
-                let cfg = config.clone();
-                let inst_id = payload.installation.as_ref().map(|i| i.id);
                 let pr_number = payload
                     .issue
                     .as_ref()
                     .and_then(|i| i["number"].as_i64())
                     .unwrap_or(0);
-                let repo_full_name = payload
-                    .repo
-                    .as_ref()
-                    .and_then(|r| r["full_name"].as_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-
-                tokio::spawn(async move {
-                    let token = match auth::get_installation_token(&cfg, inst_id).await {
-                        Ok(t) => t,
-                        Err(e) => {
-                            eprintln!("  Auth error: {}", e);
-                            return;
-                        }
-                    };
-
-                    if pr_number <= 0 || repo_full_name == "unknown" {
-                        eprintln!(
-                            "  Ignoring review command without a valid repository and PR number"
-                        );
-                        return;
-                    }
-                    let repo_name = &repo_full_name;
-                    let pr_data =
-                        match review::fetch_pull_request(&token, repo_name, pr_number).await {
-                            Ok(data) => data,
-                            Err(e) => {
-                                eprintln!("  Failed to fetch PR #{}: {}", pr_number, e);
-                                return;
-                            }
-                        };
-
-                    let wrapped = WebhookPayload {
-                        action: String::new(),
-                        pull_request: Some(pr_data),
-                        repo: None,
-                        installation: None,
-                        comment: None,
-                        issue: None,
-                    };
-
-                    if let Err(e) = review::review_pr(&token, repo_name, &wrapped).await {
-                        eprintln!("  Review error: {}", e);
-                    }
-                });
-            }
-        } else if is_ignore_cmd {
-            let is_pr = payload
-                .issue
-                .as_ref()
-                .and_then(|i| i.get("pull_request"))
-                .is_some();
-            if is_pr {
-                let cfg = config.clone();
-                let inst_id = payload.installation.as_ref().map(|i| i.id);
-                let pr_number = payload
-                    .issue
-                    .as_ref()
-                    .and_then(|i| i["number"].as_i64())
-                    .unwrap_or(0);
-                let repo_full_name = payload
-                    .repo
-                    .as_ref()
-                    .and_then(|r| r["full_name"].as_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-
-                tokio::spawn(async move {
-                    let token = match auth::get_installation_token(&cfg, inst_id).await {
-                        Ok(t) => t,
-                        Err(e) => {
-                            eprintln!("  Auth error: {}", e);
-                            return;
-                        }
-                    };
-                    let client = reqwest::Client::builder()
-                        .timeout(std::time::Duration::from_secs(30))
-                        .connect_timeout(std::time::Duration::from_secs(10))
-                        .build()
-                        .unwrap_or_else(|_| reqwest::Client::new());
-                    let url = format!(
-                        "https://api.github.com/repos/{}/issues/{}/comments",
-                        repo_full_name, pr_number
-                    );
-                    let body = "👋 Codasaurus ignore is now available as a placeholder. \
-                        To dismiss specific findings, use `@codasaurus-bot dismiss <fingerprint>` \
-                        or reply to an inline comment with `@codasaurus-bot ignore`. \
-                        Full per-finding dismissal will be available in a future release.";
-                    let _ = client
-                        .post(&url)
-                        .header("Authorization", format!("Bearer {}", token))
-                        .header("Accept", "application/vnd.github+json")
-                        .header("User-Agent", concat!("codasaurus/", env!("CARGO_PKG_VERSION")))
-                        .json(&serde_json::json!({"body": body}))
-                        .send()
-                        .await;
-                });
+                let ctx = WebhookContext::from_payload(config.clone(), &payload);
+                if is_review_cmd {
+                    tokio::spawn(spawn_review(ctx, pr_number));
+                } else {
+                    tokio::spawn(spawn_ignore_comment(ctx, pr_number));
+                }
             }
         }
     }
     Ok(Json(serde_json::json!({"status": "ok"})))
+}
+
+async fn spawn_review(ctx: WebhookContext, pr_number: i64) {
+    let token = match get_installation_token(&ctx.cfg, ctx.inst_id).await {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("  Auth error: {}", e);
+            return;
+        }
+    };
+    if pr_number <= 0 || ctx.repo_full_name == "unknown" {
+        eprintln!("  Ignoring review command without a valid repository and PR number");
+        return;
+    }
+    let pr_data = match fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("  Failed to fetch PR #{}: {}", pr_number, e);
+            return;
+        }
+    };
+    let wrapped = WebhookPayload {
+        action: String::new(),
+        pull_request: Some(pr_data),
+        repo: None,
+        installation: None,
+        comment: None,
+        issue: None,
+    };
+    if let Err(e) = review_pr(&token, &ctx.repo_full_name, &wrapped).await {
+        eprintln!("  Review error: {}", e);
+    }
+}
+
+async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64) {
+    let token = match get_installation_token(&ctx.cfg, ctx.inst_id).await {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("  Auth error: {}", e);
+            return;
+        }
+    };
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let url = format!(
+        "https://api.github.com/repos/{}/issues/{}/comments",
+        ctx.repo_full_name, pr_number
+    );
+    let body = "👋 Codasaurus ignore is now available as a placeholder. \
+        To dismiss specific findings, use `@codasaurus-bot dismiss <fingerprint>` \
+        or reply to an inline comment with `@codasaurus-bot ignore`. \
+        Full per-finding dismissal will be available in a future release.";
+    let _ = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", USER_AGENT)
+        .json(&serde_json::json!({"body": body}))
+        .send()
+        .await;
 }

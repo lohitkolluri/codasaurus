@@ -9,6 +9,10 @@
 
   import { params } from "svelte-spa-router";
 
+  function formatLabel(key) {
+    return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
   let repo = $state(null);
   let loading = $state(true);
   let saving = $state(false);
@@ -70,7 +74,7 @@
 
           {#each Object.entries(detectors) as [key, val]}
             <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
-              <span style="font-size:14px">{key}</span>
+              <span style="font-size:14px">{formatLabel(key)}</span>
               <label class="toggle">
                 <div class="toggle-track" class:on={val ?? false} role="checkbox" aria-checked={val ?? false}
                   tabindex="0"

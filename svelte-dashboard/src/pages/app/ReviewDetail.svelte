@@ -1,6 +1,5 @@
 <script>
   import { onMount } from "svelte";
-  import { push } from "svelte-spa-router";
   import { api } from "../../stores/api.js";
   import Sidebar from "../../lib/Sidebar.svelte";
   import Header from "../../lib/Header.svelte";
@@ -32,7 +31,7 @@
     }
   });
 
-  let fileFindings = $derived(() => {
+  let fileFindings = $derived.by(() => {
     if (!selectedFile || !allFindings.length) return [];
     return allFindings.filter((f) => f.file_path === selectedFile || f.file === selectedFile);
   });
@@ -41,7 +40,7 @@
     return findings.filter((f) => f.severity === severity).length;
   }
 
-  let selectedFindings = $derived(fileFindings());
+  let selectedFindings = $derived(fileFindings);
 
   function selectFile(filePath) {
     selectedFile = filePath;

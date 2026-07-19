@@ -23,7 +23,7 @@ pub fn router() -> Router<AppState> {
 /// GET /api/v1/stats
 async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
     // Core stats are computed by the DB layer
-    let core: serde_json::Value = db::reviews::get_stats(&state.pool).await?;
+    let mut core: serde_json::Value = db::reviews::get_stats(&state.pool).await?;
 
     // Recent activity: latest 10 reviews with repo full_name
     #[derive(sqlx::FromRow)]
@@ -60,8 +60,7 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
         })
         .collect();
 
-    let mut result = core.as_object().cloned().unwrap_or_default();
-    result.insert("recent_activity".into(), json!(activity));
-
-    Ok(Json(serde_json::Value::Object(result)))
+    if let Some(obj) = core.as_object_mut() {        obj.insert("recent_activity".into(), json!(activity));
+    }
+    Ok(Json(core))
 }

@@ -7,7 +7,7 @@
     }
   }
 
-  const visiblePages = $derived(() => {
+  const visiblePages = $derived.by(() => {
     const pages = [];
     const start = Math.max(1, page - 2);
     const end = Math.min(totalPages, page + 2);
@@ -22,7 +22,7 @@
   <div class="pagination">
     <button disabled={page <= 1} onclick={() => goTo(page - 1)}>Prev</button>
 
-    {#each visiblePages() as p}
+    {#each visiblePages as p}
       <button class="page-num" class:active={p === page} onclick={() => goTo(p)}>
         {p}
       </button>

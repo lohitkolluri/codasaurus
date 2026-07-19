@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "lucide-svelte": "^1.0.1",
     "svelte-spa-router": "^4.0.1"
   },
   "devDependencies": {

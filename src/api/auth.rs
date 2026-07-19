@@ -58,11 +58,9 @@ async fn login(
 ) -> Result<Json<LoginResponse>, ApiError> {
     let user = db::users::verify_password(&state.pool, &body.email, &body.password)
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
+        .map_err(|e| ApiError::unauthorized(format!("Authentication failed: {}", e)))?
         .ok_or_else(|| ApiError::unauthorized("Invalid email or password"))?;
 
-    // Phase 1: return the user directly. The SPA stores it in memory.
-    // No session token needed since the dashboard is behind your own network.
     Ok(Json(LoginResponse {
         user: UserInfo {
             email: user.email,
@@ -76,7 +74,6 @@ async fn login(
 /// Returns whether an admin user has been configured and who they are.
 /// Phase 1: checks if any admin user exists in the DB.
 async fn me(State(state): State<AppState>) -> Json<MeResponse> {
-    // We need at least one admin user to be "authenticated"
     let any_user: bool = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'")
         .fetch_one(&state.pool.0)
         .await
@@ -84,7 +81,6 @@ async fn me(State(state): State<AppState>) -> Json<MeResponse> {
         .unwrap_or(false);
 
     if any_user {
-        // Fetch the first admin's email (the only one in Phase 1)
         let email: String = sqlx::query_scalar(
             "SELECT email FROM users WHERE role = 'admin' ORDER BY id LIMIT 1",
         )

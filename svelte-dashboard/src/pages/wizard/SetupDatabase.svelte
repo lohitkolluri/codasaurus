@@ -44,14 +44,14 @@
 
   <div class="form-group">
     <label>Database Provider</label>
-    <div class="radio-card" class:selected={provider === "sqlite"} onclick={() => (provider = "sqlite")}>
+    <div class="radio-card" class:selected={provider === "sqlite"}>
       <label>
         <input type="radio" name="provider" value="sqlite" bind:group={provider} />
         SQLite
       </label>
       <div class="radio-hint">Embedded database, no setup required. Database path: codasaurus.db</div>
     </div>
-    <div class="radio-card" class:selected={provider === "postgres"} onclick={() => (provider = "postgres")}>
+    <div class="radio-card" class:selected={provider === "postgres"}>
       <label>
         <input type="radio" name="provider" value="postgres" bind:group={provider} />
         PostgreSQL

@@ -1,7 +1,6 @@
 use axum::extract::{Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -75,7 +74,8 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/status", get(setup_status))
         .route("/database", post(setup_database))
-        .route("/llm", post(setup_llm))
+        .route("/llm", get(get_llm_config).post(setup_llm))
+        .route("/github/manifest-page", get(github_manifest_page))
         .route("/github/manifest-url", get(github_manifest_url))
         .route("/github", post(setup_github))
         .route("/github/callback", post(github_callback))
@@ -102,8 +102,19 @@ async fn setup_status(
     use db::config::get_config;
 
     let database = get_config(&state.pool, "database_provider").await.ok().flatten().is_some();
-    let llm = get_config(&state.pool, "llm_provider").await.ok().flatten().is_some();
-    let github = get_config(&state.pool, "github_app_id").await.ok().flatten().is_some();
+
+    // Check both DB config and env vars for GitHub. If GITHUB_APP_ID is set
+    // in the environment, the bot is already configured at startup — no need
+    // to create a new GitHub App through the manifest flow.
+    let github = get_config(&state.pool, "github_app_id")
+        .await
+        .ok()
+        .flatten()
+        .is_some()
+        || std::env::var("GITHUB_APP_ID").is_ok();
+
+    let llm = get_config(&state.pool, "llm_provider").await.ok().flatten().is_some()
+        || std::env::var("OPENROUTER_API_KEY").is_ok();
 
     let admin: bool = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM users WHERE role = 'admin'",
@@ -127,23 +138,24 @@ async fn setup_database(
 
     match provider.as_str() {
         "sqlite" => {
-            // Validate by trying to connect
-            let test_pool = sqlx::SqlitePool::connect(&body.url)
-                .await
-                .map_err(|e| ApiError::bad_request(format!("Cannot connect: {}", e)))?;
-
-            // Run a test query
+            // SQLite is already connected via DATABASE_URL at startup.
+            // Validate by running a query on the existing pool instead of
+            // creating a new connection (which would use a relative path
+            // from the CWD inside the container).
             sqlx::query_scalar::<_, i64>("SELECT 1")
-                .fetch_one(&test_pool)
+                .fetch_one(&state.pool.0)
                 .await
                 .map_err(|e| ApiError::bad_request(format!("Test query failed: {}", e)))?;
 
-            test_pool.close().await;
+            // Use the DATABASE_URL from env for the stored config so it
+            // matches what the server actually uses at startup, falling
+            // back to the body URL as a reasonable default.
+            let db_url = std::env::var("DATABASE_URL").unwrap_or(body.url);
 
             // Store config
             db::config::set_config(&state.pool, "database_provider", "sqlite")
                 .await?;
-            db::config::set_config(&state.pool, "database_url", &body.url)
+            db::config::set_config(&state.pool, "database_url", &db_url)
                 .await?;
 
             Ok(Json(SetupResponse {
@@ -187,6 +199,41 @@ async fn setup_database(
             other
         ))),
     }
+}
+
+/// GET /api/setup/llm — return current LLM config from DB + env vars.
+async fn get_llm_config(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    use db::config::get_config;
+
+    let provider = get_config(&state.pool, "llm_provider")
+        .await.ok().flatten()
+        .or_else(|| {
+            if std::env::var("OPENROUTER_API_KEY").is_ok() { Some("openrouter".into()) }
+            else if std::env::var("CODASAURUS_BASE_URL").is_ok() { Some("custom".into()) }
+            else { None }
+        });
+
+    let api_key = get_config(&state.pool, "openrouter_api_key")
+        .await.ok().flatten()
+        .or_else(|| std::env::var("OPENROUTER_API_KEY").ok())
+        .map(|_| "••••••••".to_string()); // never expose full key
+
+    let model = get_config(&state.pool, "llm_model")
+        .await.ok().flatten()
+        .or_else(|| std::env::var("CODASAURUS_MODEL").ok());
+
+    let base_url = get_config(&state.pool, "llm_base_url")
+        .await.ok().flatten()
+        .or_else(|| std::env::var("CODASAURUS_BASE_URL").ok());
+
+    Ok(Json(json!({
+        "provider": provider,
+        "api_key": api_key,
+        "model": model,
+        "base_url": base_url,
+    })))
 }
 
 /// POST /api/v1/setup/llm?test=true
@@ -281,11 +328,15 @@ async fn test_llm_connection(
     }
 }
 
-/// GET /api/setup/github/manifest-url
-async fn github_manifest_url(
+/// GET /api/setup/github/manifest-page — auto-submitting HTML form that
+/// POSTs the manifest to GitHub. This is the officially documented flow:
+/// https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest
+async fn github_manifest_page(
     State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    // Use public URL from config, falling back to env var, then placeholder
+) -> Result<impl axum::response::IntoResponse, ApiError> {
+    use axum::http::{header, StatusCode};
+    use axum::response::Html;
+
     let public_url = db::config::get_config(&state.pool, "public_url")
         .await
         .ok()
@@ -293,16 +344,12 @@ async fn github_manifest_url(
         .or_else(|| std::env::var("PUBLIC_URL").ok())
         .unwrap_or_else(|| "http://localhost:3000".to_string());
 
-    // Auto-generate a webhook secret — the user doesn't need to set this manually
-    let webhook_secret = uuid::Uuid::new_v4().to_string().replace('-', "");
-
     let manifest = json!({
         "name": "codasaurus",
         "url": &public_url,
         "hook_attributes": {
-            "url": format!("{}/webhook", public_url),
-            "secret": webhook_secret,
-            "active": true
+            "url": "https://example.com/codasaurus-webhook",
+            "active": false
         },
         "redirect_url": format!("{}/setup/github/callback", public_url),
         "callback_urls": [
@@ -312,7 +359,6 @@ async fn github_manifest_url(
         "setup_on_update": true,
         "public": false,
         "request_oauth_on_install": true,
-        "expire_user_tokens": true,
         "default_permissions": {
             "pull_requests": "write",
             "checks": "write",
@@ -326,20 +372,99 @@ async fn github_manifest_url(
             "issue_comment",
             "push",
             "check_run",
-            "check_suite",
-            "installation",
-            "installation_repositories"
+            "check_suite"
         ]
     });
 
-    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
-        serde_json::to_string(&manifest)
-            .map_err(|e| ApiError::internal(format!("Failed to serialize manifest: {}", e)))?,
+    let manifest_json = serde_json::to_string(&manifest)
+        .map_err(|e| ApiError::internal(format!("Failed to serialize manifest: {}", e)))?;
+
+    // HTML page that auto-submits the manifest form to GitHub.
+    // This matches GitHub's documented POST form flow exactly.
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Redirecting to GitHub…</title>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           display: flex; justify-content: center; align-items: center;
+           height: 100vh; margin: 0; background: #f6f8fa; color: #1f2328; }}
+    .card {{ text-align: center; padding: 40px; background: #fff;
+             border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }}
+    .spinner {{ border: 3px solid #d0d7de; border-top-color: #0969da;
+                border-radius: 50%; width: 24px; height: 24px;
+                animation: spin .8s linear infinite; margin: 16px auto; }}
+    @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <p style="font-size:14px;margin:0 0 8px">Redirecting to GitHub to create your app…</p>
+    <div class="spinner"></div>
+    <form id="f" method="post" action="https://github.com/settings/apps/new" target="_blank">
+      <input type="hidden" name="manifest" value='{}'>
+    </form>
+  </div>
+  <script>document.getElementById("f").submit();</script>
+</body>
+</html>"#,
+        // Escape single quotes for the HTML attribute
+        manifest_json.replace('\'', "&#39;")
     );
 
-    let url = format!("https://github.com/settings/apps/new?manifest={}", encoded);
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        Html(html),
+    ))
+}
 
-    Ok(Json(json!({ "url": url })))
+/// GET /api/setup/github/manifest — return the manifest JSON for programmatic use.
+async fn github_manifest_url(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let public_url = db::config::get_config(&state.pool, "public_url")
+        .await
+        .ok()
+        .flatten()
+        .or_else(|| std::env::var("PUBLIC_URL").ok())
+        .unwrap_or_else(|| "http://localhost:3000".to_string());
+
+    let manifest = json!({
+        "name": "codasaurus",
+        "url": &public_url,
+        "hook_attributes": {
+            "url": "https://example.com/codasaurus-webhook",
+            "active": false
+        },
+        "redirect_url": format!("{}/setup/github/callback", public_url),
+        "callback_urls": [
+            format!("{}/api/auth/github/callback", public_url)
+        ],
+        "setup_url": format!("{}/setup/complete", public_url),
+        "setup_on_update": true,
+        "public": false,
+        "request_oauth_on_install": true,
+        "default_permissions": {
+            "pull_requests": "write",
+            "checks": "write",
+            "contents": "read",
+            "issues": "read",
+            "metadata": "read",
+            "emails": "read"
+        },
+        "default_events": [
+            "pull_request",
+            "issue_comment",
+            "push",
+            "check_run",
+            "check_suite"
+        ]
+    });
+
+    Ok(Json(manifest))
 }
 
 /// POST /api/v1/setup/github
@@ -458,6 +583,8 @@ async fn github_callback(
     db::config::set_config(&state.pool, "github_private_key", &pem).await?;
     db::config::set_config(&state.pool, "github_webhook_secret", &webhook_secret)
         .await?;
+    db::config::set_config(&state.pool, "github_app_name", &app_name).await?;
+    db::config::set_config(&state.pool, "github_app_slug", &slug).await?;
 
     let install_url = format!("https://github.com/apps/{}/installations/new", slug);
 

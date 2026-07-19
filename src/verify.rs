@@ -45,7 +45,7 @@ pub fn run_verify(opts: VerifyOptions) -> Result<VerifyReport> {
     }
 
     // Step 3: Build the code graph from the changed files
-    let graph = build_verify_graph(&parsed_files);
+    let graph = build_verify_graph(&parsed_files)?;
 
     // Step 4: Extract changed symbols from the graph
     let changed_symbols = extract_changed_symbols(&graph, &changed_files);
@@ -173,16 +173,9 @@ fn parse_changed_files(files: &[String], config: &Config) -> Vec<parser::ParsedF
 /// Reuses the same global graph that the detectors module populates.
 fn build_verify_graph(
     parsed_files: &[parser::ParsedFile],
-) -> std::sync::MutexGuard<'static, crate::graph::CodeGraph> {
+) -> anyhow::Result<std::sync::MutexGuard<'static, crate::graph::CodeGraph>> {
     code_graph::populate(parsed_files);
-    // Share the same global graph the detectors module built
-    match code_graph::lock_graph() {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("Warning: verify graph lock failed: {}", e);
-            panic!("Code graph unavailable: {}", e);
-        }
-    }
+    code_graph::lock_graph().map_err(|e| anyhow::anyhow!("Code graph unavailable: {}", e))
 }
 
 /// Extract changed symbols from the graph for the given files.

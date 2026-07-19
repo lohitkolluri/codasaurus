@@ -17,7 +17,7 @@
     try {
       const data = await api.get("/api/stats");
       stats = data;
-      recentReviews = data.recent_reviews ?? [];
+      recentReviews = data.recent_activity ?? [];
     } catch (err) {
       error = err.message || "Failed to load stats";
     } finally {
@@ -52,9 +52,9 @@
         {:else}
           {#each recentReviews as review}
             <div class="review-card" style="margin-bottom:8px">
-              <h3>{review.pr_title ?? review.pr_number ?? "PR #" + review.id}</h3>
+              <h3>{review.pr_title ?? `PR #${review.pr_number ?? review.id}`}</h3>
               <div class="review-meta">
-                <span>{review.repo_name ?? ""}</span>
+                <span>{review.repo ?? ""}</span>
                 <span class="status-badge {review.status}">{review.status}</span>
                 <span>{review.created_at ? new Date(review.created_at).toLocaleString() : ""}</span>
               </div>

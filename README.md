@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/logo.png" alt="Codasaurus logo" width="240">
+  <img src="assets/logo.svg" alt="Codasaurus logo" width="240">
 </p>
 
 <h1 align="center">Codasaurus</h1>
