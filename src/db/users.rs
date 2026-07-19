@@ -63,10 +63,3 @@ pub async fn verify_password(
         Err(_) => Ok(None),
     }
 }
-
-pub async fn get_user_by_email(pool: &DbPool, email: &str) -> Result<Option<User>, sqlx::Error> {
-    sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = ?")
-        .bind(email)
-        .fetch_optional(&pool.0)
-        .await
-}

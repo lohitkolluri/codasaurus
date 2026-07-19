@@ -76,7 +76,6 @@ pub async fn create_review(pool: &DbPool, review: &ReviewCreate) -> Result<Revie
     .await
 }
 
-#[allow(dead_code)]
 pub async fn update_review(
     pool: &DbPool,
     id: i64,

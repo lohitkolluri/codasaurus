@@ -30,3 +30,7 @@ codasaurus.db
 # SPA build artifacts
 svelte-dashboard/node_modules/
 svelte-dashboard/dist/
+
+# Generated tool directories
+.codegraph/
+.playwright-mcp/

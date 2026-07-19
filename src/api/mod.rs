@@ -7,7 +7,6 @@ pub mod audit;
 pub mod auth;
 pub mod errors;
 pub mod github;
-pub mod middleware;
 pub mod repos;
 pub mod reviews;
 pub mod settings;

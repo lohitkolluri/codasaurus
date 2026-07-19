@@ -27,11 +27,3 @@ pub async fn get_all_config(pool: &DbPool) -> Result<Vec<AppConfig>, sqlx::Error
         .fetch_all(&pool.0)
         .await
 }
-
-pub async fn delete_config(pool: &DbPool, key: &str) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM app_config WHERE key = ?")
-        .bind(key)
-        .execute(&pool.0)
-        .await?;
-    Ok(())
-}

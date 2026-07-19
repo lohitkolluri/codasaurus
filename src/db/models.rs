@@ -104,15 +104,6 @@ pub struct FindingCreate {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
-pub struct Dismissal {
-    pub id: i64,
-    pub fingerprint: String,
-    pub dismissed_by: Option<String>,
-    pub reason: Option<String>,
-    pub created_at: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
 pub struct AuditEntry {
     pub id: i64,
     pub event_type: String,
@@ -121,15 +112,6 @@ pub struct AuditEntry {
     pub target_id: Option<i64>,
     pub metadata_json: Option<String>,
     pub created_at: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct AuditEntryCreate {
-    pub event_type: String,
-    pub actor: Option<String>,
-    pub target_type: Option<String>,
-    pub target_id: Option<i64>,
-    pub metadata_json: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
@@ -146,13 +128,6 @@ pub struct User {
 #[derive(Serialize, Debug, Clone)]
 pub struct UserView {
     pub email: String,
-    pub role: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct UserCreate {
-    pub email: String,
-    pub password_hash: String,
     pub role: String,
 }
 

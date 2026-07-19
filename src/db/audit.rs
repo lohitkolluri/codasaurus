@@ -30,21 +30,3 @@ pub async fn list_audit_entries(
         }
     }
 }
-
-pub async fn create_audit_entry(
-    pool: &DbPool,
-    entry: &AuditEntryCreate,
-) -> Result<AuditEntry, sqlx::Error> {
-    sqlx::query_as::<_, AuditEntry>(
-        "INSERT INTO audit_log (event_type, actor, target_type, target_id, metadata_json)
-         VALUES (?, ?, ?, ?, ?)
-         RETURNING *",
-    )
-    .bind(&entry.event_type)
-    .bind(&entry.actor)
-    .bind(&entry.target_type)
-    .bind(entry.target_id)
-    .bind(&entry.metadata_json)
-    .fetch_one(&pool.0)
-    .await
-}

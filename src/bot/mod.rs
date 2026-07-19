@@ -137,9 +137,6 @@ struct WebhookPayload {
     /// Sent in `installation_repositories.added` event
     #[serde(rename = "repositories_added")]
     repositories_added: Option<Vec<serde_json::Value>>,
-    #[serde(rename = "repositories_removed")]
-    #[allow(dead_code)]
-    repositories_removed: Option<Vec<serde_json::Value>>,
 }
 
 pub(crate) async fn handle_webhook(
@@ -235,7 +232,6 @@ pub(crate) async fn handle_webhook(
                     issue: None,
                     repositories: None,
                     repositories_added: None,
-                    repositories_removed: None,
                 };
                 if let Err(e) = review_pr(&token, &repo_full_name, &wrapped).await {
                     eprintln!("  Review error: {}", e);
@@ -324,7 +320,6 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64) {
         issue: None,
         repositories: None,
         repositories_added: None,
-        repositories_removed: None,
     };
     if let Err(e) = review_pr(&token, &ctx.repo_full_name, &wrapped).await {
         eprintln!("  Review error: {}", e);

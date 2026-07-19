@@ -110,11 +110,6 @@ impl CodeGraph {
         callers
     }
 
-    /// Get all unique file paths in the graph.
-    pub fn all_files(&self) -> Vec<&str> {
-        self.files.keys().map(|s| s.as_str()).collect()
-    }
-
     /// Get unique files affected by changes to the given symbol set.
     pub fn affected_files(&self, symbols: &[String]) -> Vec<String> {
         let mut files: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();

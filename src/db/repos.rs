@@ -14,13 +14,6 @@ pub async fn get_repo(pool: &DbPool, id: i64) -> Result<Option<Repo>, sqlx::Erro
         .await
 }
 
-pub async fn get_repo_by_github_id(pool: &DbPool, github_id: i64) -> Result<Option<Repo>, sqlx::Error> {
-    sqlx::query_as::<_, Repo>("SELECT * FROM repos WHERE github_id = ?")
-        .bind(github_id)
-        .fetch_optional(&pool.0)
-        .await
-}
-
 pub async fn get_repo_by_full_name(pool: &DbPool, full_name: &str) -> Result<Option<Repo>, sqlx::Error> {
     sqlx::query_as::<_, Repo>("SELECT * FROM repos WHERE full_name = ?")
         .bind(full_name)
