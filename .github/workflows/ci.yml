@@ -61,11 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: actionlint
-      - name: Lint workflows
-        run: actionlint
+      - uses: rhysd/actionlint-action@v1
 
   build:
     name: Build
