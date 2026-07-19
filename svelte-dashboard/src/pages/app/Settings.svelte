@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { api } from "../../stores/api.js";
+  import { formatLabel } from "../../lib/utils.js";
   import Sidebar from "../../lib/Sidebar.svelte";
   import Header from "../../lib/Header.svelte";
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
@@ -48,10 +49,6 @@
     custom: { model: "", baseUrl: "" },
     disabled: { model: "", baseUrl: "" },
   };
-
-  function formatLabel(key) {
-    return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  }
 
   async function loadModels() {
     try {

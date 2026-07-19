@@ -5,7 +5,9 @@ use axum::{
     Json, Router,
 };
 use serde::Deserialize;
-use std::time::Duration;
+use std::collections::HashSet;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tokio::time::timeout;
 
 mod auth;
@@ -16,6 +18,34 @@ use self::auth::get_installation_token;
 use self::review::{fetch_pull_request, review_pr};
 
 static USER_AGENT: &str = concat!("codasaurus/", env!("CARGO_PKG_VERSION"));
+
+/// Tracks recently processed webhook delivery IDs to prevent replay attacks.
+/// Cleared every hour to bound memory use.
+struct DeliveryTracker {
+    seen: HashSet<String>,
+    last_cleanup: Instant,
+}
+
+impl DeliveryTracker {
+    fn new() -> Self {
+        Self {
+            seen: HashSet::new(),
+            last_cleanup: Instant::now(),
+        }
+    }
+
+    /// Returns `true` if this delivery ID has already been processed.
+    fn is_duplicate(&mut self, id: &str) -> bool {
+        if self.last_cleanup.elapsed() > Duration::from_secs(3600) {
+            self.seen.clear();
+            self.last_cleanup = Instant::now();
+        }
+        !self.seen.insert(id.to_string())
+    }
+}
+
+static DELIVERY_TRACKER: std::sync::LazyLock<Mutex<DeliveryTracker>> =
+    std::sync::LazyLock::new(|| Mutex::new(DeliveryTracker::new()));
 
 #[derive(Clone)]
 pub struct BotConfig {
@@ -80,6 +110,19 @@ async fn handle_webhook(
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    // Replay attack protection: check X-GitHub-Delivery
+    let delivery_id = headers
+        .get("x-github-delivery")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if !delivery_id.is_empty() {
+        if let Ok(mut tracker) = DELIVERY_TRACKER.lock() {
+            if tracker.is_duplicate(delivery_id) {
+                return Ok(Json(serde_json::json!({"status": "ok", "duplicate": true})));
+            }
+        }
+    }
+
     let sig = headers
         .get("x-hub-signature-256")
         .and_then(|v| v.to_str().ok())

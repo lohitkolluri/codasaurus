@@ -8,10 +8,7 @@
   import ErrorState from "../../lib/ErrorState.svelte";
 
   import { params } from "svelte-spa-router";
-
-  function formatLabel(key) {
-    return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  }
+  import { formatLabel } from "../../lib/utils.js";
 
   let repo = $state(null);
   let loading = $state(true);
