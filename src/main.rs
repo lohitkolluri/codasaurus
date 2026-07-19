@@ -295,7 +295,7 @@ fn resolve_private_key() -> anyhow::Result<String> {
         anyhow::anyhow!("GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_B64 required")
     })?;
     use base64::Engine;
-    let decoded = base64::engine::general_purpose::URL_SAFE
+    let decoded = base64::engine::general_purpose::STANDARD
         .decode(b64.as_bytes())
         .map_err(|e| anyhow::anyhow!("Invalid base64 key: {}", e))?;
     String::from_utf8(decoded).map_err(|e| anyhow::anyhow!("Invalid UTF-8 in decoded key: {}", e))

@@ -20,7 +20,11 @@ use crate::db;
 
 const SYNC_KEYS: &[(&str, &str)] = &[
     ("GITHUB_APP_ID", "github_app_id"),
-    ("GITHUB_APP_PRIVATE_KEY_B64", "github_private_key"),
+    // Private key is NOT synced here — the env var GITHUB_APP_PRIVATE_KEY_B64
+    // uses base64 STANDARD encoding, while the DB stores raw PEM (from the
+    // manifest flow or from decode-then-store). Syncing the base64 string
+    // directly would corrupt the PEM field. The env var is read at runtime
+    // as a fallback in resolve_bot_config().
     ("GITHUB_WEBHOOK_SECRET", "github_webhook_secret"),
     ("OPENROUTER_API_KEY", "openrouter_api_key"),
 ];
