@@ -1,0 +1,44 @@
+- generic [ref=f1e16]:
+  - complementary [ref=f1e17]:
+    - generic [ref=f1e18]: Codasaurus
+    - navigation [ref=f1e36]:
+      - list [ref=f1e37]:
+        - listitem [ref=f1e38]:
+          - link "Dashboard" [ref=f1e39] [cursor=pointer]:
+            - /url: "#/app/dashboard"
+        - listitem [ref=f1e42]:
+          - link "Repositories" [ref=f1e43] [cursor=pointer]:
+            - /url: "#/app/repos"
+        - listitem [ref=f1e46]:
+          - link "Reviews" [ref=f1e47] [cursor=pointer]:
+            - /url: "#/app/reviews"
+        - listitem [ref=f1e50]:
+          - link "Settings" [ref=f1e51] [cursor=pointer]:
+            - /url: "#/app/settings"
+        - listitem [ref=f1e54]:
+          - link "Audit log" [ref=f1e55] [cursor=pointer]:
+            - /url: "#/app/audit"
+    - generic [ref=f1e58]: admin@admin.com
+  - generic [ref=f1e60]:
+    - banner [ref=f1e61]:
+      - generic [ref=f1e62]: Dashboard
+      - generic [ref=f1e64]:
+        - generic [ref=f1e65]: admin@admin.com
+        - button "Toggle theme" [ref=f1e66] [cursor=pointer]
+        - button "Log out" [ref=f1e68] [cursor=pointer]
+    - generic [ref=f1e70]:
+      - generic [ref=f1e71]:
+        - generic [ref=f1e72]:
+          - generic [ref=f1e73]: "0"
+          - generic [ref=f1e74]: Repos Monitored
+        - generic [ref=f1e75]:
+          - generic [ref=f1e76]: "0"
+          - generic [ref=f1e77]: Reviews Today
+        - generic [ref=f1e78]:
+          - generic [ref=f1e79]: 0%
+          - generic [ref=f1e80]: Pass Rate
+        - generic [ref=f1e81]:
+          - generic [ref=f1e82]: "0"
+          - generic [ref=f1e83]: Active Findings
+      - heading "Recent Activity" [level=2] [ref=f1e84]
+      - generic [ref=f1e85]: No recent reviews

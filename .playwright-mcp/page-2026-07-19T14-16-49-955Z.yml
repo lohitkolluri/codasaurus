@@ -1,0 +1,12 @@
+- generic [ref=f1e5]:
+  - heading "Codasaurus" [level=1] [ref=f1e6]
+  - paragraph [ref=f1e7]: AI Code Review Platform
+  - generic [ref=f1e8]:
+    - generic [ref=f1e9]:
+      - generic [ref=f1e10]: Email
+      - textbox "Email" [ref=f1e11]:
+        - /placeholder: you@example.com
+    - generic [ref=f1e12]:
+      - generic [ref=f1e13]: Password
+      - textbox "Password" [ref=f1e14]
+    - button "Sign In" [ref=f1e15] [cursor=pointer]

@@ -42,6 +42,15 @@
     push(`/app/repos/${id}`);
   }
 
+  async function toggleRepo(id, current) {
+    try {
+      await api.put(`/api/repos/${id}`, { config_json: "", active: !current });
+      repos = await api.get("/api/repos");
+    } catch (err) {
+      syncMsg = "Toggle failed: " + (err.message || "unknown error");
+    }
+  }
+
   async function installRepo() {
     try {
       const data = await api.get("/api/github/install-url");
@@ -96,16 +105,14 @@
           </thead>
           <tbody>
             {#each repos as repo}
-              <tr style="cursor:pointer" onclick={() => openRepo(repo.id)} role="button" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter') openRepo(repo.id); }}>
-                <td style="font-weight:600">{repo.full_name ?? repo.name ?? repo.id}</td>
+              <tr>
+                <td style="font-weight:600;cursor:pointer" onclick={() => openRepo(repo.id)} role="button" tabindex="0">{repo.full_name ?? repo.name ?? repo.id}</td>
                 <td>{repo.default_branch ?? "main"}</td>
                 <td>{repo.updated_at ? new Date(repo.updated_at).toLocaleDateString() : "—"}</td>
                 <td>
-                  {#if repo.active}
-                    <span class="status-badge passing">Active</span>
-                  {:else}
-                    <span class="status-badge pending">Inactive</span>
-                  {/if}
+                  <button class="toggle-repo" class:active={repo.active} onclick={() => toggleRepo(repo.id, repo.active)}>
+                    {repo.active ? "Active" : "Inactive"}
+                  </button>
                 </td>
               </tr>
             {/each}
@@ -115,3 +122,20 @@
     </div>
   </div>
 </div>
+
+<style>
+  .toggle-repo {
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .toggle-repo.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+</style>

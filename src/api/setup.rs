@@ -397,10 +397,10 @@ async fn github_manifest_page(
         "callback_urls": [
             format!("{}/api/auth/github/callback", public_url)
         ],
-        "setup_url": format!("{}/setup/complete", public_url),
+        "setup_url": format!("{}/#/setup/complete", public_url),
         "setup_on_update": true,
         "public": false,
-        "request_oauth_on_install": true,
+        "request_oauth_on_install": false,
         "default_permissions": {
             "pull_requests": "write",
             "checks": "write",
@@ -484,10 +484,10 @@ async fn github_manifest_url(
         "callback_urls": [
             format!("{}/api/auth/github/callback", public_url)
         ],
-        "setup_url": format!("{}/setup/complete", public_url),
+        "setup_url": format!("{}/#/setup/complete", public_url),
         "setup_on_update": true,
         "public": false,
-        "request_oauth_on_install": true,
+        "request_oauth_on_install": false,
         "default_permissions": {
             "pull_requests": "write",
             "checks": "write",

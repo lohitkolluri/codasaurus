@@ -21,7 +21,12 @@
 
   onMount(async () => {
     try {
-      const id = $params.id;
+      const id = $params?.id;
+      if (!id) {
+        error = "No repo ID specified";
+        loading = false;
+        return;
+      }
       const data = await api.get(`/api/repos/${id}`);
       repo = data;
       detectors = data.detectors ?? {};

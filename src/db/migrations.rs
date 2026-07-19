@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS repos (
     default_branch TEXT,
     installation_id BIGINT NOT NULL,
     private INTEGER NOT NULL DEFAULT 0,
-    active INTEGER NOT NULL DEFAULT 1,
+    active INTEGER NOT NULL DEFAULT 0,
     config_json TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
