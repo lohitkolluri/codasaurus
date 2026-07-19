@@ -21,10 +21,12 @@
       const data = await api.post("/api/setup/github/callback", { code });
       status = "success";
       installUrl = data.install_url;
-      // Notify the original tab that setup is complete
+      // Try to update the opener tab first
       if (window.opener && !window.opener.closed) {
         window.opener.location.href = "/setup/github";
       }
+      // Always redirect this tab to the setup page so the user sees it
+      window.location.href = "/setup/github";
     } catch (err) {
       status = "error";
       errorMsg = err.message || "Failed to complete GitHub App setup.";
