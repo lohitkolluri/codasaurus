@@ -371,24 +371,12 @@ async fn resolve_public_url(
     "http://localhost:3000".to_string()
 }
 
-/// GET /api/setup/github/manifest-page — auto-submitting HTML form that
-/// POSTs the manifest to GitHub. This is the officially documented flow:
-/// https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest
-async fn github_manifest_page(
-    State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
-) -> Result<impl axum::response::IntoResponse, ApiError> {
-    use axum::http::{header, StatusCode};
-    use axum::response::Html;
-
-    let public_url = resolve_public_url(&state, &headers).await;
-
-    // Unique suffix so the GitHub App name doesn't collide
+/// Build the GitHub App manifest JSON shared by the HTML page and JSON endpoints.
+fn build_manifest(public_url: &str) -> serde_json::Value {
     let suffix: String = uuid::Uuid::new_v4().to_string().chars().take(4).collect();
-
-    let manifest = json!({
+    json!({
         "name": format!("codasaurus-{}", suffix),
-        "url": &public_url,
+        "url": public_url,
         "hook_attributes": {
             "url": format!("{}/webhook/", public_url),
             "active": true
@@ -416,7 +404,21 @@ async fn github_manifest_page(
             "check_run",
             "check_suite"
         ]
-    });
+    })
+}
+
+/// GET /api/setup/github/manifest-page — auto-submitting HTML form that
+/// POSTs the manifest to GitHub. This is the officially documented flow:
+/// https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest
+async fn github_manifest_page(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<impl axum::response::IntoResponse, ApiError> {
+    use axum::http::{header, StatusCode};
+    use axum::response::Html;
+
+    let public_url = resolve_public_url(&state, &headers).await;
+    let manifest = build_manifest(&public_url);
 
     let manifest_json = serde_json::to_string(&manifest)
         .map_err(|e| ApiError::internal(format!("Failed to serialize manifest: {}", e)))?;
@@ -469,43 +471,7 @@ async fn github_manifest_url(
     headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let public_url = resolve_public_url(&state, &headers).await;
-
-    // Unique suffix so the GitHub App name doesn't collide
-    let suffix: String = uuid::Uuid::new_v4().to_string().chars().take(4).collect();
-
-    let manifest = json!({
-        "name": format!("codasaurus-{}", suffix),
-        "url": &public_url,
-        "hook_attributes": {
-            "url": format!("{}/webhook/", public_url),
-            "active": true
-        },
-        "redirect_url": format!("{}/api/setup/github/callback", public_url),
-        "callback_urls": [
-            format!("{}/api/auth/github/callback", public_url)
-        ],
-        "setup_url": format!("{}/#/setup/complete", public_url),
-        "setup_on_update": true,
-        "public": false,
-        "request_oauth_on_install": false,
-        "default_permissions": {
-            "pull_requests": "write",
-            "checks": "write",
-            "contents": "read",
-            "issues": "read",
-            "metadata": "read",
-            "emails": "read"
-        },
-        "default_events": [
-            "pull_request",
-            "issue_comment",
-            "push",
-            "check_run",
-            "check_suite"
-        ]
-    });
-
-    Ok(Json(manifest))
+    Ok(Json(build_manifest(&public_url)))
 }
 
 /// POST /api/v1/setup/github
