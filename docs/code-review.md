@@ -20,6 +20,8 @@ How Codasaurus reviews PRs — and how we keep this repo reviewable.
 | `improve`                | Concrete fix suggestions           |
 | `ask …`                  | Answer a specific question         |
 | `changelog` / `add_docs` | Release/docs drafts (comment only) |
+| `similar`                | Related PRs by path history        |
+| `fix`                    | Apply available codemods (opt-in)  |
 | `security` / `labels`    | Focused scans / soft labels        |
 
 ## Repo maintainability (this codebase)

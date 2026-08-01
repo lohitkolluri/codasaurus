@@ -23,6 +23,8 @@ pub(crate) enum BotCommand {
     Changelog,
     Security,
     AddDocs,
+    Similar,
+    Fix,
     Ask(String),
     Ignore(Option<String>),
     Help,
@@ -42,6 +44,16 @@ pub(crate) fn parse_bot_command(body: &str) -> Option<BotCommand> {
     }
     if lower.contains("changelog") || lower.contains("update_changelog") {
         return Some(BotCommand::Changelog);
+    }
+    if lower.contains("similar") || lower.contains("related_prs") || lower.contains("related-prs") {
+        return Some(BotCommand::Similar);
+    }
+    if lower.contains("@codasaurus fix")
+        || lower.contains("@codasaurus-bot fix")
+        || lower.contains(" autofix")
+        || lower.contains(" apply_fix")
+    {
+        return Some(BotCommand::Fix);
     }
     if lower.contains("security") {
         return Some(BotCommand::Security);
@@ -135,6 +147,8 @@ pub(crate) async fn handle_bot_command(
         BotCommand::Changelog => spawn_changelog(ctx, pr_number, timeout_secs).await,
         BotCommand::Security => spawn_security(ctx, pr_number, timeout_secs).await,
         BotCommand::AddDocs => spawn_add_docs(ctx, pr_number, timeout_secs).await,
+        BotCommand::Similar => spawn_similar(ctx, pr_number, timeout_secs).await,
+        BotCommand::Fix => spawn_fix(ctx, pr_number, timeout_secs).await,
     }
 }
 
@@ -195,9 +209,57 @@ async fn spawn_describe(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) 
                 body.chars().take(800).collect::<String>()
             )
         };
-        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
+        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await?;
+
+        let mut update_body = false;
+        if let Some(pool) = pool {
+            if let Ok(Some(v)) = crate::db::config::get_config(pool, "update_pr_description").await {
+                update_body = matches!(
+                    v.to_ascii_lowercase().as_str(),
+                    "true" | "1" | "yes" | "on"
+                );
+            }
+            if let Ok(Some(repo)) =
+                crate::db::repos::get_repo_by_full_name(pool, &ctx.repo_full_name).await
+            {
+                if let Some(cfg) = repo.config_json.as_deref() {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(cfg) {
+                        if let Some(b) = val.get("update_pr_description").and_then(|v| v.as_bool())
+                        {
+                            update_body = b;
+                        }
+                    }
+                }
+            }
+        }
+        if update_body {
+            let plain = text
+                .strip_prefix("### Codasaurus describe\n\n")
+                .unwrap_or(&text);
+            let _ = patch_pr_body(&token, &ctx.repo_full_name, pr_number, plain).await;
+        }
+        Ok::<_, anyhow::Error>(())
     })
     .await;
+}
+
+async fn patch_pr_body(token: &str, repo: &str, pr_number: i64, body: &str) -> anyhow::Result<()> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()?;
+    let url = format!("https://api.github.com/repos/{repo}/pulls/{pr_number}");
+    let resp = client
+        .patch(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", USER_AGENT)
+        .json(&serde_json::json!({ "body": body }))
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        tracing::warn!(status = %resp.status(), "update_pr_description failed");
+    }
+    Ok(())
 }
 
 async fn spawn_improve(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
@@ -822,6 +884,263 @@ async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64, fingerprint: 
     }
 }
 
+async fn spawn_similar(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
+    let Ok(_permit) = REVIEW_PERMITS.acquire().await else {
+        tracing::error!("review semaphore closed");
+        return;
+    };
+    let _ = timeout(Duration::from_secs(timeout_secs), async move {
+        let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(45))
+            .build()?;
+        let auth = format!("Bearer {token}");
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::AUTHORIZATION,
+            reqwest::header::HeaderValue::from_str(&auth)?,
+        );
+        headers.insert(
+            reqwest::header::ACCEPT,
+            reqwest::header::HeaderValue::from_static("application/vnd.github+json"),
+        );
+        headers.insert(
+            reqwest::header::USER_AGENT,
+            reqwest::header::HeaderValue::from_static(USER_AGENT),
+        );
+        let paths = fetch_changed_paths_list(&token, &ctx.repo_full_name, pr_number).await?;
+        let related = crate::bot::related_prs::find_related_prs(
+            &client,
+            &headers,
+            &ctx.repo_full_name,
+            &paths,
+            pr_number,
+        )
+        .await
+        .unwrap_or_default();
+        let text = if related.is_empty() {
+            "### Codasaurus similar\n\nNo related PRs found for these paths.".into()
+        } else {
+            let mut body = String::from("### Codasaurus similar\n\nPRs that recently touched the same paths:\n\n");
+            for r in &related {
+                body.push_str(&format!("- {r}\n"));
+            }
+            body
+        };
+        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
+    })
+    .await;
+}
+
+async fn fetch_changed_paths_list(
+    token: &str,
+    repo: &str,
+    pr_number: i64,
+) -> anyhow::Result<Vec<String>> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()?;
+    let url = format!("https://api.github.com/repos/{repo}/pulls/{pr_number}/files?per_page=100");
+    let files: Vec<serde_json::Value> = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", USER_AGENT)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await
+        .unwrap_or_default();
+    Ok(files
+        .iter()
+        .filter_map(|f| f["filename"].as_str().map(str::to_string))
+        .collect())
+}
+
+async fn spawn_fix(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
+    let Ok(_permit) = REVIEW_PERMITS.acquire().await else {
+        tracing::error!("review semaphore closed");
+        return;
+    };
+    let _ = timeout(Duration::from_secs(timeout_secs), async move {
+        let pool = bot_db_pool();
+        let mut allowed = false;
+        if let Some(pool) = pool {
+            if let Ok(Some(v)) = crate::db::config::get_config(pool, "allow_auto_fix").await {
+                allowed = matches!(
+                    v.to_ascii_lowercase().as_str(),
+                    "true" | "1" | "yes" | "on"
+                );
+            }
+            if let Ok(Some(repo)) =
+                crate::db::repos::get_repo_by_full_name(pool, &ctx.repo_full_name).await
+            {
+                if let Some(cfg) = repo.config_json.as_deref() {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(cfg) {
+                        if let Some(b) = val.get("allow_auto_fix").and_then(|v| v.as_bool()) {
+                            allowed = b;
+                        }
+                    }
+                }
+            }
+        }
+        if !allowed {
+            post_issue_comment(
+                &get_installation_token(&ctx.cfg, ctx.inst_id).await?,
+                &ctx.repo_full_name,
+                pr_number,
+                "### Codasaurus fix\n\nAuto-fix is disabled. Enable `allow_auto_fix` in Settings or repo `config_json`.",
+            )
+            .await?;
+            return Ok(());
+        }
+
+        let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
+        let pr = fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await?;
+        let head_ref = pr["head"]["ref"].as_str().unwrap_or("").to_string();
+        let head_sha = pr["head"]["sha"].as_str().unwrap_or("").to_string();
+        if head_ref.is_empty() {
+            anyhow::bail!("missing head ref");
+        }
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .build()?;
+        let auth = format!("Bearer {token}");
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::AUTHORIZATION,
+            reqwest::header::HeaderValue::from_str(&auth)?,
+        );
+        headers.insert(
+            reqwest::header::ACCEPT,
+            reqwest::header::HeaderValue::from_static("application/vnd.github+json"),
+        );
+        headers.insert(
+            reqwest::header::USER_AGENT,
+            reqwest::header::HeaderValue::from_static(USER_AGENT),
+        );
+
+        let files_url = format!(
+            "https://api.github.com/repos/{}/pulls/{}/files?per_page=100",
+            ctx.repo_full_name, pr_number
+        );
+        let files: Vec<serde_json::Value> = client
+            .get(&files_url)
+            .headers(headers.clone())
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await
+            .unwrap_or_default();
+
+        let mut config = crate::config::Config::load_for_bot(pool).await;
+        // Prefer stale_api for codemods
+        config.checks.stale_api = true;
+        let mut parsed = Vec::new();
+        for f in &files {
+            let name = f["filename"].as_str().unwrap_or("");
+            let patch = f["patch"].as_str().unwrap_or("");
+            if name.is_empty() || patch.is_empty() {
+                continue;
+            }
+            if let Ok(p) = crate::parser::parse_unified_diff(name, patch) {
+                parsed.push(p);
+            }
+        }
+        let findings = crate::detectors::run_all(&parsed, &config);
+        let with_codemod: Vec<_> = findings
+            .findings
+            .into_iter()
+            .filter(|f| f.codemod.as_ref().is_some_and(|c| !c.is_empty()) && f.line > 0)
+            .take(8)
+            .collect();
+
+        if with_codemod.is_empty() {
+            post_issue_comment(
+                &token,
+                &ctx.repo_full_name,
+                pr_number,
+                "### Codasaurus fix\n\nNo applyable codemods found on this PR (enable stale-api / findings with replacements).",
+            )
+            .await?;
+            return Ok(());
+        }
+
+        let git_ref = if head_sha.is_empty() {
+            head_ref.as_str()
+        } else {
+            head_sha.as_str()
+        };
+        let mut applied = Vec::new();
+        let mut by_file: std::collections::BTreeMap<String, Vec<_>> =
+            std::collections::BTreeMap::new();
+        for f in with_codemod {
+            by_file.entry(f.file.clone()).or_default().push(f);
+        }
+
+        for (path, findings) in by_file {
+            let Some((content, sha)) = crate::bot::github_files::fetch_repo_file_with_sha(
+                &client,
+                &headers,
+                &ctx.repo_full_name,
+                &path,
+                git_ref,
+            )
+            .await?
+            else {
+                continue;
+            };
+            let mut lines: Vec<String> = content.lines().map(str::to_string).collect();
+            let mut changed = false;
+            for f in findings {
+                let Some(codemod) = f.codemod.as_deref() else {
+                    continue;
+                };
+                let idx = f.line.saturating_sub(1);
+                if idx < lines.len() {
+                    lines[idx] = codemod.trim_end().to_string();
+                    changed = true;
+                    applied.push(format!("`{path}:{}`", f.line));
+                }
+            }
+            if !changed {
+                continue;
+            }
+            let new_content = if content.ends_with('\n') {
+                format!("{}\n", lines.join("\n"))
+            } else {
+                lines.join("\n")
+            };
+            crate::bot::github_files::put_repo_file(
+                &client,
+                &headers,
+                &ctx.repo_full_name,
+                &path,
+                &head_ref,
+                &new_content,
+                &sha,
+                &format!("chore: apply Codasaurus fix on {path}"),
+            )
+            .await?;
+        }
+
+        let text = if applied.is_empty() {
+            "### Codasaurus fix\n\nCould not apply codemods (file fetch/update failed).".into()
+        } else {
+            format!(
+                "### Codasaurus fix\n\nApplied {} change(s) on `{head_ref}`:\n\n{}",
+                applied.len(),
+                applied.iter().map(|s| format!("- {s}")).collect::<Vec<_>>().join("\n")
+            )
+        };
+        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
+    })
+    .await;
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -864,5 +1183,17 @@ mod tests {
     #[test]
     fn ignores_unrelated_comments() {
         assert!(parse_bot_command("lgtm thanks").is_none());
+    }
+
+    #[test]
+    fn parses_similar_and_fix() {
+        assert!(matches!(
+            parse_bot_command("@codasaurus similar"),
+            Some(BotCommand::Similar)
+        ));
+        assert!(matches!(
+            parse_bot_command("@codasaurus fix"),
+            Some(BotCommand::Fix)
+        ));
     }
 }

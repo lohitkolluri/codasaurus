@@ -7,6 +7,7 @@ pub mod audit;
 pub mod auth;
 pub mod errors;
 pub mod github;
+pub mod learning;
 pub mod repos;
 pub mod reviews;
 pub mod settings;
@@ -38,6 +39,7 @@ pub fn protected_router() -> Router<AppState> {
         .nest("/api/repos", repos::router())
         .nest("/api/reviews", reviews::router())
         .nest("/api/settings", settings::router())
+        .nest("/api/learning", learning::router())
         .nest("/api/github", github::router())
         .nest("/api/audit", audit::router())
 }

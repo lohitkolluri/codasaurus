@@ -3,11 +3,11 @@
 //! Env: `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, optional
 //! `OIDC_REDIRECT_URI` / `OIDC_SCOPES` / `PUBLIC_URL`.
 //!
-//! ID tokens are decoded for the `email` claim over TLS to the IdP. For
-//! stricter deployments, pin the issuer and terminate TLS at a trusted proxy;
-//! JWKS signature verification can be layered on later without API changes.
+//! ID tokens are verified against the IdP JWKS when available; email is taken
+//! from the verified claims (falls back to payload decode only if JWKS missing).
 
 use anyhow::{bail, Context, Result};
+use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -55,12 +55,24 @@ impl OidcConfig {
 struct Discovery {
     authorization_endpoint: String,
     token_endpoint: String,
+    #[serde(default)]
+    jwks_uri: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
     id_token: Option<String>,
     access_token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IdClaims {
+    email: Option<String>,
+    preferred_username: Option<String>,
+    #[allow(dead_code)]
+    iss: Option<String>,
+    #[allow(dead_code)]
+    aud: serde_json::Value,
 }
 
 /// Short-lived CSRF state store.
@@ -91,11 +103,11 @@ pub async fn authorization_url(cfg: &OidcConfig) -> Result<(String, String)> {
 }
 
 pub fn take_state(state: &str) -> bool {
-    let Ok(mut m) = PENDING.lock() else {
-        return false;
-    };
-    prune_pending(&mut m);
-    m.remove(state).is_some()
+    if let Ok(mut m) = PENDING.lock() {
+        prune_pending(&mut m);
+        return m.remove(state).is_some();
+    }
+    false
 }
 
 pub async fn exchange_code(cfg: &OidcConfig, code: &str) -> Result<String> {
@@ -123,7 +135,12 @@ pub async fn exchange_code(cfg: &OidcConfig, code: &str) -> Result<String> {
         .id_token
         .or(resp.access_token)
         .context("OIDC token response missing id_token")?;
-    let email = email_from_jwt(&id_token)?;
+    let email = if let Some(jwks_uri) = disc.jwks_uri.as_deref() {
+        email_from_verified_jwt(cfg, &id_token, jwks_uri).await?
+    } else {
+        tracing::warn!("OIDC discovery missing jwks_uri; decoding payload without signature verify");
+        email_from_jwt_unverified(&id_token)?
+    };
     Ok(email)
 }
 
@@ -145,9 +162,52 @@ async fn discover(cfg: &OidcConfig) -> Result<Discovery> {
     Ok(disc)
 }
 
-/// Decode JWT payload (no signature verification — suitable for trusted IdP over TLS;
-/// production harden with JWKS when needed).
-fn email_from_jwt(token: &str) -> Result<String> {
+async fn email_from_verified_jwt(cfg: &OidcConfig, token: &str, jwks_uri: &str) -> Result<String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()?;
+    let jwks: jsonwebtoken::jwk::JwkSet = client
+        .get(jwks_uri)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await
+        .context("fetch JWKS")?;
+
+    let header = decode_header(token).context("JWT header")?;
+    let kid = header.kid.as_deref();
+    let jwk = match kid {
+        Some(kid) => jwks.find(kid).context("no JWKS key matching kid")?,
+        None => jwks.keys.first().context("JWKS empty")?,
+    };
+    let key = DecodingKey::from_jwk(jwk).context("DecodingKey from JWK")?;
+
+    let alg = header.alg;
+    let mut validation = Validation::new(alg);
+    validation.set_issuer(&[cfg.issuer.clone()]);
+    validation.set_audience(&[cfg.client_id.clone()]);
+    // Some IdPs put aud as array — jsonwebtoken handles via set_audience
+    validation.validate_aud = true;
+
+    let data = decode::<IdClaims>(token, &key, &validation).context("JWT signature verify")?;
+    email_from_claims(&data.claims)
+}
+
+fn email_from_claims(claims: &IdClaims) -> Result<String> {
+    if let Some(email) = claims.email.as_deref().filter(|e| !e.is_empty()) {
+        return Ok(email.to_string());
+    }
+    if let Some(pref) = claims.preferred_username.as_deref() {
+        if pref.contains('@') {
+            return Ok(pref.to_string());
+        }
+    }
+    bail!("OIDC token has no email claim")
+}
+
+/// Decode JWT payload without signature verification (last-resort fallback).
+fn email_from_jwt_unverified(token: &str) -> Result<String> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() < 2 {
         bail!("invalid JWT");

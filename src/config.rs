@@ -224,6 +224,8 @@ pub struct RepoBotFlags {
     pub auto_describe: bool,
     pub auto_review_diff: bool,
     pub auto_labels: bool,
+    pub update_pr_description: bool,
+    pub allow_auto_fix: bool,
 }
 
 impl Default for RepoBotFlags {
@@ -233,6 +235,8 @@ impl Default for RepoBotFlags {
             auto_describe: true,
             auto_review_diff: true,
             auto_labels: true,
+            update_pr_description: false,
+            allow_auto_fix: false,
         }
     }
 }
@@ -246,6 +250,14 @@ impl Config {
                 for entry in entries {
                     apply_enabled_flag(&mut config.checks, &entry.key, &entry.value);
                     apply_behavior_flag(&mut config.behavior, &entry.key, &entry.value);
+                    if entry.key == "exclude_patterns" && !entry.value.trim().is_empty() {
+                        for part in entry.value.split([',', '\n']) {
+                            let p = part.trim();
+                            if !p.is_empty() {
+                                config.checks.exclude_patterns.push(p.to_string());
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -267,7 +279,9 @@ impl Config {
     }
 
     /// Overlay per-repo `config_json` from the dashboard.
-    /// Shape: `{ "detectors": {...}, "llm_enabled": bool, "auto_describe": bool, "auto_review_diff": bool, "auto_labels": bool }`.
+    /// Shape: `{ "detectors": {...}, "llm_enabled": bool, "auto_describe": bool,
+    /// "auto_review_diff": bool, "auto_labels": bool, "update_pr_description": bool,
+    /// "allow_auto_fix": bool, "exclude_patterns": ["vendor/"] }`.
     pub fn overlay_repo_config_json(&mut self, config_json: &str) -> RepoBotFlags {
         let mut flags = RepoBotFlags::default();
         let Ok(value) = serde_json::from_str::<serde_json::Value>(config_json) else {
@@ -285,6 +299,16 @@ impl Config {
                 apply_detector_key(&mut self.checks, key, enabled);
             }
         }
+        if let Some(arr) = value.get("exclude_patterns").and_then(|v| v.as_array()) {
+            let extra: Vec<String> = arr
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !extra.is_empty() {
+                self.checks.exclude_patterns.extend(extra);
+            }
+        }
         if let Some(v) = value.get("llm_enabled").and_then(|v| v.as_bool()) {
             flags.llm_enabled = v;
         }
@@ -296,6 +320,12 @@ impl Config {
         }
         if let Some(v) = value.get("auto_labels").and_then(|v| v.as_bool()) {
             flags.auto_labels = v;
+        }
+        if let Some(v) = value.get("update_pr_description").and_then(|v| v.as_bool()) {
+            flags.update_pr_description = v;
+        }
+        if let Some(v) = value.get("allow_auto_fix").and_then(|v| v.as_bool()) {
+            flags.allow_auto_fix = v;
         }
         flags
     }

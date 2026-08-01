@@ -17,6 +17,12 @@
 
   let detectors = $state({});
   let llmEnabled = $state(true);
+  let autoDescribe = $state(true);
+  let autoReviewDiff = $state(true);
+  let autoLabels = $state(true);
+  let updatePrDescription = $state(false);
+  let allowAutoFix = $state(false);
+  let excludePatterns = $state("");
 
   // Reactively load when params change (fixes $params being undefined at mount)
   $effect(() => {
@@ -54,6 +60,14 @@
         detectors = defaults;
       }
       llmEnabled = cfg.llm_enabled ?? true;
+      autoDescribe = cfg.auto_describe ?? true;
+      autoReviewDiff = cfg.auto_review_diff ?? true;
+      autoLabels = cfg.auto_labels ?? true;
+      updatePrDescription = cfg.update_pr_description ?? false;
+      allowAutoFix = cfg.allow_auto_fix ?? false;
+      excludePatterns = Array.isArray(cfg.exclude_patterns)
+        ? cfg.exclude_patterns.join(", ")
+        : (cfg.exclude_patterns ?? "");
     } catch (err) {
       error = err.message || "Failed to load repo";
     } finally {
@@ -68,7 +82,19 @@
       const id = $params?.id;
       if (!id) return;
       await api.put(`/api/repos/${id}`, {
-        config_json: JSON.stringify({ detectors, llm_enabled: llmEnabled }),
+        config_json: JSON.stringify({
+          detectors,
+          llm_enabled: llmEnabled,
+          auto_describe: autoDescribe,
+          auto_review_diff: autoReviewDiff,
+          auto_labels: autoLabels,
+          update_pr_description: updatePrDescription,
+          allow_auto_fix: allowAutoFix,
+          exclude_patterns: excludePatterns
+            .split(/[,\n]/)
+            .map((s) => s.trim())
+            .filter(Boolean),
+        }),
         active: repo?.active ?? true,
       });
       saveMsg = "Saved";
@@ -137,6 +163,64 @@
               </div>
             </label>
             <span>Enable LLM-powered review on this repo</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Automation</h3>
+          <div class="llm-row">
+            <label class="toggle">
+              <div class="toggle-track" class:on={autoDescribe} role="checkbox" aria-checked={autoDescribe}
+                tabindex="0" onclick={() => (autoDescribe = !autoDescribe)}
+                onkeydown={(e) => { if (e.key === 'Enter') autoDescribe = !autoDescribe; }}>
+                <div class="toggle-knob"></div>
+              </div>
+            </label>
+            <span>Auto-describe on open</span>
+          </div>
+          <div class="llm-row">
+            <label class="toggle">
+              <div class="toggle-track" class:on={autoReviewDiff} role="checkbox" aria-checked={autoReviewDiff}
+                tabindex="0" onclick={() => (autoReviewDiff = !autoReviewDiff)}
+                onkeydown={(e) => { if (e.key === 'Enter') autoReviewDiff = !autoReviewDiff; }}>
+                <div class="toggle-knob"></div>
+              </div>
+            </label>
+            <span>Auto LLM review_diff</span>
+          </div>
+          <div class="llm-row">
+            <label class="toggle">
+              <div class="toggle-track" class:on={autoLabels} role="checkbox" aria-checked={autoLabels}
+                tabindex="0" onclick={() => (autoLabels = !autoLabels)}
+                onkeydown={(e) => { if (e.key === 'Enter') autoLabels = !autoLabels; }}>
+                <div class="toggle-knob"></div>
+              </div>
+            </label>
+            <span>Auto-apply labels</span>
+          </div>
+          <div class="llm-row">
+            <label class="toggle">
+              <div class="toggle-track" class:on={updatePrDescription} role="checkbox" aria-checked={updatePrDescription}
+                tabindex="0" onclick={() => (updatePrDescription = !updatePrDescription)}
+                onkeydown={(e) => { if (e.key === 'Enter') updatePrDescription = !updatePrDescription; }}>
+                <div class="toggle-knob"></div>
+              </div>
+            </label>
+            <span>Update PR description on describe</span>
+          </div>
+          <div class="llm-row">
+            <label class="toggle">
+              <div class="toggle-track" class:on={allowAutoFix} role="checkbox" aria-checked={allowAutoFix}
+                tabindex="0" onclick={() => (allowAutoFix = !allowAutoFix)}
+                onkeydown={(e) => { if (e.key === 'Enter') allowAutoFix = !allowAutoFix; }}>
+                <div class="toggle-knob"></div>
+              </div>
+            </label>
+            <span>Allow @codasaurus fix</span>
+          </div>
+          <div class="form-group" style="margin-top:12px">
+            <label for="repo-exclude">Exclude patterns</label>
+            <input id="repo-exclude" type="text" bind:value={excludePatterns} placeholder="vendor/,packages/legacy/" />
           </div>
         </div>
 

@@ -142,6 +142,19 @@ pub async fn review_pr_with_options(
         return Ok(());
     }
 
+    let exclude = config.checks.exclude_patterns.clone();
+    let files: Vec<serde_json::Value> = files
+        .into_iter()
+        .filter(|f| {
+            let name = f["filename"].as_str().unwrap_or("");
+            !crate::detectors::is_excluded(name, &exclude)
+        })
+        .collect();
+    if files.is_empty() {
+        tracing::info!(repo = repo_name, pr = pr_number, "all PR files excluded by patterns");
+        return Ok(());
+    }
+
     let changed_paths: Vec<String> = files
         .iter()
         .filter_map(|f| f["filename"].as_str().map(String::from))
@@ -404,7 +417,24 @@ pub async fn review_pr_with_options(
         &pr_title,
         &pr_body,
     );
-    review_ctx.related_prs = related_prs;
+    review_ctx.related_prs = related_prs.clone();
+    if let Some(pool) = pool {
+        if let Ok(Some(instr)) = crate::db::config::get_config(pool, "custom_instructions").await {
+            if !instr.trim().is_empty() {
+                let existing = review_ctx.repo_context.take().unwrap_or_default();
+                review_ctx.repo_context = Some(format!(
+                    "Org custom instructions:\n{instr}\n\n{existing}"
+                ));
+            }
+        }
+    }
+    let issue_assessment = crate::bot::issue_assessment::assess_linked_issues(
+        &pr_title,
+        &changed_paths,
+        &review_ctx.linked_issues,
+    );
+    let issue_assessment_md =
+        crate::bot::issue_assessment::assessment_markdown(&issue_assessment);
 
     let mut review_comments: Vec<serde_json::Value> = Vec::new();
     let mut has_blocking = false;
@@ -529,7 +559,7 @@ pub async fn review_pr_with_options(
         return Ok(());
     }
 
-    let body = crate::bot::markdown::walkthrough_body(
+    let body = crate::bot::markdown::walkthrough_body_ext(
         &findings,
         has_blocking,
         &pr_title,
@@ -539,6 +569,8 @@ pub async fn review_pr_with_options(
         &runtime,
         false,
         repo_llm_enabled,
+        &related_prs,
+        &issue_assessment_md,
     );
 
     // Try to create a review with inline comments; fall back to single comment
@@ -685,7 +717,7 @@ pub async fn review_pr_with_options(
 
     // Phase 1: auto-describe on opened/reopened (separate comment slot).
     if options.auto_describe {
-        let describe = crate::bot::markdown::walkthrough_body(
+        let describe = crate::bot::markdown::walkthrough_body_ext(
             &findings,
             has_blocking,
             &pr_title,
@@ -695,6 +727,8 @@ pub async fn review_pr_with_options(
             &runtime,
             true,
             repo_llm_enabled,
+            &related_prs,
+            &issue_assessment_md,
         );
         let describe_body = format!(
             "### Codasaurus describe\n\n{describe}\n\n---\n_Auto-describe on PR open · `@codasaurus help`_"

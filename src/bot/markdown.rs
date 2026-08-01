@@ -140,7 +140,7 @@ pub fn redact_secrets(s: &str) -> String {
 }
 
 /// Build the main walkthrough / summary comment body.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, dead_code)]
 pub fn walkthrough_body(
     findings: &Findings,
     has_blocking: bool,
@@ -151,6 +151,36 @@ pub fn walkthrough_body(
     runtime: &BotRuntimeConfig,
     include_brand_gif: bool,
     include_mermaid: bool,
+) -> String {
+    walkthrough_body_ext(
+        findings,
+        has_blocking,
+        pr_title,
+        files,
+        reviewers,
+        config,
+        runtime,
+        include_brand_gif,
+        include_mermaid,
+        &[],
+        "",
+    )
+}
+
+/// Extended walkthrough with related PRs + linked-issue assessment markdown.
+#[allow(clippy::too_many_arguments)]
+pub fn walkthrough_body_ext(
+    findings: &Findings,
+    has_blocking: bool,
+    pr_title: &str,
+    files: &[serde_json::Value],
+    reviewers: &[String],
+    config: &Config,
+    runtime: &BotRuntimeConfig,
+    include_brand_gif: bool,
+    include_mermaid: bool,
+    related_prs: &[String],
+    issue_assessment_md: &str,
 ) -> String {
     let counts = findings.count_by_severity();
     let blocking = *counts.get("blocking").unwrap_or(&0);
@@ -169,7 +199,6 @@ pub fn walkthrough_body(
     let mut body = String::new();
 
     if include_brand_gif && runtime.max_inline_comments > 0 {
-        // Optional decorative header (enterprise default: off via caller)
         let _ = writeln!(body, "<sub>Codasaurus review</sub>\n");
     }
 
@@ -180,14 +209,9 @@ pub fn walkthrough_body(
         "| Severity | Count |\n| --- | ---: |\n| blocking | {blocking} |\n| warning | {warning} |\n| info | {info} |\n| **total** | **{total}** |\n"
     );
 
-    // Collapsible walkthrough
     let _ = writeln!(body, "<details>");
     let _ = writeln!(body, "<summary><strong>Walkthrough</strong></summary>\n");
-    let _ = writeln!(
-        body,
-        "PR: _{}_\n",
-        escape_md(pr_title)
-    );
+    let _ = writeln!(body, "PR: _{}_\n", escape_md(pr_title));
 
     if include_mermaid {
         if let Some(diagram) = mermaid_change_flow(files) {
@@ -195,7 +219,18 @@ pub fn walkthrough_body(
         }
     }
 
-    // Changed files table
+    if !issue_assessment_md.is_empty() {
+        body.push_str(issue_assessment_md);
+    }
+
+    if !related_prs.is_empty() {
+        let _ = writeln!(body, "#### Related PRs\n");
+        for r in related_prs.iter().take(8) {
+            let _ = writeln!(body, "- {r}");
+        }
+        let _ = writeln!(body);
+    }
+
     let _ = writeln!(body, "#### Changed files\n");
     let _ = writeln!(body, "| File | Status |");
     let _ = writeln!(body, "| --- | --- |");
@@ -209,7 +244,6 @@ pub fn walkthrough_body(
     }
     let _ = writeln!(body);
 
-    // Findings grouped
     if !findings.is_empty() {
         let _ = writeln!(body, "#### Findings\n");
         for f in findings.findings.iter().take(30) {
@@ -233,21 +267,14 @@ pub fn walkthrough_body(
         let _ = writeln!(body);
     }
 
-    // Pre-merge checklist
     let _ = writeln!(body, "#### Pre-merge checks\n");
     let checks = [
-        (
-            !has_blocking,
-            "No blocking findings",
-        ),
+        (!has_blocking, "No blocking findings"),
         (
             warning <= config.pre_merge.max_warnings,
             "Warning budget within limit",
         ),
-        (
-            !pr_title.trim().is_empty(),
-            "PR has a title",
-        ),
+        (!pr_title.trim().is_empty(), "PR has a title"),
     ];
     for (ok, label) in checks {
         let box_ = if ok { "[x]" } else { "[ ]" };
@@ -275,14 +302,20 @@ pub fn walkthrough_body(
         "<details><summary>Commands</summary>\n\n\
          - `@codasaurus review` — re-run review\n\
          - `@codasaurus describe` — PR summary / walkthrough\n\
+         - `@codasaurus summarize` — short executive summary\n\
          - `@codasaurus improve` — actionable suggestions\n\
+         - `@codasaurus security` — secrets / vuln-focused scan\n\
+         - `@codasaurus labels` — suggest and apply labels\n\
+         - `@codasaurus changelog` / `update_changelog` — Keep a Changelog draft\n\
+         - `@codasaurus add_docs` — docs stubs\n\
+         - `@codasaurus similar` — related PRs by path history\n\
+         - `@codasaurus fix` — apply available codemods (opt-in)\n\
          - `@codasaurus ask <question>` — ask about this PR\n\
          - `@codasaurus ignore <fingerprint>` — dismiss a finding\n\
          - `@codasaurus help` — show commands\n\n\
          </details>"
     );
 
-    // Fit GitHub comment limit
     if body.len() > runtime.max_comment_bytes {
         truncate_utf8_owned(&mut body, runtime.max_comment_bytes);
     }
@@ -305,6 +338,8 @@ pub fn help_body() -> String {
      | `@codasaurus labels` | Suggest and apply PR labels |\n\
      | `@codasaurus changelog` / `update_changelog` | Draft a Keep a Changelog section |\n\
      | `@codasaurus add_docs` | Suggest README/docs stubs for this PR |\n\
+     | `@codasaurus similar` | Related PRs by path history |\n\
+     | `@codasaurus fix` | Apply available codemods (opt-in) |\n\
      | `@codasaurus ask …` | Answer a question about this PR |\n\
      | `@codasaurus ignore <fp>` | Dismiss a finding by fingerprint |\n\
      | `@codasaurus help` | Show this help |\n"

@@ -97,6 +97,10 @@ async fn set_setting(
         "guidelines_enabled",
         "iac_enabled",
         "auto_labels_enabled",
+        "exclude_patterns",
+        "update_pr_description",
+        "custom_instructions",
+        "allow_auto_fix",
     ];
     if !ALLOWED_KEYS.contains(&key.as_str()) {
         return Err(ApiError::bad_request(format!("Unknown setting: {key}")));

@@ -121,6 +121,43 @@ impl LearningStore {
         Ok(())
     }
 
+    pub async fn list_rules(&self) -> Result<Vec<crate::learning::LearnedRule>> {
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            id: String,
+            detector: String,
+            file_pattern: Option<String>,
+            message_pattern: Option<String>,
+            action: String,
+            reason: String,
+            created_at: String,
+        }
+        let rows: Vec<Row> = db_fetch_all!(
+            &self.pool,
+            Row,
+            "SELECT id, detector, file_pattern, message_pattern, action, reason, created_at
+             FROM learned_rules ORDER BY created_at DESC LIMIT 200"
+        )?;
+        Ok(rows
+            .into_iter()
+            .map(|r| crate::learning::LearnedRule {
+                id: r.id,
+                detector: r.detector,
+                file_pattern: r.file_pattern,
+                message_pattern: r.message_pattern,
+                action: crate::learning::RuleAction::from_static_str(&r.action)
+                    .unwrap_or(crate::learning::RuleAction::Ignore),
+                reason: r.reason,
+                created_at: r.created_at,
+            })
+            .collect())
+    }
+
+    pub async fn delete_rule(&self, id: &str) -> Result<bool> {
+        let n = db_execute!(&self.pool, "DELETE FROM learned_rules WHERE id = ?", id)?;
+        Ok(n > 0)
+    }
+
     pub async fn count_dismissals_for_detector(&self, detector: &str) -> Result<i64> {
         Ok(db_scalar!(
             &self.pool,

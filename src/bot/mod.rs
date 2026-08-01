@@ -9,6 +9,7 @@ mod codeowners;
 mod commands;
 mod github_extra;
 pub(crate) mod github_files;
+mod issue_assessment;
 pub(crate) mod markdown;
 mod policy;
 mod quality;
