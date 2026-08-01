@@ -25,7 +25,7 @@ codasaurus serve --port 3000
 
 Unset `DATABASE_URL` falls back to that same local default (**not** on Render — there it is required).
 
-**$0 cloud:** [run-for-free.md](run-for-free.md) (Render web + Neon Postgres).
+**$0 forever (no trials):** [run-for-free.md](run-for-free.md) — Render free web + Neon Free Postgres only.
 
 ## Render / Neon / Supabase
 

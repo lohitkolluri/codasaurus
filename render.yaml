@@ -1,6 +1,6 @@
-# Free-friendly Codasaurus on Render.
-# Pair with Neon (or another always-free Postgres) via DATABASE_URL.
-# See docs/run-for-free.md
+# Always-free Codasaurus on Render (web only).
+# DATABASE_URL must be a lifetime-free Postgres (Neon Free recommended).
+# Do NOT use Render free Postgres — it expires. See docs/run-for-free.md
 
 services:
   - type: web

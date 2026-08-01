@@ -48,7 +48,7 @@ docker compose up
 
 Open the dashboard → finish the [onboarding wizard](docs/setup-onboarding.md) (~5 min) → install the GitHub App.
 
-**Want $0 cloud hosting?** Follow [Run completely free](docs/run-for-free.md) (Render + Neon + optional free LLM).
+**Want $0 forever (no trials)?** Follow [Run on always-free infra](docs/run-for-free.md) — Render free web + Neon Free Postgres + LLM optional/off.
 
 ```bash
 # From source (Postgres must be reachable)
@@ -69,7 +69,7 @@ codasaurus serve | health | version
 | ------------------------------------------------------------------ | ---------------------------------- |
 | [Setup — onboarding](docs/setup-onboarding.md)                     | First-run wizard                   |
 | [Setup — GitHub App](docs/setup-github-app.md)                     | Permissions, manifest, manual keys |
-| [Run completely free](docs/run-for-free.md)                        | Free host + Postgres + LLM stack   |
+| [Run completely free](docs/run-for-free.md)                        | Always-free host + Postgres (no trials) |
 | [Database](docs/database.md)                                       | PostgreSQL, pool, schema           |
 | [Configuration](docs/configuration.md)                             | Env vars, TOML, offline, OIDC      |
 | [Commands](docs/commands.md)                                       | `@codasaurus` on PRs               |

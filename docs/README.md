@@ -6,7 +6,7 @@ Operator guides for self-hosting Codasaurus.
 | ------------------------------------------------------------- | ---------------------------------------------- |
 | [Setup — onboarding wizard](setup-onboarding.md)              | First boot of the dashboard                    |
 | [Setup — GitHub App](setup-github-app.md)                     | Manifest flow, permissions, manual credentials |
-| [Run completely free](run-for-free.md)                        | Free Render + Neon (+ optional free LLM)       |
+| [Run completely free](run-for-free.md)                        | Always-free Render + Neon (no trials/expiry)   |
 | [Database](database.md)                                       | PostgreSQL pool, schema, multi-replica         |
 | [Configuration](configuration.md)                             | Env vars, TOML, offline mode, OIDC             |
 | [Commands](commands.md)                                       | `@codasaurus` on pull requests                 |
