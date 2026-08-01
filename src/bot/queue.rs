@@ -50,7 +50,7 @@ pub async fn enqueue(
 /// Atomically claim the oldest pending (or stale running) job.
 pub async fn claim_next(pool: &DbPool, stale_secs: i64) -> Result<Option<ReviewJob>> {
     // Partial indexes on pending/running keep this hot path index-friendly.
-    let row = sqlx::query_as::<_, (i64, String, i64, String, Option<i64>, String, i64)>(
+    let row = sqlx::query_as::<_, (i64, String, i64, String, Option<i64>, String, i32)>(
         "UPDATE review_jobs SET
            status = 'running',
            attempts = attempts + 1,
@@ -81,7 +81,7 @@ pub async fn claim_next(pool: &DbPool, stale_secs: i64) -> Result<Option<ReviewJ
             head_sha,
             installation_id,
             action,
-            attempts,
+            attempts: i64::from(attempts),
         },
     ))
 }

@@ -31,7 +31,7 @@ impl DbPool {
 
     /// Lightweight connectivity probe.
     pub async fn ping(&self) -> Result<(), sqlx::Error> {
-        sqlx::query_scalar::<_, i64>("SELECT 1")
+        sqlx::query_scalar::<_, i32>("SELECT 1")
             .fetch_one(self.as_pg())
             .await
             .map(|_| ())

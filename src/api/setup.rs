@@ -263,7 +263,7 @@ async fn setup_database(
                 let test_pool = sqlx::PgPool::connect(&db_url)
                     .await
                     .map_err(|e| ApiError::bad_request(format!("Cannot connect: {e}")))?;
-                sqlx::query_scalar::<_, i64>("SELECT 1")
+                sqlx::query_scalar::<_, i32>("SELECT 1")
                     .fetch_one(&test_pool)
                     .await
                     .map_err(|e| ApiError::bad_request(format!("Test query failed: {e}")))?;
