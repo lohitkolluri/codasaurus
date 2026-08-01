@@ -152,4 +152,4 @@ cargo build --release
 
 ---
 
-MIT · [LICENSE](LICENSE) · [Lohit Kolluri](https://github.com/lohitkolluri)
+[AGPL-3.0-or-later](LICENSE) · free forever · keep credit · Copyright (C) 2026 [Lohit Kolluri](https://github.com/lohitkolluri)
