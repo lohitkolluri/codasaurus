@@ -1,138 +1,95 @@
 # Run Codasaurus on always-free infrastructure
 
-This guide lists **lifetime / always-free** options only — no 30-day trials, no expiring databases, no one-time credits that turn into bills.
+**Lifetime / always-free only** — no 30-day trials, no expiring databases, no one-time credits that turn into bills.
 
-Vendors change plans. If a product adds an expiry date, drop it. Prefer options labeled **Always Free** or a permanent **Free** plan with **$0/month and no end date**.
-
-## Policy: what “completely free” means here
+Soft limits (sleep, pause, storage caps) are OK. Time bombs are not. Re-check each vendor’s pricing page; if something gains an expiry date, stop using it.
 
 | Allowed | Not allowed |
 | --- | --- |
-| Permanent free plan ($0, no expiry) | “Free for 30/90 days then delete” |
-| Soft limits (sleep, pause, storage caps, rate limits) | One-time trial credits (Railway-style) |
-| Idle pause you can wake (Neon scale-to-zero, Supabase pause) | 12‑month cloud free tiers (e.g. many RDS offers) |
-| Software you run on hardware you already own | “Free compute” that requires a card + auto-charges |
+| Permanent Free / Always Free plan ($0, no end date) | “Free for 30/90 days then delete” |
+| Idle sleep/pause you can wake | Trial credits → paid |
+| Caps on storage / hours / rate limits | 12‑month cloud free tiers |
 
 ---
 
-## Canonical always-free stack
+## Postgres options (ranked)
 
-| Layer | Choice | Why |
-| --- | --- | --- |
-| **Postgres** | [Neon Free](https://neon.com/pricing) | Permanent free plan, no card, never expires ([FreeTiers](https://www.freetiers.com/directory/neon); [Neon FAQ](https://neon.com/faqs/managed-postgres-databases-free-tier)) |
-| **App host** | [Render](https://render.com/pricing) **free web service** | Permanent free *web* plan (sleeps when idle; monthly hour/build caps) — **not** Render free Postgres |
-| **LLM** | **Disabled** in the wizard | Tier‑1 detectors need $0 LLM |
-| **GitHub** | Free GitHub App | No Codasaurus seats |
-| **TLS** | Render HTTPS | Included on free web services |
+Best → less ideal for Codasaurus. All are lifetime-free plans (or $0 on hardware you already own).
 
-Optional always-free LLM later: models listed as free on [OpenRouter](https://openrouter.ai) (rate-limited; catalog changes) or **Ollama on your own machine**.
+| Rank | Option | Always free? | Approx. free limit | Fit for Codasaurus | Main catch |
+| :---: | --- | --- | --- | --- | --- |
+| **1** | [Neon Free](https://neon.com/pricing) | Yes — never expires ([FreeTiers](https://www.freetiers.com/directory/neon)) | ~0.5 GB / project, monthly CU-hours ([Neon FAQ](https://neon.com/faqs/managed-postgres-databases-free-tier)) | **Best default** — URI + TLS; pool auto-tunes | Scale-to-zero cold start |
+| **2** | [Supabase Free](https://supabase.com/pricing) | Yes (plan does not expire) | ~500 MB, 2 free projects | Strong alternative; same `DATABASE_URL` flow | Pauses after **1 week** idle ([pricing](https://supabase.com/pricing)) |
+| **3** | Self-host Postgres (`docker compose` / your VPS) | Yes ($0 incremental) | Your disk | Full control; no cloud pause | You own backups & uptime |
+| **4** | Postgres on [Oracle Always Free](https://www.oracle.com/cloud/postgresql) compute | Yes (Always Free VM/storage) | Always Free VM quotas | Fine if you already use OCI | DIY install; ignore OCI’s separate 30-day *credits* |
+| **5** | [Aiven](https://swyftstack.com/blog/free-postgresql-hosting) free Postgres (if still offered) | Confirm “permanent free” on signup | Often larger storage in roundups | OK if plan is still $0 forever | Verify live — free plans change |
 
-### Explicitly excluded (not lifetime free)
+**Do not use:** Render free Postgres, Railway credits, AWS RDS 12‑month free — not lifetime free ([Render](https://agentdeals.dev/vendor/render); [Neon FAQ](https://neon.com/faqs/managed-postgres-databases-free-tier)).
 
-| Thing | Why it’s out |
-| --- | --- |
-| **Render free Postgres** | Database **expires** after a limited window ([Render free notes](https://agentdeals.dev/vendor/render)) |
-| **Railway free** | Trial / usage credit → paid ([free hosting comparisons](https://toolfreebie.com/render-hosting-review)) |
-| **AWS RDS “free tier”** | Typically **12 months**, not forever ([Neon FAQ comparison](https://neon.com/faqs/managed-postgres-databases-free-tier)) |
-| Any “$X credit then billing” | Not $0 for life |
+Use a **session/direct** URI. Avoid transaction-only poolers (e.g. Supabase port **6543**).
 
 ---
 
-## Deploy (Render web + Neon DB)
+## Deployment options (ranked)
 
-### 1. Neon (always-free Postgres)
+Best → less ideal. Host must run the Docker image / binary and accept GitHub webhooks.
 
-1. Sign up at [console.neon.tech](https://console.neon.tech/signup) — Free plan, no card ([Neon](https://neon.com/pricing)).
-2. Copy a **direct** or **session** connection URI (avoid transaction-only / port **6543**).
-3. That string is `DATABASE_URL`. Soft limits: ~0.5 GB storage / project, monthly compute hours, scale-to-zero when idle ([Neon FAQ](https://neon.com/faqs/managed-postgres-databases-free-tier)).
+| Rank | Option | Always free? | Approx. free limit | Fit for Codasaurus | Main catch |
+| :---: | --- | --- | --- | --- | --- |
+| **1** | [Render](https://render.com/pricing) free **web service** | Yes (permanent free *web* plan) | ~512 MB RAM, ~750 hrs/mo, sleeps ~15 min ([guide](https://deploybase.app/blog/render-free-tier-complete-guide-2026)) | **Best DX** — Dockerfile + HTTPS | Cold start 30–60s after sleep |
+| **2** | Local / home server + free tunnel | Yes | Your machine | Zero cloud bill; great for dogfooding | Must stay online for webhooks |
+| **3** | [Oracle Always Free](https://www.oracle.com/cloud/postgresql) VM + Docker | Yes (Always Free compute) | Always Free VM quotas | Always-on-ish if you size it right | More ops than Render |
+| **4** | Any always-on box you already pay for | Yes incremental | Your VPS | `docker compose up` in prod | Not “new free cloud,” but $0 extra |
+| **5** | Other PaaS free web tiers | Only if permanent $0 | Varies | Possible | Skip if card + auto-bill or trial-only (e.g. Railway credits) |
 
-### 2. Render (always-free web service)
+**Do not use for “forever free”:** Railway trial credits, time-boxed PaaS free DBs bundled as “free hosting.”
 
-1. New **Web Service** → this repo → **Docker** → plan **Free**.
-2. Env:
+---
 
-| Key | Value |
+## Best suggestions (pick a row)
+
+Recommended combinations for people running Codasaurus at $0.
+
+| Suggestion | Postgres | Deploy | LLM | Best for |
+| --- | --- | --- | --- | --- |
+| **A — Recommended** | Neon (#1) | Render free web (#1) | Off | Most people; least friction |
+| **B — Dashboard-friendly DB** | Supabase (#2) | Render free web (#1) | Off | Prefer Supabase UI; add a weekly ping so it doesn’t pause |
+| **C — All on your metal** | Compose Postgres (#3) | Same host / tunnel (#2) | Off or Ollama | Max control, no cloud DB |
+| **D — Always-on free VM** | Neon (#1) or Compose on VM (#3) | Oracle Always Free VM (#3) | Off | Fewer cold starts than Render sleep |
+| **E — Already have a VPS** | Neon (#1) or local Postgres (#3) | Your VPS (#4) | Off / Ollama | Production-ish without new SaaS |
+
+Optional LLM later (still $0): disable is fine; or **Ollama on your PC**; or [OpenRouter](https://openrouter.ai) models currently listed free (rate-limited; list changes).
+
+---
+
+## Quick start (suggestion A)
+
+1. **Neon** — create Free project → copy connection URI → `DATABASE_URL`.
+2. **Render** — Web Service → this repo → Docker → Free plan.
+
+| Env | Value |
 | --- | --- |
 | `DATABASE_URL` | Neon URI |
 | `CODASAURUS_FREE_TIER` | `1` |
 | `PUBLIC_URL` | `https://YOUR-SERVICE.onrender.com` |
 
-3. Health check: `/health`
-4. Deploy until logs show `Database connected (PostgreSQL)`.
+3. Health check `/health` → deploy → wizard: **skip LLM** → GitHub App → admin.
+4. `curl -s https://YOUR-SERVICE.onrender.com/health` → HTTP 200.
 
-Render free web **sleeps after ~15 minutes** idle and cold-starts in tens of seconds ([Render free guide](https://deploybase.app/blog/render-free-tier-complete-guide-2026)). That is a soft limit, not an expiry. GitHub usually retries webhooks.
-
-### 3. Wizard
-
-Skip LLM → create GitHub App → create admin. Tier‑1 review works at $0.
-
----
-
-## Always-free Postgres alternatives
-
-Only permanent free plans:
-
-| Provider | Always free? | Notes for Codasaurus |
-| --- | --- | --- |
-| **Neon Free** | Yes — recommended | Best default; auto pool/TLS tuning in-app |
-| **Supabase Free** | Yes (plan does not expire) | ~500 MB; projects **pause after 1 week** idle ([Supabase pricing](https://supabase.com/pricing)) — wake with traffic or a keep-alive; max 2 free projects |
-| **Self-host Postgres** on hardware you already have | Yes | `docker compose` Postgres + app; $0 incremental |
-
-Do **not** list Render free Postgres, Railway, or time-boxed cloud DB trials here.
-
----
-
-## Always-free app hosting alternatives
-
-| Option | Always free? | Fit |
-| --- | --- | --- |
-| **Render free web** | Yes (with sleep + monthly caps) | Easiest for this Dockerfile |
-| **Laptop / home server + tunnel** | Yes | `docker compose up`; expose with a free tunnel if needed |
-| **Oracle Cloud Always Free VM** | Yes (Always Free compute/storage) | More setup: run Docker yourself on an Always Free instance ([Oracle Free Tier](https://www.oracle.com/cloud/postgresql) mentions Always Free services + separate 30-day credits — use **Always Free** only, ignore the trial credits) |
-
-Skip Fly/Railway unless you confirm a permanent $0 plan with no card billing.
-
----
-
-## Always-free LLM
-
-| Option | Lifetime free? | Notes |
-| --- | --- | --- |
-| **LLM disabled** | Yes | Default for this guide |
-| **Ollama on your PC** | Yes | Your electricity; point `CODASAURUS_BASE_URL` at it |
-| **OpenRouter free model IDs** | Yes while listed free | Rate limits; not an SLA ([free model lists change](https://costgoat.com/pricing/openrouter-free-models)) |
-
----
-
-## Local forever-free (no cloud bill)
+Set `CODASAURUS_FREE_TIER=1` on any free host. Codasaurus then uses a small pool (3), 60s acquire timeout, and 1 concurrent review. Details: [database.md](database.md).
 
 ```bash
+# Suggestion C — local forever-free
 docker compose up
 ```
-
-Postgres + Codasaurus on your machine. Lifetime free. Use a free tunnel only if GitHub must reach you.
-
----
-
-## Product defaults for this stack
-
-With `CODASAURUS_FREE_TIER=1` or Neon/Supabase/Render URLs:
-
-| Knob | Default |
-| --- | --- |
-| Pool size | 3 |
-| Acquire timeout | 60s (Neon wake) |
-| Concurrent reviews | 1 |
-| `/health` | HTTP 200 while DB is waking |
-
-Details: [database.md](database.md).
 
 ---
 
 ## Sources
 
-- [Neon pricing](https://neon.com/pricing) · [Neon free FAQ](https://neon.com/faqs/managed-postgres-databases-free-tier) · [Neon Always Free (FreeTiers)](https://www.freetiers.com/directory/neon)
-- [Supabase pricing](https://supabase.com/pricing) (pause after 1 week inactivity)
-- [Render pricing](https://render.com/pricing) · [Render free tier guide](https://deploybase.app/blog/render-free-tier-complete-guide-2026) (Mar 2026) · [Render free (AgentDeals)](https://agentdeals.dev/vendor/render) (Jun 2026)
-- [Oracle Cloud Free Tier / Always Free](https://www.oracle.com/cloud/postgresql)
+- [Neon pricing](https://neon.com/pricing) · [Neon free FAQ](https://neon.com/faqs/managed-postgres-databases-free-tier) · [Neon Always Free](https://www.freetiers.com/directory/neon)
+- [Supabase pricing](https://supabase.com/pricing)
+- [Render pricing](https://render.com/pricing) · [Render free guide](https://deploybase.app/blog/render-free-tier-complete-guide-2026) (Mar 2026) · [Render free (AgentDeals)](https://agentdeals.dev/vendor/render) (Jun 2026)
+- [Free PostgreSQL hosting 2026](https://swyftstack.com/blog/free-postgresql-hosting) (Jul 2026)
+- [Oracle Cloud Free Tier](https://www.oracle.com/cloud/postgresql)
 - [OpenRouter free models listing](https://costgoat.com/pricing/openrouter-free-models) (Jul 2026)
