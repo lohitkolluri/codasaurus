@@ -537,8 +537,130 @@ async fn spawn_describe(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) 
 }
 
 async fn spawn_improve(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
-    // Improve runs a full review so inline ```suggestion``` blocks and fix guidance appear
-    spawn_review(ctx, pr_number, timeout_secs).await;
+    let pool = bot_db_pool();
+    let Some(llm) = crate::llm::LlmConfig::from_db_or_env(pool).await else {
+        // No LLM — fall back to full static review (still surfaces codemods).
+        spawn_review(ctx, pr_number, timeout_secs).await;
+        return;
+    };
+
+    let Ok(_permit) = REVIEW_PERMITS.acquire().await else {
+        tracing::error!("review semaphore closed");
+        return;
+    };
+
+    let ctx_fallback = ctx.clone();
+    let result = timeout(Duration::from_secs(timeout_secs), async move {
+        let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
+        let pr = fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await?;
+        let title = pr["title"].as_str().unwrap_or("").to_string();
+        let body = pr["body"].as_str().unwrap_or("").to_string();
+        let head_ref = pr["head"]["ref"].as_str().unwrap_or("").to_string();
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .build()?;
+        let auth = format!("Bearer {token}");
+        let files_url = format!(
+            "https://api.github.com/repos/{}/pulls/{}/files?per_page=100",
+            ctx.repo_full_name, pr_number
+        );
+        let files: Vec<serde_json::Value> = client
+            .get(&files_url)
+            .header("Authorization", &auth)
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", USER_AGENT)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        let mut diff = String::new();
+        for f in files.iter().take(40) {
+            let name = f["filename"].as_str().unwrap_or("?");
+            let patch = f["patch"].as_str().unwrap_or("");
+            if patch.is_empty() {
+                continue;
+            }
+            let _ = std::fmt::Write::write_fmt(
+                &mut diff,
+                format_args!("--- a/{name}\n+++ b/{name}\n{patch}\n"),
+            );
+            if diff.len() > 24_000 {
+                break;
+            }
+        }
+        if diff.is_empty() {
+            post_issue_comment(
+                &token,
+                &ctx.repo_full_name,
+                pr_number,
+                "### Codasaurus improve\n\nNo textual diffs available to improve.",
+            )
+            .await?;
+            return Ok::<_, anyhow::Error>(());
+        }
+
+        let review_ctx = crate::llm::ReviewContext {
+            repo: Some(ctx.repo_full_name.clone()),
+            branch: Some(head_ref),
+            pr_title: Some(title.clone()),
+            pr_description: Some(body.chars().take(2_000).collect()),
+            linked_issues: Vec::new(),
+            related_prs: Vec::new(),
+            repo_context: Some(format!(
+                "Improve mode: suggest concrete code fixes for PR `{title}`."
+            )),
+        };
+
+        let output = crate::llm::review_diff(&diff, &llm, Some(&review_ctx)).await?;
+        let mut text = String::from("### Codasaurus improve\n\n");
+        if let Some(summary) = output.summary.as_deref().filter(|s| !s.is_empty()) {
+            let _ = std::fmt::Write::write_fmt(&mut text, format_args!("{summary}\n\n"));
+        } else if !output.verdict.is_empty() {
+            let _ = std::fmt::Write::write_fmt(
+                &mut text,
+                format_args!("**Verdict:** {}\n\n", output.verdict),
+            );
+        }
+        if output.issues.is_empty() {
+            text.push_str("_No improvement suggestions from the model._\n");
+        } else {
+            text.push_str("| File | Line | Severity | Suggestion |\n| --- | ---: | --- | --- |\n");
+            for issue in output.issues.iter().take(20) {
+                let sev = &issue.severity;
+                let sug = issue
+                    .suggestion
+                    .as_deref()
+                    .unwrap_or(&issue.description)
+                    .replace('|', "\\|")
+                    .chars()
+                    .take(160)
+                    .collect::<String>();
+                let _ = std::fmt::Write::write_fmt(
+                    &mut text,
+                    format_args!("| `{}` | {} | `{sev}` | {sug} |\n", issue.file, issue.line),
+                );
+            }
+        }
+        text.push_str(
+            "\n<details><summary>Commands</summary>\n\n`@codasaurus review` · `@codasaurus ask …`\n\n</details>",
+        );
+        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await?;
+        Ok(())
+    })
+    .await;
+
+    match result {
+        Ok(Ok(())) => tracing::info!(pr = pr_number, "improve completed"),
+        Ok(Err(e)) => {
+            tracing::warn!(pr = pr_number, error = %e, "improve failed; falling back to review");
+            drop(_permit);
+            spawn_review(ctx_fallback, pr_number, timeout_secs).await;
+        }
+        Err(_) => tracing::error!(pr = pr_number, "improve timed out"),
+    }
 }
 
 async fn spawn_ask(ctx: WebhookContext, pr_number: i64, question: String, timeout_secs: u64) {
