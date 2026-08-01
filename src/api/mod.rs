@@ -8,11 +8,13 @@ pub mod auth;
 pub mod errors;
 pub mod github;
 pub mod learning;
+pub mod rbac;
 pub mod repos;
 pub mod reviews;
 pub mod settings;
 pub mod setup;
 pub mod stats;
+pub mod users;
 
 use axum::middleware;
 use axum::Router;
@@ -42,6 +44,7 @@ pub fn protected_router() -> Router<AppState> {
         .nest("/api/learning", learning::router())
         .nest("/api/github", github::router())
         .nest("/api/audit", audit::router())
+        .nest("/api/users", users::router())
 }
 
 /// Build the full API route tree. Prefer [`build_router`] when you have state

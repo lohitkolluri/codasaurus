@@ -107,8 +107,9 @@ CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY,
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL DEFAULT '',
-    role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin', 'viewer')),
+    role TEXT NOT NULL DEFAULT 'owner' CHECK (role IN ('owner', 'maintainer', 'viewer')),
     auth_provider TEXT NOT NULL DEFAULT 'local',
+    is_bootstrap BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -120,6 +121,20 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS invites (
+    id BIGSERIAL PRIMARY KEY,
+    token_hash TEXT UNIQUE NOT NULL,
+    email TEXT,
+    role TEXT NOT NULL CHECK (role IN ('owner', 'maintainer', 'viewer')),
+    created_by TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    accepted_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_invites_pending
+    ON invites (expires_at ASC) WHERE accepted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS webhook_deliveries (
     delivery_id TEXT PRIMARY KEY,
@@ -227,6 +242,112 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     .await?;
 
     migrate_v11_timestamptz_and_indexes(pool).await?;
+    migrate_v12_roles_and_invites(pool).await?;
+    migrate_v13_bootstrap_owner(pool).await?;
+    Ok(())
+}
+
+/// v13: mark the first/onboarding account as bootstrap (instance superuser).
+async fn migrate_v13_bootstrap_owner(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
+    if current.unwrap_or(0) >= 13 {
+        return Ok(());
+    }
+
+    let _ = sqlx::query(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_bootstrap BOOLEAN NOT NULL DEFAULT FALSE",
+    )
+    .execute(pool)
+    .await;
+
+    // Existing installs: earliest owner becomes the bootstrap account.
+    let _ = sqlx::query(
+        r#"
+        UPDATE users SET is_bootstrap = TRUE
+        WHERE id = (
+            SELECT id FROM users
+            WHERE role IN ('owner', 'admin')
+            ORDER BY created_at ASC, id ASC
+            LIMIT 1
+        )
+        AND NOT EXISTS (SELECT 1 FROM users WHERE is_bootstrap = TRUE)
+        "#,
+    )
+    .execute(pool)
+    .await;
+
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (13) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// v12: admin/viewer → owner/maintainer/viewer + invites table.
+async fn migrate_v12_roles_and_invites(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
+    if current.unwrap_or(0) >= 12 {
+        return Ok(());
+    }
+
+    // Drop old CHECK, migrate roles, re-add CHECK for new role set.
+    let _ = sqlx::query(
+        "ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check",
+    )
+    .execute(pool)
+    .await;
+    sqlx::query("UPDATE users SET role = 'owner' WHERE role = 'admin'")
+        .execute(pool)
+        .await?;
+    // Any unexpected role becomes viewer.
+    sqlx::query(
+        "UPDATE users SET role = 'viewer' WHERE role NOT IN ('owner', 'maintainer', 'viewer')",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "ALTER TABLE users ALTER COLUMN role SET DEFAULT 'owner'",
+    )
+    .execute(pool)
+    .await?;
+    let _ = sqlx::query(
+        "ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('owner', 'maintainer', 'viewer'))",
+    )
+    .execute(pool)
+    .await;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS invites (
+            id BIGSERIAL PRIMARY KEY,
+            token_hash TEXT UNIQUE NOT NULL,
+            email TEXT,
+            role TEXT NOT NULL CHECK (role IN ('owner', 'maintainer', 'viewer')),
+            created_by TEXT NOT NULL,
+            expires_at TIMESTAMPTZ NOT NULL,
+            accepted_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+    let _ = sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_invites_pending ON invites (expires_at ASC) WHERE accepted_at IS NULL",
+    )
+    .execute(pool)
+    .await;
+
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (12) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

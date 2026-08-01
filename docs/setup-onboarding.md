@@ -8,15 +8,14 @@
 
 Codasaurus serves a Svelte SPA on the same port as the API. On a fresh install, open the dashboard and finish the wizard (~5 minutes). You can leave and resume; progress is derived from stored config, not a sticky “wizard state” cookie.
 
-
 ## Steps
 
 | #   | Step                | Required          | What it stores                                                   |
 | --- | ------------------- | ----------------- | ---------------------------------------------------------------- |
 | 1   | **Database**        | Auto when serving | Confirms live Postgres; optional URL preference (`database_url`) |
-| 2   | **AI review (LLM)** | Optional          | `llm_provider`, key / model / base URL, or `disabled`           |
+| 2   | **AI review (LLM)** | Optional          | `llm_provider`, key / model / base URL, or `disabled`            |
 | 3   | **GitHub App**      | Yes               | App ID, private key PEM, webhook secret, slug                    |
-| 4   | **Admin**           | Yes               | First `users` row with role `admin`                              |
+| 4   | **Owner**           | Yes               | First `users` row: role `owner` + `is_bootstrap` (superuser)     |
 
 `GET /api/setup/status` returns booleans for each step plus `complete` when all required steps are true. Env vars already set at process start (`DATABASE_URL`, `OPENROUTER_API_KEY`, `GITHUB_APP_ID`, …) count as done. The database step is **true whenever the server is up** (Postgres connected at boot).
 
@@ -27,14 +26,14 @@ Codasaurus serves a Svelte SPA on the same port as the API. On a fresh install, 
 3. Confirm **PostgreSQL** (Compose already wired `DATABASE_URL`). See [database.md](database.md).
 4. On LLM: use OpenRouter / Ollama, or **Skip for now** (Tier‑1 detectors still run).
 5. **Create GitHub App** opens GitHub’s manifest form in a new tab; credentials save on callback.
-6. Create the admin email/password (min 8 characters). There is no email reset yet. Store the password safely.
+6. Create the owner email/password (min 8 characters). This account is the instance **superuser** (bootstrap owner). There is no email reset yet. Store the password safely. Invite teammates later from Settings → Team.
 7. On **Setup complete**: install the App on orgs/repos, then sign in.
 
 ## Routing behavior
 
 - `/#/` and `/#/setup` redirect to login when setup is already complete.
 - `/#/setup/complete` sends you back to the first incomplete step if anything is missing.
-- After the first admin exists, mutating `/api/setup/*` requires an authenticated admin session.
+- After the first owner exists, mutating `/api/setup/*` requires an authenticated **owner** session.
 
 ## From source without Compose
 

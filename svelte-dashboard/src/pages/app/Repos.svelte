@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { push } from "svelte-spa-router";
   import { api } from "../../stores/api.js";
+  import { isMaintainer } from "../../stores/auth.js";
   import Sidebar from "../../lib/Sidebar.svelte";
   import Header from "../../lib/Header.svelte";
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
@@ -15,6 +16,7 @@
   let syncMsg = $state("");
   let syncError = $state(false);
   let search = $state("");
+  let canManage = $derived($isMaintainer);
 
   let filtered = $derived.by(() => {
     if (!search) return repos;
@@ -131,7 +133,7 @@
         <div class="toolbar-actions">
           <span class="toolbar-count">{repos.length} synced</span>
           <button onclick={manageRepos}>Configure repos on GitHub</button>
-          <button onclick={syncRepos} disabled={syncing}>{syncing ? "Syncing…" : "Sync Repos"}</button>
+          <button onclick={syncRepos} disabled={syncing || !canManage}>{syncing ? "Syncing…" : "Sync Repos"}</button>
           <button class="primary" onclick={installRepo}>Install on new repos</button>
         </div>
       </div>
@@ -145,8 +147,8 @@
           <input type="search" placeholder="Search repositories…" bind:value={search} />
           <div class="search-actions">
             <span class="filter-count">{filtered.length} of {repos.length}</span>
-            <button onclick={() => batchToggle(true)}>Enable all</button>
-            <button onclick={() => batchToggle(false)}>Disable all</button>
+            <button onclick={() => batchToggle(true)} disabled={!canManage}>Enable all</button>
+            <button onclick={() => batchToggle(false)} disabled={!canManage}>Disable all</button>
           </div>
         </div>
       {/if}
@@ -182,7 +184,7 @@
                   <td><code>{repo.default_branch ?? "main"}</code></td>
                   <td>{repo.updated_at ? new Date(repo.updated_at).toLocaleDateString() : "-"}</td>
                   <td>
-                    <button class="toggle-btn" class:active={repo.active} onclick={(e) => { e.stopPropagation(); toggleRepo(repo.id, repo.active); }}>
+                    <button class="toggle-btn" class:active={repo.active} disabled={!canManage} onclick={(e) => { e.stopPropagation(); if (canManage) toggleRepo(repo.id, repo.active); }}>
                       {repo.active ? "Active" : "Inactive"}
                     </button>
                   </td>

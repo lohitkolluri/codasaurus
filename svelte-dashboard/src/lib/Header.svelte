@@ -1,5 +1,5 @@
 <script>
-  import { currentUser, logout } from "../stores/auth.js";
+  import { currentUser, logout, roleLabel } from "../stores/auth.js";
   import { push } from "svelte-spa-router";
   import { Sun, Moon, LogOut } from "lucide-svelte";
 
@@ -24,7 +24,16 @@
       <span class="top-header-title">{title}</span>
   </div>
   <div class="top-header-right">
-    <span class="header-user">{($currentUser?.email) ?? ""}</span>
+    {#if $currentUser}
+      <span class="header-user">
+        {$currentUser.email}
+        {#if $currentUser.role}
+          <span class="role-badge" class:bootstrap={!!$currentUser.is_bootstrap}>
+            {roleLabel($currentUser.role, $currentUser.is_bootstrap)}
+          </span>
+        {/if}
+      </span>
+    {/if}
     <button class="header-btn icon-btn" aria-label="Toggle theme" title="Toggle theme" onclick={toggleTheme}>
       {#if theme === "light"}<Moon size={16} />{:else}<Sun size={16} />{/if}
     </button>

@@ -73,5 +73,6 @@
         {submitting ? "Signing in…" : "Sign In"}
       </button>
     </form>
+    <p class="login-invite-hint">Have an invite link? Open it to create your account.</p>
   </div>
 </div>

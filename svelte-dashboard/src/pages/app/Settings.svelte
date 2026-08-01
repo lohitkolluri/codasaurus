@@ -1,25 +1,29 @@
 <script>
-  import { onMount, tick } from "svelte";
+  import { onMount } from "svelte";
   import { location } from "svelte-spa-router";
   import { api } from "../../stores/api.js";
+  import { currentUser, isOwner, isMaintainer, roleLabel } from "../../stores/auth.js";
   import { formatLabel } from "../../lib/utils.js";
   import Sidebar from "../../lib/Sidebar.svelte";
   import Header from "../../lib/Header.svelte";
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
   import ErrorState from "../../lib/ErrorState.svelte";
 
-  const SECTIONS = [
+  const TABS = [
     { id: "llm", label: "LLM" },
     { id: "detectors", label: "Detectors" },
     { id: "policy", label: "Policy" },
     { id: "github", label: "GitHub" },
+    { id: "team", label: "Team" },
     { id: "learning", label: "Learning" },
   ];
+
+  let canEditSettings = $derived($isOwner);
 
   let settings = $state({});
   let loading = $state(true);
   let error = $state("");
-  let activeSection = $state("llm");
+  let activeTab = $state("llm");
 
   let llmProvider = $state("openrouter");
   let llmKey = $state("");
@@ -82,6 +86,19 @@
   let clearingGithub = $state(false);
   let confirmClearGithub = $state(false);
 
+  let members = $state([]);
+  let pendingInvites = $state([]);
+  let teamMsg = $state("");
+  let inviteEmail = $state("");
+  let inviteRole = $state("viewer");
+  let inviteCreating = $state(false);
+  let lastInviteUrl = $state("");
+  let confirmRemoveId = $state(null);
+  let pwCurrent = $state("");
+  let pwNew = $state("");
+  let pwMsg = $state("");
+  let pwSaving = $state(false);
+
   const PROVIDER_DEFAULTS = {
     openrouter: { model: "openai/gpt-4o", baseUrl: OPENROUTER_BASE },
     ollama: { model: "llama3", baseUrl: "http://localhost:11434/v1" },
@@ -139,40 +156,126 @@
     setTimeout(() => (cheapModelDropdown = false), 150);
   }
 
-  /** In-page jump only — do not touch location.hash (svelte-spa-router owns it). */
-  function scrollToSection(id) {
-    activeSection = id;
-    document.getElementById(`settings-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  function selectTab(id) {
+    if (!TABS.some((t) => t.id === id)) return;
+    activeTab = id;
   }
 
-  async function jumpToDeepLink() {
-    await tick();
+  function applyDeepLink() {
     if ($location === "/app/settings/github") {
-      activeSection = "github";
-      document.getElementById("settings-github")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      activeTab = "github";
     }
   }
 
-  function watchSectionVisibility() {
-    const nodes = SECTIONS.map((s) => document.getElementById(`settings-${s.id}`)).filter(Boolean);
-    if (nodes.length === 0) return () => {};
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
-        if (visible[0]?.target?.id) {
-          activeSection = visible[0].target.id.replace(/^settings-/, "");
-        }
-      },
-      { rootMargin: "-20% 0px -55% 0px", threshold: [0.15, 0.4, 0.7] }
-    );
-    for (const el of nodes) observer.observe(el);
-    return () => observer.disconnect();
+  async function loadTeam() {
+    if (!$isOwner) return;
+    try {
+      const [u, inv] = await Promise.all([
+        api.get("/api/users"),
+        api.get("/api/users/invites"),
+      ]);
+      members = u.users || [];
+      pendingInvites = inv.invites || [];
+    } catch {
+      members = [];
+      pendingInvites = [];
+    }
+  }
+
+  async function createInvite() {
+    inviteCreating = true;
+    teamMsg = "";
+    lastInviteUrl = "";
+    try {
+      const res = await api.post("/api/users/invites", {
+        email: inviteEmail.trim() || null,
+        role: inviteRole,
+      });
+      lastInviteUrl = res.url || "";
+      teamMsg = "Invite created. Copy the link and share it.";
+      inviteEmail = "";
+      await loadTeam();
+    } catch (err) {
+      teamMsg = err.message || "Invite failed";
+    } finally {
+      inviteCreating = false;
+    }
+  }
+
+  async function copyInviteUrl() {
+    if (!lastInviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(lastInviteUrl);
+      teamMsg = "Invite link copied";
+    } catch {
+      teamMsg = "Copy failed. Select the URL manually.";
+    }
+  }
+
+  async function revokeInvite(id) {
+    teamMsg = "";
+    try {
+      await api.delete(`/api/users/invites/${id}`);
+      teamMsg = "Invite revoked";
+      await loadTeam();
+    } catch (err) {
+      teamMsg = err.message || "Revoke failed";
+    }
+  }
+
+  async function changeMemberRole(id, role) {
+    teamMsg = "";
+    try {
+      await api.patch(`/api/users/${id}`, { role });
+      teamMsg = "Role updated";
+      await loadTeam();
+    } catch (err) {
+      teamMsg = err.message || "Role change failed";
+    }
+  }
+
+  async function transferBootstrap(id) {
+    teamMsg = "";
+    try {
+      await api.post(`/api/users/${id}/transfer-bootstrap`);
+      teamMsg = "Bootstrap / superuser transferred";
+      await loadTeam();
+    } catch (err) {
+      teamMsg = err.message || "Transfer failed";
+    }
+  }
+
+  async function removeMember(id) {
+    teamMsg = "";
+    try {
+      await api.delete(`/api/users/${id}`);
+      confirmRemoveId = null;
+      teamMsg = "Member removed";
+      await loadTeam();
+    } catch (err) {
+      teamMsg = err.message || "Remove failed";
+    }
+  }
+
+  async function changePassword() {
+    pwSaving = true;
+    pwMsg = "";
+    try {
+      await api.post("/api/users/me/password", {
+        current_password: pwCurrent,
+        new_password: pwNew,
+      });
+      pwMsg = "Password updated";
+      pwCurrent = "";
+      pwNew = "";
+    } catch (err) {
+      pwMsg = err.message || "Password change failed";
+    } finally {
+      pwSaving = false;
+    }
   }
 
   onMount(() => {
-    let stopWatch = () => {};
     (async () => {
       try {
         const [data, gh] = await Promise.all([
@@ -221,11 +324,10 @@
         error = err.message || "Failed to load settings";
       } finally {
         loading = false;
-        await jumpToDeepLink();
-        stopWatch = watchSectionVisibility();
+        await loadTeam();
+        applyDeepLink();
       }
     })();
-    return () => stopWatch();
   });
 
   async function saveLLM() {
@@ -348,24 +450,42 @@
         <div class="page-toolbar compact settings-hero">
           <div>
             <h1 class="page-title">Settings</h1>
-            <p class="page-description">LLM, detectors, policy, GitHub App, and learned rules.</p>
+            <p class="page-description">LLM, detectors, policy, GitHub App, team, and learned rules.</p>
           </div>
         </div>
 
-        <nav class="settings-subnav" aria-label="Settings sections">
-          {#each SECTIONS as s}
-            <button
-              type="button"
-              class="settings-subnav-item"
-              class:active={activeSection === s.id}
-              aria-current={activeSection === s.id ? "true" : undefined}
-              onclick={() => scrollToSection(s.id)}
-            >{s.label}</button>
-          {/each}
-        </nav>
+        {#if !canEditSettings}
+          <div class="settings-readonly-banner" role="status">
+            Only owners can change LLM, detector, policy, and GitHub settings. Your role: {roleLabel($currentUser?.role, $currentUser?.is_bootstrap)}.
+          </div>
+        {/if}
 
-        <div class="settings-stack">
-          <section id="settings-llm" class="card settings-card settings-card-wide">
+        <div class="settings-tabs-wrap">
+          <nav class="settings-tabs" aria-label="Settings tabs" role="tablist">
+            {#each TABS as s}
+              <button
+                type="button"
+                role="tab"
+                class="settings-tab"
+                class:active={activeTab === s.id}
+                id="tab-{s.id}"
+                aria-selected={activeTab === s.id}
+                aria-controls="panel-{s.id}"
+                tabindex={activeTab === s.id ? 0 : -1}
+                onclick={() => selectTab(s.id)}
+              >{s.label}</button>
+            {/each}
+          </nav>
+        </div>
+
+        <div
+          class="settings-panel"
+          role="tabpanel"
+          id="panel-{activeTab}"
+          aria-labelledby="tab-{activeTab}"
+        >
+          {#if activeTab === "llm"}
+          <section class="card settings-card">
             <header class="settings-section-head">
               <h3 class="section-heading">LLM</h3>
               <p class="section-desc">Optional. Tier-1 detectors run without a model.</p>
@@ -454,12 +574,12 @@
               </div>
             {/if}
             <div class="save-row">
-              <button onclick={saveLLM} disabled={llmSaving}>{llmSaving ? "Saving…" : "Save"}</button>
+              <button onclick={saveLLM} disabled={llmSaving || !canEditSettings}>{llmSaving ? "Saving…" : "Save"}</button>
               {#if llmMsg}<span class="save-msg" class:error={llmMsg !== "Saved"}>{llmMsg}</span>{/if}
             </div>
           </section>
-
-          <section id="settings-detectors" class="card settings-card">
+          {:else if activeTab === "detectors"}
+          <section class="card settings-card">
             <header class="settings-section-head">
               <h3 class="section-heading">Detectors</h3>
               <p class="section-desc">Tier-1 checks that run on every PR.</p>
@@ -488,7 +608,7 @@
               </select>
             </div>
             <div class="save-row">
-              <button onclick={async () => { await saveDetectors(); await saveSeverity(); }} disabled={detectorSaving || severitySaving}>
+              <button onclick={async () => { await saveDetectors(); await saveSeverity(); }} disabled={detectorSaving || severitySaving || !canEditSettings}>
                 {detectorSaving || severitySaving ? "Saving…" : "Save"}
               </button>
               {#if detectorMsg || severityMsg}
@@ -498,8 +618,8 @@
               {/if}
             </div>
           </section>
-
-          <section id="settings-policy" class="card settings-card">
+          {:else if activeTab === "policy"}
+          <section class="card settings-card">
             <header class="settings-section-head">
               <h3 class="section-heading">Policy</h3>
               <p class="section-desc">Caps, paths, labels, and offline mode.</p>
@@ -591,12 +711,12 @@
               <textarea id="custom-instructions" rows="4" bind:value={customInstructions} placeholder="Prefer small PRs; never suggest rewriting auth…"></textarea>
             </div>
             <div class="save-row">
-              <button onclick={savePolicy} disabled={policySaving}>{policySaving ? "Saving…" : "Save"}</button>
+              <button onclick={savePolicy} disabled={policySaving || !canEditSettings}>{policySaving ? "Saving…" : "Save"}</button>
               {#if policyMsg}<span class="save-msg" class:error={policyMsg !== "Saved"}>{policyMsg}</span>{/if}
             </div>
           </section>
-
-          <section id="settings-github" class="card settings-card settings-card-wide">
+          {:else if activeTab === "github"}
+          <section class="card settings-card">
             <header class="settings-section-head">
               <h3 class="section-heading">GitHub App</h3>
               <p class="section-desc">Install URL and local credentials. Rotate keys on GitHub, then clear and re-setup here.</p>
@@ -634,7 +754,7 @@
                   This does <strong>not</strong> uninstall the App from GitHub.
                 </p>
                 {#if !confirmClearGithub}
-                  <button class="danger" onclick={() => (confirmClearGithub = true)}>Clear local GitHub config</button>
+                  <button class="danger" onclick={() => (confirmClearGithub = true)} disabled={!canEditSettings}>Clear local GitHub config</button>
                 {:else}
                   <p style="font-size:13px;margin-bottom:8px">Clear local credentials? The GitHub App stays installed until you remove it on GitHub.</p>
                   <div style="display:flex;gap:8px">
@@ -655,8 +775,124 @@
               </div>
             {/if}
           </section>
+          {:else if activeTab === "team"}
+          <section class="card settings-card">
+            <header class="settings-section-head">
+              <h3 class="section-heading">Team</h3>
+              <p class="section-desc">Owners, maintainers, and viewers. Invite with a shareable link (no email required).</p>
+            </header>
 
-          <section id="settings-learning" class="card settings-card">
+            <div class="settings-meta-grid" style="margin-bottom:16px">
+              <div>
+                <span class="meta-label">Your access</span>
+                <p class="meta-value">{roleLabel($currentUser?.role, $currentUser?.is_bootstrap)} · {$currentUser?.email}</p>
+              </div>
+            </div>
+
+            {#if $currentUser?.auth_provider !== "oidc"}
+              <div class="form-group">
+                <label for="pw-current">Change password</label>
+                <input id="pw-current" type="password" bind:value={pwCurrent} placeholder="Current password" autocomplete="current-password" />
+              </div>
+              <div class="form-group">
+                <label for="pw-new">New password</label>
+                <input id="pw-new" type="password" bind:value={pwNew} placeholder="At least 8 characters" autocomplete="new-password" />
+              </div>
+              <div class="save-row">
+                <button onclick={changePassword} disabled={pwSaving || !pwCurrent || pwNew.length < 8}>
+                  {pwSaving ? "Updating…" : "Update password"}
+                </button>
+                {#if pwMsg}<span class="save-msg" class:error={pwMsg !== "Password updated"}>{pwMsg}</span>{/if}
+              </div>
+            {/if}
+
+            {#if $isOwner}
+              <h4 class="team-subhead">Members</h4>
+              <div class="detector-list">
+                {#each members as m}
+                  <div class="detector-row">
+                    <span>
+                      <strong>{m.email}</strong>
+                      <span class="role-badge" class:bootstrap={!!m.is_bootstrap}>{roleLabel(m.role, m.is_bootstrap)}</span>
+                      <br /><span class="muted">{m.auth_provider} · joined {m.created_at?.slice?.(0, 10) || ""}</span>
+                    </span>
+                    <div class="team-actions">
+                      {#if m.is_bootstrap}
+                        <span class="muted">Protected</span>
+                      {:else}
+                        <select
+                          value={m.role}
+                          aria-label={`Role for ${m.email}`}
+                          onchange={(e) => changeMemberRole(m.id, e.target.value)}
+                        >
+                          <option value="owner">Owner</option>
+                          <option value="maintainer">Maintainer</option>
+                          <option value="viewer">Viewer</option>
+                        </select>
+                        {#if $currentUser?.is_bootstrap && m.role === "owner"}
+                          <button class="linkish" onclick={() => transferBootstrap(m.id)}>Make superuser</button>
+                        {/if}
+                        {#if confirmRemoveId === m.id}
+                          <button class="danger" onclick={() => removeMember(m.id)}>Confirm</button>
+                          <button onclick={() => (confirmRemoveId = null)}>Cancel</button>
+                        {:else}
+                          <button class="linkish" onclick={() => (confirmRemoveId = m.id)}>Remove</button>
+                        {/if}
+                      {/if}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+
+              <h4 class="team-subhead">Invite link</h4>
+              <div class="settings-llm-grid">
+                <div class="form-group">
+                  <label for="invite-email">Email (optional lock)</label>
+                  <input id="invite-email" type="email" bind:value={inviteEmail} placeholder="optional@company.com" />
+                </div>
+                <div class="form-group">
+                  <label for="invite-role">Role</label>
+                  <select id="invite-role" bind:value={inviteRole}>
+                    <option value="viewer">Viewer</option>
+                    <option value="maintainer">Maintainer</option>
+                    <option value="owner">Owner</option>
+                  </select>
+                </div>
+              </div>
+              <div class="save-row">
+                <button class="primary" onclick={createInvite} disabled={inviteCreating}>
+                  {inviteCreating ? "Creating…" : "Create invite link"}
+                </button>
+                {#if lastInviteUrl}
+                  <button onclick={copyInviteUrl}>Copy invite link</button>
+                {/if}
+              </div>
+              {#if lastInviteUrl}
+                <p class="field-hint" style="word-break:break-all">{lastInviteUrl}</p>
+              {/if}
+
+              {#if pendingInvites.length > 0}
+                <h4 class="team-subhead">Pending invites</h4>
+                <div class="detector-list">
+                  {#each pendingInvites as inv}
+                    <div class="detector-row">
+                      <span>
+                        <strong>{inv.email || "Open link"}</strong>
+                        <span class="role-badge">{roleLabel(inv.role)}</span>
+                        <br /><span class="muted">expires {inv.expires_at?.slice?.(0, 10) || ""} · by {inv.created_by}</span>
+                      </span>
+                      <button class="linkish" onclick={() => revokeInvite(inv.id)}>Revoke</button>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+              {#if teamMsg}<p class="save-msg" class:error={/fail|error|Revoke failed|Invite failed|Role change|Remove failed/i.test(teamMsg)}>{teamMsg}</p>{/if}
+            {:else}
+              <p class="empty-note">Only owners can invite members or change roles.</p>
+            {/if}
+          </section>
+          {:else if activeTab === "learning"}
+          <section class="card settings-card">
             <header class="settings-section-head">
               <h3 class="section-heading">Learning</h3>
               <p class="section-desc">Ignore rules taught by dismissing findings.</p>
@@ -672,13 +908,14 @@
                       {#if rule.file_pattern} · <code>{rule.file_pattern}</code>{/if}
                       <br /><span class="muted">{rule.reason || rule.action}</span>
                     </span>
-                    <button class="linkish" onclick={() => deleteRule(rule.id)}>Delete</button>
+                    <button class="linkish" onclick={() => deleteRule(rule.id)} disabled={!$isMaintainer}>Delete</button>
                   </div>
                 {/each}
               </div>
             {/if}
             {#if rulesMsg}<p class="save-msg" class:error={rulesMsg !== "Rule deleted"}>{rulesMsg}</p>{/if}
           </section>
+          {/if}
         </div>
       {/if}
     </div>
@@ -761,6 +998,20 @@
   .search-item:hover, .search-item.active { background: var(--bg-secondary); }
   .empty-note { font-size: 13px; color: var(--text-muted); }
   .muted { font-size: 12px; color: var(--text-muted); }
+  .team-subhead {
+    margin: 20px 0 10px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .team-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .team-actions select {
+    font-size: 13px;
+    padding: 4px 8px;
+  }
   .linkish {
     background: none;
     border: none;

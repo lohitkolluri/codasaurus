@@ -1,4 +1,4 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{header, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -10,6 +10,7 @@ use serde_json::json;
 use crate::db;
 
 use super::errors::ApiError;
+use super::rbac;
 use super::AppState;
 
 const SESSION_COOKIE: &str = "codasaurus_session";
@@ -40,6 +41,16 @@ pub struct MeResponse {
 pub struct UserInfo {
     pub email: String,
     pub role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_provider: Option<String>,
+    #[serde(default)]
+    pub is_bootstrap: bool,
+}
+
+#[derive(Deserialize)]
+pub struct AcceptInviteBody {
+    pub email: Option<String>,
+    pub password: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -54,6 +65,8 @@ pub fn router() -> Router<AppState> {
         .route("/oidc/status", get(oidc_status))
         .route("/oidc/login", get(oidc_login))
         .route("/oidc/callback", get(oidc_callback))
+        .route("/invite/{token}", get(invite_info))
+        .route("/invite/{token}/accept", post(accept_invite))
 }
 
 // ---------------------------------------------------------------------------
@@ -157,7 +170,9 @@ async fn login(
         Json(LoginResponse {
             user: UserInfo {
                 email: user.email,
-                role: user.role,
+                role: rbac::normalize_role(&user.role).to_string(),
+                auth_provider: None,
+                is_bootstrap: user.is_bootstrap,
             },
         }),
     ))
@@ -167,17 +182,28 @@ async fn login(
 async fn me(State(state): State<AppState>, headers: axum::http::HeaderMap) -> Json<MeResponse> {
     if let Some(token) = extract_token(&headers) {
         if let Ok(Some(email)) = db::sessions::get_session(&state.pool, &token).await {
-            let role: String = crate::db::db_scalar!(
-                &state.pool,
-                String,
-                "SELECT role FROM users WHERE email = ?",
-                &email
-            )
-            .unwrap_or_else(|_| "admin".into());
+            let row: Option<(String, String, bool)> = {
+                let prepared = state.pool.prepare_sql(
+                    "SELECT role, auth_provider, is_bootstrap FROM users WHERE email = ?",
+                );
+                sqlx::query_as::<_, (String, String, bool)>(&prepared)
+                    .bind(&email)
+                    .fetch_optional(state.pool.as_pg())
+                    .await
+                    .ok()
+                    .flatten()
+            };
+            let (role, auth_provider, is_bootstrap) =
+                row.unwrap_or_else(|| ("viewer".into(), "local".into(), false));
 
             return Json(MeResponse {
                 authenticated: true,
-                user: Some(UserInfo { email, role }),
+                user: Some(UserInfo {
+                    email,
+                    role: rbac::normalize_role(&role).to_string(),
+                    auth_provider: Some(auth_provider),
+                    is_bootstrap,
+                }),
             });
         }
     }
@@ -243,7 +269,23 @@ async fn oidc_callback(
     let email = crate::oidc::exchange_code(&cfg, &code)
         .await
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let _user = db::users::upsert_oidc_user(&state.pool, &email, "admin")
+
+    let existing = db::users::get_user_by_email(&state.pool, &email)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let role = if existing.is_some() {
+        // Preserve role on re-login; do not consume invites for existing users.
+        "viewer".to_string()
+    } else {
+        match db::invites::consume_for_oidc(&state.pool, &email)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?
+        {
+            Some(r) => r,
+            None => "viewer".to_string(),
+        }
+    };
+    let _user = db::users::upsert_oidc_user(&state.pool, &email, &role)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
     let token = db::sessions::create_session(&state.pool, &email)
@@ -257,6 +299,103 @@ async fn oidc_callback(
             (header::SET_COOKIE, cookie),
             (header::LOCATION, "/#/app/dashboard".into()),
         ],
+    ))
+}
+
+/// GET /api/auth/invite/:token
+async fn invite_info(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let invite = db::invites::get_pending_by_token(&state.pool, &token)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Invite not found or expired"))?;
+    Ok(Json(json!({
+        "email": invite.email,
+        "role": invite.role,
+        "expires_at": invite.expires_at,
+        "email_locked": invite.email.is_some(),
+    })))
+}
+
+/// POST /api/auth/invite/:token/accept
+async fn accept_invite(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+    Json(body): Json<AcceptInviteBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    let invite = db::invites::get_pending_by_token(&state.pool, &token)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Invite not found or expired"))?;
+
+    if body.password.len() < 8 {
+        return Err(ApiError::bad_request(
+            "Password must be at least 8 characters",
+        ));
+    }
+
+    let email = if let Some(locked) = &invite.email {
+        if let Some(provided) = body.email.as_ref().map(|e| e.trim().to_lowercase()) {
+            if !provided.is_empty() && provided != locked.to_lowercase() {
+                return Err(ApiError::bad_request(
+                    "This invite is locked to a different email",
+                ));
+            }
+        }
+        locked.clone()
+    } else {
+        let e = body
+            .email
+            .as_ref()
+            .map(|e| e.trim().to_lowercase())
+            .filter(|e| !e.is_empty())
+            .ok_or_else(|| ApiError::bad_request("Email is required"))?;
+        if !e.contains('@') {
+            return Err(ApiError::bad_request("Invalid email address"));
+        }
+        e
+    };
+
+    if db::users::get_user_by_email(&state.pool, &email)
+        .await?
+        .is_some()
+    {
+        return Err(ApiError::bad_request(
+            "A user with that email already exists",
+        ));
+    }
+
+    let user = db::invites::accept_local(&state.pool, &invite, &email, &body.password)
+        .await
+        .map_err(|e| {
+            if let sqlx::Error::Database(ref db_err) = e {
+                if db_err.message().contains("UNIQUE") {
+                    return ApiError::bad_request("A user with that email already exists");
+                }
+            }
+            ApiError::internal(e.to_string())
+        })?;
+
+    let session = db::sessions::create_session(&state.pool, &user.email)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    db::audit::log_event(
+        &state.pool,
+        "user.accept",
+        Some(&user.email),
+        Some("invite"),
+        Some(invite.id),
+    )
+    .await;
+
+    Ok((
+        [(header::SET_COOKIE, set_cookie(&session))],
+        Json(json!({
+            "user": {
+                "email": user.email,
+                "role": user.role,
+            }
+        })),
     ))
 }
 

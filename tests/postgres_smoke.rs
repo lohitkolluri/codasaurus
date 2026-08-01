@@ -39,7 +39,7 @@ async fn postgres_migrations_enqueue_and_claim() {
         "pg-smoke-{}@example.com",
         chrono::Utc::now().timestamp_millis()
     );
-    let user = db::users::create_user(&pool, &email, "test-pass-123!", "admin")
+    let user = db::users::create_user(&pool, &email, "test-pass-123!", "owner")
         .await
         .expect("create_user");
     assert_eq!(user.email, email);

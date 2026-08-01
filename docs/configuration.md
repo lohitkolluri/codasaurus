@@ -8,7 +8,6 @@
 
 Codasaurus merges **environment variables**, optional **TOML**, and **dashboard / DB** settings. Precedence for GitHub App credentials: env → DB (wizard). Detector toggles and policy prefer DB overlays when present.
 
-
 ## Process commands
 
 ```text
@@ -21,15 +20,15 @@ codasaurus version
 
 ### Core
 
-| Variable                        | Required            | Description                                                                         |
-| ------------------------------- | ------------------- | ----------------------------------------------------------------------------------- |
-| `DATABASE_URL`                  | recommended         | Postgres URL (default `postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus`) |
-| `CODASAURUS_DB_MAX_CONNECTIONS`     | no          | Pool size (default `16`, or `3` on free/Render/Neon hosts) |
-| `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS`| no          | Wait for a free connection (default `30`, or `60` on free hosts) |
-| `CODASAURUS_FREE_TIER`              | no          | `1` forces free-tier pool + concurrency defaults |
-| `CODASAURUS_DATA_DIR`               | no          | Data directory (Docker: `/data`) |
-| `PORT` / `--port`               | no                  | Listen port (default `3000`)                                                        |
-| `PUBLIC_URL`                    | recommended in prod | Canonical HTTPS origin for GitHub manifest callbacks                                |
+| Variable                             | Required            | Description                                                                         |
+| ------------------------------------ | ------------------- | ----------------------------------------------------------------------------------- |
+| `DATABASE_URL`                       | recommended         | Postgres URL (default `postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus`) |
+| `CODASAURUS_DB_MAX_CONNECTIONS`      | no                  | Pool size (default `16`, or `3` on free/Render/Neon hosts)                          |
+| `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS` | no                  | Wait for a free connection (default `30`, or `60` on free hosts)                    |
+| `CODASAURUS_FREE_TIER`               | no                  | `1` forces free-tier pool + concurrency defaults                                    |
+| `CODASAURUS_DATA_DIR`                | no                  | Data directory (Docker: `/data`)                                                    |
+| `PORT` / `--port`                    | no                  | Listen port (default `3000`)                                                        |
+| `PUBLIC_URL`                         | recommended in prod | Canonical HTTPS origin for GitHub manifest callbacks                                |
 
 ### GitHub App
 
@@ -77,14 +76,29 @@ Dashboard **Settings → LLM** writes `llm_provider`, `llm_model`, `llm_model_ch
 
 ### Auth / SSO
 
-| Variable             | Description                  |
-| -------------------- | ---------------------------- |
-| `OIDC_ISSUER`        | OIDC issuer URL              |
-| `OIDC_CLIENT_ID`     | Client id                    |
-| `OIDC_CLIENT_SECRET` | Client secret                |
-| `PUBLIC_URL`         | Must match IdP redirect URIs |
+| Variable             | Description                                     |
+| -------------------- | ----------------------------------------------- |
+| `OIDC_ISSUER`        | OIDC issuer URL                                 |
+| `OIDC_CLIENT_ID`     | Client id                                       |
+| `OIDC_CLIENT_SECRET` | Client secret                                   |
+| `PUBLIC_URL`         | Base URL for invite links and IdP redirect URIs |
 
-Local admin users are created in the [onboarding wizard](setup-onboarding.md).
+The first account is created as the **bootstrap owner** (shown as **Superuser**) in the [onboarding wizard](setup-onboarding.md). That account cannot be demoted or removed until bootstrap is transferred to another owner. Additional members join via **invite links** (Settings → Team). No SMTP required.
+
+#### Roles
+
+| Role | Can do |
+| ---- | ------ |
+| **Superuser** (bootstrap owner) | Same as Owner; cannot be demoted/removed; can transfer bootstrap to another owner |
+| **Owner** | Everything: settings, GitHub config, invites, role changes |
+| **Maintainer** | Sync/enable repos, dismiss findings, delete learning rules (read settings) |
+| **Viewer** | Read dashboard, repos, reviews, audit (no mutations) |
+
+New OIDC users are provisioned as **viewer** unless a pending invite matches their email (then the invite role is used). Existing roles are preserved on re-login.
+
+#### Invite links
+
+Owners create a link under Settings → Team. Optional email lock. Links expire in 7 days. Accept at `/#/invite/<token>`.
 
 ### Runtime tuning
 
@@ -127,11 +141,11 @@ Per-repo overlays and policy packs are edited in the dashboard (`config_json`, f
 
 `/health` reports:
 
-| `egress_profile` | Meaning                                                                                             |
-| ---------------- | --------------------------------------------------------------------------------------------------- |
+| `egress_profile` | Meaning                                                                                            |
+| ---------------- | -------------------------------------------------------------------------------------------------- |
 | `offline`        | `CODASAURUS_OFFLINE` or dashboard `offline_mode`: no LLM; registries/OSV fail-closed or cache-only |
-| `byok-only`      | LLM endpoint/key configured; Tier‑1 network allowed                                                 |
-| `full`           | Not offline; no LLM configured (Tier‑1 only)                                                        |
+| `byok-only`      | LLM endpoint/key configured; Tier‑1 network allowed                                                |
+| `full`           | Not offline; no LLM configured (Tier‑1 only)                                                       |
 
 ## Docker
 

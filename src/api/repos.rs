@@ -48,9 +48,7 @@ async fn sync_repos(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    crate::api::auth::require_session(&state.pool, &headers)
-        .await
-        .map_err(|_| ApiError::unauthorized("Authentication required"))?;
+    super::rbac::require_maintainer(&state, &headers).await?;
     use crate::db::config::get_config;
 
     // Read GitHub credentials from DB config
@@ -233,9 +231,7 @@ async fn update_repo(
     Path(id): Path<i64>,
     Json(body): Json<UpdateRepoBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    crate::api::auth::require_session(&state.pool, &headers)
-        .await
-        .map_err(|_| ApiError::unauthorized("Authentication required"))?;
+    super::rbac::require_maintainer(&state, &headers).await?;
     db::repos::update_repo(&state.pool, id, &body.config_json, body.active).await?;
     Ok(Json(json!({ "status": "ok" })))
 }
@@ -246,9 +242,7 @@ async fn delete_repo(
     headers: axum::http::HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    crate::api::auth::require_session(&state.pool, &headers)
-        .await
-        .map_err(|_| ApiError::unauthorized("Authentication required"))?;
+    super::rbac::require_maintainer(&state, &headers).await?;
     db::repos::delete_repo(&state.pool, id).await?;
     Ok(Json(json!({ "status": "ok" })))
 }

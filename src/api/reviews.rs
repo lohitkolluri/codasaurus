@@ -207,8 +207,10 @@ async fn get_review_findings(
 /// POST /api/reviews/dismiss — dismiss a finding into the learning store
 async fn dismiss_finding(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<DismissBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    super::rbac::require_maintainer(&state, &headers).await?;
     let fp = body.fingerprint.trim();
     if fp.len() < 8 {
         return Err(ApiError::bad_request("fingerprint too short"));

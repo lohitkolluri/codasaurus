@@ -124,6 +124,8 @@ pub struct User {
     pub role: String,
     #[serde(default = "default_auth_provider")]
     pub auth_provider: String,
+    #[serde(default)]
+    pub is_bootstrap: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -136,6 +138,8 @@ fn default_auth_provider() -> String {
 pub struct UserView {
     pub email: String,
     pub role: String,
+    #[serde(default)]
+    pub is_bootstrap: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]

@@ -10,6 +10,7 @@ pub enum ApiError {
     BadRequest(String),
     Internal(String),
     Unauthorized(String),
+    Forbidden(String),
 }
 
 impl IntoResponse for ApiError {
@@ -19,6 +20,7 @@ impl IntoResponse for ApiError {
             ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             ApiError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             ApiError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
+            ApiError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
         };
         (status, Json(json!({ "error": message }))).into_response()
     }
@@ -46,5 +48,9 @@ impl ApiError {
 
     pub fn unauthorized(msg: impl Into<String>) -> Self {
         ApiError::Unauthorized(msg.into())
+    }
+
+    pub fn forbidden(msg: impl Into<String>) -> Self {
+        ApiError::Forbidden(msg.into())
     }
 }

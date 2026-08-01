@@ -68,9 +68,11 @@ async fn get_settings(State(state): State<AppState>) -> Result<Json<serde_json::
 /// PUT /api/v1/settings/:key
 async fn set_setting(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Path(key): Path<String>,
     Json(body): Json<SetSettingBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let actor = super::rbac::require_owner(&state, &headers).await?;
     // Allowlist of writable config keys — prevents arbitrary config writes.
     const ALLOWED_KEYS: &[&str] = &[
         "llm_provider",
@@ -134,7 +136,14 @@ async fn set_setting(
             .map_err(ApiError::bad_request)?;
     }
     db::config::set_config(&state.pool, &key, &body.value).await?;
-    db::audit::log_event(&state.pool, "settings.updated", None, Some(&key), None).await;
+    db::audit::log_event(
+        &state.pool,
+        "settings.updated",
+        Some(&actor.email),
+        Some(&key),
+        None,
+    )
+    .await;
     if key == "offline_mode" {
         let on = matches!(
             body.value.to_ascii_lowercase().as_str(),
@@ -175,7 +184,9 @@ async fn get_github_settings(
 
 async fn delete_github_settings(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let actor = super::rbac::require_owner(&state, &headers).await?;
     for key in GITHUB_KEYS {
         crate::db::db_execute!(&state.pool, "DELETE FROM app_config WHERE key = ?", key)?;
     }
@@ -184,7 +195,7 @@ async fn delete_github_settings(
     db::audit::log_event(
         &state.pool,
         "github.config_cleared",
-        None,
+        Some(&actor.email),
         Some("github_app"),
         None,
     )

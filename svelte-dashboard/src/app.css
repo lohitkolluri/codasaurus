@@ -627,10 +627,48 @@ tr:hover td {
 .header-user {
     font-size: var(--text-sm);
     color: var(--text-secondary);
-    max-width: 220px;
+    max-width: 280px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.role-badge {
+    display: inline-block;
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: capitalize;
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+}
+
+.role-badge.bootstrap {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.settings-readonly-banner {
+    margin-bottom: 14px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.login-invite-hint {
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--text-muted);
+    text-align: center;
 }
 
 .header-btn {
@@ -1858,44 +1896,52 @@ tr:hover td {
     grid-column: 1 / -1;
 }
 
-.settings-card {
-    scroll-margin-top: 72px;
-}
-
-.settings-subnav {
-    position: sticky;
-    top: 0;
-    z-index: 5;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 10px 0 14px;
-    margin-bottom: 4px;
-    background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
-    backdrop-filter: blur(8px);
+.settings-tabs-wrap {
+    margin-bottom: 16px;
     border-bottom: 1px solid var(--border);
 }
 
-.settings-subnav-item {
-    border: 1px solid var(--border);
-    background: var(--bg-secondary);
-    color: var(--text-secondary);
-    border-radius: var(--radius-pill);
-    padding: 6px 12px;
-    font-size: 12px;
+.settings-tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+}
+
+.settings-tab {
+    flex: 0 0 auto;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-muted);
+    padding: 10px 14px;
+    font-size: 13px;
     font-weight: 500;
     cursor: pointer;
+    margin-bottom: -1px;
 }
 
-.settings-subnav-item:hover {
+.settings-tab:hover {
     color: var(--text-primary);
-    border-color: var(--text-muted);
+    background: transparent;
 }
 
-.settings-subnav-item.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--bg-primary);
+.settings-tab.active {
+    color: var(--text-primary);
+    border-bottom-color: var(--accent);
+    background: transparent;
+}
+
+.settings-panel {
+    width: 100%;
+    max-width: 720px;
+}
+
+.settings-panel .settings-card {
+    margin: 0;
 }
 
 .settings-llm-grid {
@@ -1916,11 +1962,6 @@ tr:hover td {
 }
 
 @media (min-width: 1100px) {
-    .settings-stack {
-        grid-template-columns: 1fr 1fr;
-        align-items: start;
-    }
-
     .settings-llm-grid {
         grid-template-columns: 1fr 1fr;
     }

@@ -41,8 +41,10 @@ async fn list_rules(State(state): State<AppState>) -> Result<Json<serde_json::Va
 
 async fn delete_rule(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    super::rbac::require_maintainer(&state, &headers).await?;
     let store = LearningStore::from_pool(&state.pool);
     let deleted = store
         .delete_rule(&id)

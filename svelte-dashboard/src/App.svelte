@@ -24,6 +24,7 @@
   import ReviewDetail from "./pages/app/ReviewDetail.svelte";
   import Settings from "./pages/app/Settings.svelte";
   import AuditLog from "./pages/app/AuditLog.svelte";
+  import InviteAccept from "./pages/InviteAccept.svelte";
 
   let loading = $state(true);
   let initialCheckDone = $state(false);
@@ -69,6 +70,7 @@
     "/setup/admin": SetupAdmin,
     "/setup/complete": SetupComplete,
     "/login": Login,
+    "/invite/:token": InviteAccept,
     "/app/dashboard": Dashboard,
     "/app/repos": Repos,
     "/app/repos/:id": RepoDetail,

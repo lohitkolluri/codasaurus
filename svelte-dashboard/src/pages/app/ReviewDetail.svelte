@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { api } from "../../stores/api.js";
+  import { isMaintainer } from "../../stores/auth.js";
   import Sidebar from "../../lib/Sidebar.svelte";
   import Header from "../../lib/Header.svelte";
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
@@ -13,6 +14,7 @@
   let allFindings = $state([]);
   let loading = $state(true);
   let error = $state("");
+  let canDismiss = $derived($isMaintainer);
 
   let selectedFile = $state(null);
 
@@ -160,10 +162,12 @@
                         {finding.fingerprint.includes(":") ? finding.fingerprint.split(":").pop().slice(0,12) : finding.fingerprint.slice(0,12)}
                       </span>
                     {/if}
+                    {#if canDismiss}
                     <button
                       style="margin-left:auto;font-size:12px"
                       onclick={() => dismissFinding(finding)}
                     >Dismiss</button>
+                    {/if}
                   </div>
                   <div class="finding-message">{finding.message}</div>
                   {#if finding.code_snippet}

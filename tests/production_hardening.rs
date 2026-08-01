@@ -102,8 +102,8 @@ async fn setup_status_is_public() {
 #[tokio::test]
 async fn setup_admin_freeze_after_first_admin() {
     let pool = test_pool().await;
-    let email = unique_email("admin");
-    db::users::create_user(&pool, &email, "password123", "admin")
+    let email = unique_email("owner");
+    db::users::create_user(&pool, &email, "password123", "owner")
         .await
         .unwrap();
 
@@ -130,7 +130,7 @@ async fn setup_admin_freeze_after_first_admin() {
 async fn session_tokens_are_random() {
     let pool = test_pool().await;
     let email = unique_email("sess");
-    db::users::create_user(&pool, &email, "password123", "admin")
+    db::users::create_user(&pool, &email, "password123", "owner")
         .await
         .unwrap();
 
@@ -146,7 +146,7 @@ async fn session_tokens_are_random() {
 async fn authenticated_settings_ok() {
     let pool = test_pool().await;
     let email = unique_email("settings");
-    db::users::create_user(&pool, &email, "password123", "admin")
+    db::users::create_user(&pool, &email, "password123", "owner")
         .await
         .unwrap();
     let token = db::sessions::create_session(&pool, &email).await.unwrap();
@@ -238,4 +238,144 @@ async fn github_request_fails_cleanly_on_unreachable() {
     })
     .await;
     assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn viewer_cannot_write_settings() {
+    let pool = test_pool().await;
+    let email = unique_email("viewer");
+    db::users::create_user(&pool, &email, "password123", "viewer")
+        .await
+        .unwrap();
+    let token = db::sessions::create_session(&pool, &email).await.unwrap();
+    let app = app(pool);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/settings/llm_provider")
+                .header("content-type", "application/json")
+                .header("cookie", format!("codasaurus_session={token}"))
+                .body(Body::from(r#"{"value":"disabled"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn maintainer_cannot_invite_but_can_list_repos() {
+    let pool = test_pool().await;
+    let email = unique_email("maint");
+    db::users::create_user(&pool, &email, "password123", "maintainer")
+        .await
+        .unwrap();
+    let token = db::sessions::create_session(&pool, &email).await.unwrap();
+    let app = app(pool.clone());
+
+    let invite = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/invites")
+                .header("content-type", "application/json")
+                .header("cookie", format!("codasaurus_session={token}"))
+                .body(Body::from(r#"{"role":"viewer"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(invite.status(), StatusCode::FORBIDDEN);
+
+    let repos = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/repos")
+                .header("cookie", format!("codasaurus_session={token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(repos.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn invite_accept_creates_session() {
+    let pool = test_pool().await;
+    let owner_email = unique_email("owner");
+    db::users::create_user(&pool, &owner_email, "password123", "owner")
+        .await
+        .unwrap();
+    let (_invite, raw) = db::invites::create_invite(
+        &pool,
+        Some(&unique_email("guest")),
+        "viewer",
+        &owner_email,
+        7,
+    )
+    .await
+    .unwrap();
+    // Re-fetch invite email from pending
+    let pending = db::invites::get_pending_by_token(&pool, &raw)
+        .await
+        .unwrap()
+        .unwrap();
+    let guest_email = pending.email.clone().unwrap();
+
+    let app = app(pool);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/auth/invite/{raw}/accept"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"password":"password123"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let set_cookie = resp
+        .headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        set_cookie.contains("codasaurus_session="),
+        "missing session cookie for {guest_email}: {set_cookie}"
+    );
+}
+
+#[tokio::test]
+async fn cannot_remove_last_owner() {
+    let pool = test_pool().await;
+    let email = unique_email("solo");
+    let user = db::users::create_bootstrap_owner(&pool, &email, "password123")
+        .await
+        .unwrap();
+    let token = db::sessions::create_session(&pool, &email).await.unwrap();
+    let app = app(pool);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/users/{}", user.id))
+                .header("cookie", format!("codasaurus_session={token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn admin_role_migrates_to_owner_rank() {
+    assert_eq!(codasaurus::api::rbac::role_rank("admin"), 3);
+    assert_eq!(codasaurus::api::rbac::normalize_role("admin"), "owner");
 }

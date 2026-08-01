@@ -12,20 +12,18 @@ use crate::ssrf;
 use super::errors::ApiError;
 use super::AppState;
 
-/// Reject mutating setup routes once an admin exists, unless the caller is authenticated.
+/// Reject mutating setup routes once an owner exists, unless the caller is an owner.
 async fn require_setup_open_or_admin(
     state: &AppState,
     headers: &axum::http::HeaderMap,
 ) -> Result<(), ApiError> {
-    let admin_exists = db::users::admin_exists(&state.pool)
+    let owner_exists = db::users::owner_exists(&state.pool)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
-    if !admin_exists {
+    if !owner_exists {
         return Ok(());
     }
-    super::auth::require_session(&state.pool, headers)
-        .await
-        .map_err(|_| ApiError::unauthorized("Setup is complete — authentication required"))?;
+    super::rbac::require_owner(state, headers).await?;
     Ok(())
 }
 
@@ -153,7 +151,7 @@ async fn setup_status(State(state): State<AppState>) -> Result<Json<SetupStatus>
     let admin: bool = crate::db::db_scalar!(
         &state.pool,
         i64,
-        "SELECT COUNT(*) FROM users WHERE role = 'admin'"
+        "SELECT COUNT(*) FROM users WHERE role IN ('owner', 'admin')"
     )
     .map(|count| count > 0)
     .unwrap_or(false);
@@ -811,14 +809,12 @@ async fn setup_admin(
     headers: axum::http::HeaderMap,
     Json(body): Json<AdminBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    // Only allow first admin without auth; subsequent creates require session.
-    let admin_exists = db::users::admin_exists(&state.pool)
+    // Only allow first owner without auth; subsequent creates require owner.
+    let owner_exists = db::users::owner_exists(&state.pool)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
-    if admin_exists {
-        super::auth::require_session(&state.pool, &headers)
-            .await
-            .map_err(|_| ApiError::unauthorized("Authentication required"))?;
+    if owner_exists {
+        super::rbac::require_owner(&state, &headers).await?;
     }
 
     if !body.email.contains('@') {
@@ -830,16 +826,21 @@ async fn setup_admin(
         ));
     }
 
-    db::users::create_user(&state.pool, &body.email, &body.password, "admin")
-        .await
-        .map_err(|e| {
-            if let sqlx::Error::Database(ref db_err) = e {
-                if db_err.message().contains("UNIQUE") {
-                    return ApiError::bad_request("An admin user already exists");
-                }
+    let result = if owner_exists {
+        // Additional owners via wizard (rare) — not bootstrap.
+        db::users::create_user(&state.pool, &body.email, &body.password, "owner").await
+    } else {
+        // Day-zero onboarding account = instance bootstrap / superuser.
+        db::users::create_bootstrap_owner(&state.pool, &body.email, &body.password).await
+    };
+    result.map_err(|e| {
+        if let sqlx::Error::Database(ref db_err) = e {
+            if db_err.message().contains("UNIQUE") {
+                return ApiError::bad_request("A user with that email already exists");
             }
-            ApiError::internal(e.to_string())
-        })?;
+        }
+        ApiError::internal(e.to_string())
+    })?;
 
     Ok(Json(json!({ "status": "ok" })))
 }
