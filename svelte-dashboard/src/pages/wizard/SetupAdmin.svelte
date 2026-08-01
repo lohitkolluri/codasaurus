@@ -52,7 +52,7 @@
   current="admin"
   {status}
   title="Create your admin login"
-  subtitle="This is the account that unlocks the dashboard. Store the password somewhere safe — there's no email reset yet."
+  subtitle="This is the account that unlocks the dashboard. Store the password somewhere safe. There's no email reset yet."
 >
   {#if error}
     <div class="error-box">{error}</div>
@@ -69,7 +69,7 @@
       At least 8 characters
       {#if password.length > 0}
         <span style="color:{lengthOk ? 'var(--success)' : 'var(--error)'}">
-          — {lengthOk ? "meets minimum" : `${password.length}/8`}
+          {lengthOk ? "meets minimum" : `${password.length}/8`}
         </span>
       {/if}
     </div>

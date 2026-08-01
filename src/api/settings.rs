@@ -191,6 +191,6 @@ async fn delete_github_settings(
     .await;
     Ok(Json(json!({
         "status": "ok",
-        "message": "Local GitHub App config cleared and repos marked inactive. This does not uninstall the App on GitHub — remove it under GitHub Settings → Applications if needed."
+        "message": "Local GitHub App config cleared and repos marked inactive. This does not uninstall the App on GitHub. Remove it under GitHub Settings → Applications if needed."
     })))
 }

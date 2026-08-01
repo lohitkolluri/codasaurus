@@ -125,7 +125,6 @@
 
       <div class="page-toolbar">
         <div>
-          <p class="eyebrow">Workspace</p>
           <h1 class="page-title">Repositories</h1>
           <p class="page-description">Synced repos start inactive. Enable only what you want reviewed so LLM spend stays intentional.</p>
         </div>

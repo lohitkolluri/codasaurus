@@ -95,7 +95,7 @@
   <WizardShell
     showProgress={false}
     title="You're ready to review PRs"
-    subtitle="Codasaurus is configured. One more activation step — install the App, then open a pull request."
+    subtitle="Codasaurus is configured. One more step: install the App, then open a pull request."
   >
     <ol class="wiz-activation">
       <li>

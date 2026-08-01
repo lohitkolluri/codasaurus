@@ -22,7 +22,7 @@
         configured = true;
         testResult = info?.connected
           ? `Connected to ${info.host} / ${info.database}`
-          : "Already configured — you can continue.";
+          : "Already configured. You can continue.";
       }
     } catch (err) {
       testError = err.message || "Could not reach Postgres";
@@ -80,7 +80,7 @@
 
     <p class="wizard-hint" style="margin:16px 0">
       Runtime always uses <code>DATABASE_URL</code> on the Codasaurus process.
-      Change it in Compose or your host env, then restart — not mid-wizard.
+      Change it in Compose or your host env, then restart. Not mid-wizard.
     </p>
 
     <button

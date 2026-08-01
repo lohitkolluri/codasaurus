@@ -88,11 +88,11 @@
                 <td style="white-space:nowrap;font-size:13px">
                   {entry.created_at || entry.timestamp
                     ? new Date(entry.created_at ?? entry.timestamp).toLocaleString()
-                    : "—"}
+                    : "-"}
                 </td>
-                <td style="font-family:var(--font-code);font-size:12px">{entry.event_type ?? entry.event ?? "—"}</td>
-                <td>{entry.actor ?? entry.user ?? "—"}</td>
-                <td>{entry.target_type ?? entry.target_id ?? "—"}</td>
+                <td style="font-family:var(--font-code);font-size:12px">{entry.event_type ?? entry.event ?? "-"}</td>
+                <td>{entry.actor ?? entry.user ?? "-"}</td>
+                <td>{entry.target_type ?? entry.target_id ?? "-"}</td>
               </tr>
             {/each}
           </tbody>

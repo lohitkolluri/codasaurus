@@ -74,11 +74,11 @@
 
           <div style="margin-bottom:12px">
             <span style="font-size:13px;color:var(--text-muted)">App Name</span>
-            <p style="font-size:14px">{config.app_name ?? "—"}</p>
+            <p style="font-size:14px">{config.app_name ?? "-"}</p>
           </div>
           <div style="margin-bottom:12px">
             <span style="font-size:13px;color:var(--text-muted)">App ID</span>
-            <p style="font-size:14px">{config.app_id ?? "—"}</p>
+            <p style="font-size:14px">{config.app_id ?? "-"}</p>
           </div>
 
           <div style="display:flex;gap:12px;margin-top:20px;flex-wrap:wrap">

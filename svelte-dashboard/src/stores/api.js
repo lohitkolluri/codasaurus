@@ -40,7 +40,7 @@ async function request(method, path, body) {
         !path.startsWith("/api/auth/") &&
         !path.startsWith("/api/setup/")
       ) {
-        // Session expired / unauthenticated — send user to login
+        // Session expired / unauthenticated. send user to login
         if (
           typeof window !== "undefined" &&
           !window.location.hash.includes("/login")

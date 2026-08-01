@@ -66,9 +66,8 @@
     <div class="app-content">
       <div class="page-toolbar compact">
         <div>
-          <p class="eyebrow">Quality signal</p>
           <h1 class="page-title">Reviews</h1>
-          <p class="page-description">Inspect every automated review and its findings.</p>
+          <p class="page-description">Every automated review and its findings.</p>
         </div>
       </div>
       <div class="filter-bar">

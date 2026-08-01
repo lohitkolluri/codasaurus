@@ -31,7 +31,7 @@
     try {
       status = await api.get("/api/setup/status");
       if (status?.complete) {
-        // Already set up — send operators to login instead of trapping them.
+        // Already set up. send operators to login instead of trapping them.
         push("/login");
         return;
       }

@@ -86,7 +86,7 @@
           <StatsCard label="Reviews Today" value={stats.total_reviews_today ?? 0} />
           <StatsCard
             label="Pass Rate"
-            value={stats.pass_rate != null ? `${Math.round(stats.pass_rate)}%` : "—"}
+            value={stats.pass_rate != null ? `${Math.round(stats.pass_rate)}%` : "-"}
             tone={stats.pass_rate != null && stats.pass_rate >= 80 ? "success" : ""}
           />
           <StatsCard label="Active Findings" value={stats.total_findings ?? 0} />
@@ -95,7 +95,7 @@
         <section class="section-block trust-panel">
           <div class="page-toolbar compact" style="margin-bottom: var(--space-4)">
             <div>
-              <p class="eyebrow">Trust</p>
+              
               <h2 class="page-title" style="font-size: var(--text-xl); margin: 0">Finding quality</h2>
             </div>
           </div>
@@ -104,7 +104,7 @@
               label="Accept rate"
               value={stats.trust?.accept_rate != null
                 ? `${Math.round(stats.trust.accept_rate)}%`
-                : "—"}
+                : "-"}
               hint="Findings not dismissed"
               tone={acceptTone(stats.trust?.accept_rate)}
             />
@@ -112,7 +112,7 @@
               label="FP proxy"
               value={stats.trust?.fp_proxy_ratio != null
                 ? Number(stats.trust.fp_proxy_ratio).toFixed(2)
-                : "—"}
+                : "-"}
               hint="Dismissals ÷ Tier-1"
               tone={fpTone(stats.trust?.fp_proxy_ratio)}
             />
@@ -124,7 +124,7 @@
                 ? `$${Number(stats.llm.spend_usd_last_day).toFixed(3)}`
                 : stats.llm?.spend_usd_estimate != null
                   ? `$${Number(stats.llm.spend_usd_estimate).toFixed(3)}`
-                  : "—"}
+                  : "-"}
               hint={stats.llm?.daily_budget_usd > 0
                 ? `last day · budget $${Number(stats.llm.daily_budget_usd).toFixed(2)}`
                 : `${stats.llm?.requests ?? 0} requests · last day`}
@@ -142,7 +142,7 @@
 
           {#if recentReviews.length === 0}
             <EmptyState
-              message="No reviews yet — open a PR on a connected repository."
+              message="No reviews yet. Open a PR on an enabled repository."
               actionLabel="View repositories"
               onAction={() => push("/app/repos")}
             />

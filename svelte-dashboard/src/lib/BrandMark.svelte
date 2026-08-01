@@ -1,4 +1,4 @@
-<!-- Codasaurus mark — adapted from Game Icons velociraptor (CC BY 3.0); see assets/ATTRIBUTION.md -->
+<!-- Codasaurus mark: adapted from Game Icons velociraptor (CC BY 3.0); see assets/ATTRIBUTION.md -->
 <script>
   let { size = 28 } = $props();
 </script>

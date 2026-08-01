@@ -56,7 +56,7 @@
   current="github"
   {status}
   title="Connect GitHub"
-  subtitle="Create a GitHub App in one click. Codasaurus gets webhook + PR permissions — you keep the keys on your server."
+  subtitle="Create a GitHub App in one click. Codasaurus gets webhook + PR permissions. You keep the keys on your server."
 >
   {#if checking}
     <p style="color:var(--text-muted)">Checking GitHub App status…</p>
@@ -72,7 +72,7 @@
       Create GitHub App
     </button>
     <p class="wizard-hint" style="margin-bottom:16px">
-      Opens GitHub in a new tab. Finish the form — credentials save automatically when you return.
+      Opens GitHub in a new tab. Finish the form. Credentials save automatically when you return.
       {#if refreshing}
         <span> Checking…</span>
       {/if}
@@ -88,7 +88,7 @@
     </div>
 
     <button type="button" onclick={refreshStatus} disabled={refreshing} style="margin-top:8px">
-      {refreshing ? "Checking…" : "I've finished — refresh status"}
+      {refreshing ? "Checking…" : "I've finished. Refresh status"}
     </button>
   {/if}
 

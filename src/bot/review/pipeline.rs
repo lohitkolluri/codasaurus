@@ -55,7 +55,7 @@ pub async fn review_pr_with_options(
     if let Some(pool) = pool {
         if let Ok(Some(repo)) = crate::db::repos::get_repo_by_full_name(pool, repo_name).await {
             if !repo.active {
-                tracing::info!(repo = repo_name, "repo inactive — skipping review");
+                tracing::info!(repo = repo_name, "repo inactive, skipping review");
                 return Ok(());
             }
         }
@@ -111,7 +111,7 @@ pub async fn review_pr_with_options(
         options.auto_review_diff = false;
     }
 
-    // Offline / air-gap: fail closed — never call LLM; skip registry prefetch.
+    // Offline / air-gap: fail closed. Never call LLM; skip registry prefetch.
     let offline_mode = {
         let db_off = if let Some(pool) = pool {
             if let Ok(Some(provider)) = crate::db::config::get_config(pool, "llm_provider").await {
@@ -133,7 +133,7 @@ pub async fn review_pr_with_options(
         options.auto_review_diff = false;
         tracing::info!(
             repo = repo_name,
-            "offline_mode enabled — LLM disabled, registry cache-only"
+            "offline_mode enabled: LLM disabled, registry cache-only"
         );
     }
     crate::registry::set_offline_mode(offline_mode);
@@ -201,7 +201,7 @@ pub async fn review_pr_with_options(
         tracing::info!(
             repo = repo_name,
             pr = pr_number,
-            "low-signal PR (lockfile/vendor/generated) — skipping Contents fan-out, prefetch, and LLM"
+            "low-signal PR (lockfile/vendor/generated): skipping Contents fan-out, prefetch, and LLM"
         );
     }
 
@@ -262,7 +262,7 @@ pub async fn review_pr_with_options(
         }
     }
 
-    // Fetch commits early — used by slop + remote guidelines.
+    // Fetch commits early (used by slop + remote guidelines).
     let pr_author = pr["user"]["login"].as_str().unwrap_or("");
     let commits_url = format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/commits");
     let commit_messages: Vec<String> = match retry_async(
@@ -525,7 +525,7 @@ pub async fn review_pr_with_options(
         budget = crate::bot::agent_mode::agent_signal_budget(budget);
         tracing::info!(
             reasons = ?agent_signal.reasons,
-            "agent-authored PR — Tier-1 prioritized budget"
+            "agent-authored PR: Tier-1 prioritized budget"
         );
     }
 

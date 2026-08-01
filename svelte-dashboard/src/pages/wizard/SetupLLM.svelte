@@ -52,7 +52,7 @@
       if (cfg.base_url) baseUrl = cfg.base_url;
       if (cfg.provider || status?.llm) {
         configured = true;
-        testResult = "Saved — Tier-1 detectors always run; LLM is additive.";
+        testResult = "Saved. Tier-1 detectors always run; LLM is additive.";
       }
       modelSearch = model;
     } catch {
@@ -102,15 +102,15 @@
         base_url: baseUrl,
       });
       if (shouldProbe && res?.test_passed === false) {
-        testError = "Saved, but the probe failed — check key, model, or base URL.";
+        testError = "Saved, but the probe failed. Check key, model, or base URL.";
         configured = true;
       } else if (shouldProbe && res?.test_passed === true) {
-        testResult = "Connected — LLM probe succeeded.";
+        testResult = "Connected. LLM probe succeeded.";
         configured = true;
       } else {
         testResult =
           provider === "disabled"
-            ? "LLM disabled — Tier-1 static review only. You can enable AI later in Settings."
+            ? "LLM disabled. Tier-1 static review only. You can enable AI later in Settings."
             : "Configuration saved.";
         configured = true;
       }
@@ -138,10 +138,10 @@
   <div class="form-group">
     <label for="provider">Provider</label>
     <select id="provider" bind:value={provider} onchange={(e) => handleProviderChange(e.target.value)}>
-      <option value="openrouter">OpenRouter — BYOK cloud models</option>
-      <option value="ollama">Ollama — local models</option>
+      <option value="openrouter">OpenRouter (BYOK cloud models)</option>
+      <option value="ollama">Ollama (local models)</option>
       <option value="custom">Custom OpenAI-compatible endpoint</option>
-      <option value="disabled">Skip — Tier-1 only</option>
+      <option value="disabled">Skip (Tier-1 only)</option>
     </select>
   </div>
 
