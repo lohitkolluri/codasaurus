@@ -77,19 +77,3 @@ jobs:
         with:
           name: codasaurus
           path: target/release/codasaurus
-
-  codasaurus-self:
-    name: Self-review
-    runs-on: ubuntu-latest
-    needs: [build]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-      - name: Download built binary
-        uses: actions/download-artifact@v4
-        with:
-          name: codasaurus
-      - name: Make executable
-        run: chmod +x codasaurus
-      - name: Run self-review
-        run: ./codasaurus check --diff origin/main --ci || echo "Self-review completed with issues"

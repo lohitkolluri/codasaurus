@@ -199,6 +199,7 @@ pub async fn fetch_linked_issues(
 }
 
 /// Assemble remote awareness used by detectors + LLM.
+#[allow(clippy::too_many_arguments)]
 pub async fn gather_remote_context(
     client: &reqwest::Client,
     headers: &HeaderMap,

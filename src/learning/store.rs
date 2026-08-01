@@ -168,8 +168,7 @@ impl LearningStore {
         // Query only fingerprints present in this review (avoids full-table scan as dismissals grow).
         // SQLite binds are capped; chunk to stay safe.
         for chunk in fingerprints.chunks(400) {
-            let placeholders = std::iter::repeat("?")
-                .take(chunk.len())
+            let placeholders = std::iter::repeat_n("?", chunk.len())
                 .collect::<Vec<_>>()
                 .join(",");
             let sql = format!(

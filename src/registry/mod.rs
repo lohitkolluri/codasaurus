@@ -1,7 +1,7 @@
 //! Package registry + OSV lookups.
 //!
 //! Async is the source of truth (org-scale reviews). Sync wrappers use
-//! `block_on` for the CLI path; the bot already runs detectors in
+//! `block_on` for sync callers; the bot already runs detectors in
 //! `spawn_blocking`, so sync wrappers there are safe.
 
 use crate::retry::{is_reqwest_error_retryable, retry_async, RetryConfig};
@@ -26,8 +26,10 @@ static CACHE_TTL: LazyLock<Mutex<u64>> = LazyLock::new(|| Mutex::new(3600));
 static CACHE: LazyLock<RwLock<HashMap<String, (bool, Instant)>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
-static OSV_CACHE: LazyLock<RwLock<HashMap<String, (Vec<OsvVulnerability>, Instant)>>> =
-    LazyLock::new(|| RwLock::new(HashMap::new()));
+type OsvCacheEntry = (Vec<OsvVulnerability>, Instant);
+type OsvCacheMap = HashMap<String, OsvCacheEntry>;
+
+static OSV_CACHE: LazyLock<RwLock<OsvCacheMap>> = LazyLock::new(|| RwLock::new(HashMap::new()));
 
 /// Shared async HTTP client used by all registry lookups (npm, PyPI, crates.io, OSV).
 static ASYNC_CLIENT: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
@@ -76,7 +78,7 @@ pub fn init_cache_from_config(config: &crate::config::Config) {
     set_cache_ttl(config.registry.cache_ttl_secs);
 }
 
-/// Sync API for CLI detectors (wraps async).
+/// Sync API for detectors running under `spawn_blocking` (wraps async).
 pub fn check_package(registry: &str, package: &str) -> Result<Option<bool>> {
     block_on(check_package_async(registry, package))
 }

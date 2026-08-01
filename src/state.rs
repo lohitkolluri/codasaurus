@@ -1,5 +1,5 @@
 //! Review comment IDs and commit SHA tracking.
-//! Uses the shared app DbPool when available; falls back to a dedicated SQLite file for CLI.
+//! Uses the shared app DbPool when available; falls back to a dedicated SQLite file.
 
 use anyhow::Result;
 use sqlx::SqlitePool;
@@ -29,7 +29,7 @@ impl ReviewState {
         }
     }
 
-    /// Open the dedicated review_state.db (CLI / non-serve contexts).
+    /// Open the dedicated review_state.db (non-serve / test contexts).
     pub fn open() -> Result<Self> {
         Self::open_at(Self::db_path()?)
     }

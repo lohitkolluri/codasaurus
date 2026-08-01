@@ -1,17 +1,16 @@
+//! Codasaurus — self-hosted GitHub App PR review agent.
+//!
+//! Binary commands: `serve`, `health`, `version`.
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use codasaurus::bot;
-use codasaurus::cli;
-use codasaurus::config;
-use codasaurus::interactive;
-use codasaurus::output;
 use codasaurus::serve;
-use std::io::IsTerminal;
 
 #[derive(Parser)]
 #[command(name = "codasaurus")]
 #[command(
-    about = "🦕 AI-generated code verification — catches hallucinated imports, phantom deps, stale APIs, and security issues"
+    about = "Self-hosted GitHub App PR review agent — Tier-1 detectors + optional BYOK LLM"
 )]
 #[command(version, long_about = None)]
 struct Cli {
@@ -21,48 +20,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Check code for AI-generated issues
-    Check {
-        /// Check staged changes (default)
-        #[arg(long)]
-        staged: bool,
-
-        /// Check diff against a git ref (e.g. --diff origin/main)
-        #[arg(long)]
-        diff: Option<String>,
-
-        /// CI mode — JSON output, strict exit codes
-        #[arg(long)]
-        ci: bool,
-
-        /// Enable LLM-powered deep review (requires API key)
-        #[arg(long)]
-        llm: bool,
-
-        /// Output as JSON
-        #[arg(long)]
-        json: bool,
-
-        /// Path to config file
-        #[arg(long)]
-        config: Option<String>,
-
-        /// Path to check (file or directory). Default: staged changes
-        path: Option<String>,
-    },
-
-    /// Watch mode — live feedback as you code (experimental)
-    Watch {
-        /// Path to watch
-        #[arg(default_value = ".")]
-        path: String,
-
-        /// Path to config file
-        #[arg(long)]
-        config: Option<String>,
-    },
-
-    /// Start the GitHub App bot server
+    /// Start the GitHub App bot + dashboard server
     Serve {
         /// Port to listen on (defaults to $PORT env var, then 3000)
         #[arg(long)]
@@ -71,51 +29,6 @@ enum Commands {
         /// Host to bind to
         #[arg(long, default_value = "0.0.0.0")]
         host: String,
-    },
-
-    /// Run as a GitHub Action (reads GITHUB_EVENT_PATH and posts Check Run annotations)
-    CheckRun {
-        /// Path to the GitHub event payload (defaults to GITHUB_EVENT_PATH env var)
-        #[arg(long, env = "GITHUB_EVENT_PATH")]
-        event_path: Option<String>,
-
-        /// Path to config file
-        #[arg(long)]
-        config: Option<String>,
-    },
-
-    /// Verify command — blast-radius analysis for changed symbols
-    Verify {
-        /// Check staged changes (default)
-        #[arg(long)]
-        staged: bool,
-
-        /// Check diff against a git ref (e.g. --diff origin/main)
-        #[arg(long)]
-        diff: Option<String>,
-
-        /// Run tests for impacted symbols
-        #[arg(long)]
-        run_tests: bool,
-
-        /// Skip confirmation prompts for test execution
-        #[arg(long)]
-        force: bool,
-
-        /// CI mode — JSON output, strict exit codes
-        #[arg(long)]
-        ci: bool,
-
-        /// Output as JSON
-        #[arg(long)]
-        json: bool,
-
-        /// Path to config file
-        #[arg(long)]
-        config: Option<String>,
-
-        /// Path to verify (file or directory). Default: staged changes
-        path: Option<String>,
     },
 
     /// Print version information
@@ -137,49 +50,6 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Check {
-            staged,
-            diff,
-            ci,
-            llm,
-            json,
-            config,
-            path,
-        } => {
-            let cfg = config::load(config.as_deref())?;
-            let interactive_mode = !json && !ci && std::io::stdout().is_terminal();
-            let findings = cli::run_check(cli::CheckOptions {
-                staged: *staged,
-                diff: diff.clone(),
-                ci: *ci,
-                llm: *llm,
-                json: *json,
-                path: path.clone(),
-                config: &cfg,
-                quiet: interactive_mode,
-            })?;
-
-            if interactive_mode {
-                interactive::run(&findings, &cfg)?;
-            } else {
-                output::render(&findings, *json || *ci)?;
-            }
-
-            let should_exit = if cfg.behavior.strict {
-                !findings.is_empty()
-            } else {
-                findings.has_blocking()
-            };
-            if should_exit && (*ci || *staged) {
-                std::process::exit(1);
-            }
-        }
-        Commands::Watch { path, config } => {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()?;
-            rt.block_on(cli::run_watch(path, config.as_deref()))?;
-        }
         Commands::Serve { port, host } => {
             let port = port.unwrap_or_else(|| {
                 std::env::var("PORT")
@@ -196,7 +66,6 @@ fn main() -> Result<()> {
                 )
             });
 
-            // Bot config is optional — only load if env vars are set
             let bot_config =
                 std::env::var("GITHUB_APP_ID")
                     .ok()
@@ -219,48 +88,6 @@ fn main() -> Result<()> {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(serve::serve(host, port, &database_url, bot_config))?;
         }
-        Commands::CheckRun { event_path, config } => {
-            let _cfg = config::load(config.as_deref())?;
-            codasaurus::action::run_check_run(event_path.clone())?;
-        }
-        Commands::Verify {
-            staged,
-            diff,
-            run_tests,
-            force,
-            ci,
-            json,
-            config,
-            path,
-        } => {
-            let cfg = config::load(config.as_deref())?;
-            let opts = codasaurus::verify::VerifyOptions {
-                staged: *staged,
-                diff: diff.clone(),
-                path: path.clone(),
-                run_tests: *run_tests,
-                force: *force,
-                ci: *ci,
-                json: *json,
-                config: &cfg,
-            };
-            let report = codasaurus::verify::run_verify(opts)?;
-
-            codasaurus::evidence::render_report(&report, *json || *ci)?;
-
-            if report.verified && !report.fix_packets.is_empty() {
-                // Verified but with warnings — still exit 0 unless running in CI
-                if *ci {
-                    eprintln!(
-                        "Warning: {} fix packets generated but all verified.",
-                        report.fix_packets.len()
-                    );
-                }
-            } else if !report.verified && (*ci || *force) {
-                std::process::exit(1);
-            }
-        }
-
         Commands::Version => {
             println!("codasaurus v{}", env!("CARGO_PKG_VERSION"));
         }

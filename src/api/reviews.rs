@@ -74,8 +74,7 @@ async fn list_reviews(
         ids
     };
     if !unique_ids.is_empty() {
-        let placeholders = std::iter::repeat("?")
-            .take(unique_ids.len())
+        let placeholders = std::iter::repeat_n("?", unique_ids.len())
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!("SELECT id, full_name FROM repos WHERE id IN ({placeholders})");

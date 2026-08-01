@@ -135,11 +135,9 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
         all.extend(graph::detect(parsed_files));
     }
 
-    if config.checks.guidelines {
-        all.extend(guidelines::detect(config));
-    }
+    // Guidelines run via detect_remote on the bot path (GitHub Contents), not local git.
 
-    // Prefer shared app DB pool (bot/serve) so dismissals stick; fall back to sidecar file for CLI.
+    // Prefer shared app DB pool (bot/serve) so dismissals stick; fall back to sidecar file.
     match LEARNING_STORE.lock() {
         Ok(mut guard) => {
             if guard.is_none() {

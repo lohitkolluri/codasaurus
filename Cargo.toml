@@ -2,18 +2,17 @@
 name = "codasaurus"
 version = "0.1.0"
 edition = "2021"
-description = "🦕 Codasaurus — munches on AI-generated bugs so you don't have to. Catches hallucinated imports, phantom deps, security holes, and AI slop. Works locally, in CI, and as a GitHub bot."
+description = "Self-hosted GitHub App PR review agent — Tier-1 detectors, BYOK LLM, walkthroughs, and slash commands."
 authors = ["Lohit Kolluri <lohitkolluri@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/lohitkolluri/codasaurus"
 homepage = "https://github.com/lohitkolluri/codasaurus"
 documentation = "https://github.com/lohitkolluri/codasaurus#readme"
 readme = "README.md"
-keywords = ["code-review", "ai", "verification", "cli", "security", "openrouter", "codasaurus"]
-categories = ["development-tools", "command-line-utilities"]
+keywords = ["code-review", "ai", "github-app", "security", "openrouter", "codasaurus", "self-hosted"]
+categories = ["development-tools"]
 
 [dependencies]
-# CLI
 clap = { version = "4", features = ["derive", "env"] }
 
 # Serialization
@@ -29,14 +28,7 @@ tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal
 # Error handling
 anyhow = "1"
 
-# Terminal output
-colored = "3"
-
-# TUI (interactive review mode)
-ratatui = "0.29"
-crossterm = "0.28"
-
-# Config
+# Config / paths
 dirs = "6"
 
 # Regex & text processing
@@ -45,10 +37,7 @@ regex = "1"
 # Multi-pattern string matching
 aho-corasick = "1"
 
-# File watching (for watch mode)
-notify = "7"
-
-# Directory traversal
+# Directory traversal (repo context helpers / tests)
 walkdir = "2"
 
 # Web server (for GitHub App bot)
