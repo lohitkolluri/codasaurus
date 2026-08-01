@@ -3,7 +3,6 @@
   import { location } from "svelte-spa-router";
   import { api } from "../../stores/api.js";
   import { currentUser, isOwner, isMaintainer, roleLabel } from "../../stores/auth.js";
-  import { formatLabel } from "../../lib/utils.js";
   import AppShell from "../../lib/AppShell.svelte";
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
   import ErrorState from "../../lib/ErrorState.svelte";
@@ -67,6 +66,83 @@
     "hallucinated_imports", "phantom_deps", "vulnerabilities", "secrets",
     "over_engineering", "boilerplate", "todo_leaks", "stale_api", "risky_patterns", "graph", "guidelines", "iac",
   ];
+
+  const DETECTOR_GROUPS = [
+    {
+      id: "safety",
+      title: "Safety",
+      desc: "High-confidence checks. Leave these on unless you have a reason.",
+      items: [
+        { key: "hallucinated_imports", label: "Fake imports", blurb: "Imports that do not resolve in the registry" },
+        { key: "phantom_deps", label: "Missing packages", blurb: "Code uses a package not listed in the manifest" },
+        { key: "vulnerabilities", label: "Vulnerabilities", blurb: "Known CVEs via OSV for changed dependencies" },
+        { key: "secrets", label: "Secrets", blurb: "API keys, tokens, and other credentials in the diff" },
+        { key: "risky_patterns", label: "Risky patterns", blurb: "Dangerous APIs and unsafe defaults" },
+      ],
+    },
+    {
+      id: "quality",
+      title: "Quality",
+      desc: "Maintainability and hygiene. Tune these if reviews feel noisy.",
+      items: [
+        { key: "over_engineering", label: "Over-engineering", blurb: "Unnecessary abstraction for the change size" },
+        { key: "boilerplate", label: "Boilerplate", blurb: "Copy-paste or generated filler" },
+        { key: "todo_leaks", label: "TODO leaks", blurb: "TODOs and FIXMEs introduced in the PR" },
+        { key: "stale_api", label: "Stale APIs", blurb: "Deprecated or removed API usage" },
+        { key: "guidelines", label: "Guidelines", blurb: "Repo guideline / AGENTS.md mismatches" },
+      ],
+    },
+    {
+      id: "advanced",
+      title: "Advanced",
+      desc: "Heavier or niche detectors.",
+      items: [
+        { key: "graph", label: "Call graph", blurb: "Cross-file impact hints (more compute)" },
+        { key: "iac", label: "IaC", blurb: "Terraform / infra misconfigurations" },
+      ],
+    },
+  ];
+
+  const STRICTNESS_OPTIONS = [
+    { id: "lenient", label: "Lenient", blurb: "Only high-confidence, merge-blocking issues" },
+    { id: "balanced", label: "Balanced", blurb: "Clear bugs and risks; skip preference nits" },
+    { id: "strict", label: "Strict", blurb: "Thorough on correctness, security, maintainability" },
+    { id: "nitpick", label: "Nitpick", blurb: "Also style, naming, and small clarity notes" },
+  ];
+
+  let detectorsOn = $derived(
+    DETECTOR_KEYS.filter((k) => detectorToggles[k]).length,
+  );
+
+  function setDetectorGroup(groupId, enabled) {
+    if (!canEditSettings) return;
+    const group = DETECTOR_GROUPS.find((g) => g.id === groupId);
+    if (!group) return;
+    for (const item of group.items) {
+      detectorToggles[item.key] = enabled;
+    }
+  }
+
+  function setDetectorPreset(preset) {
+    if (!canEditSettings) return;
+    if (preset === "off") {
+      for (const key of DETECTOR_KEYS) detectorToggles[key] = false;
+      return;
+    }
+    if (preset === "safety") {
+      for (const key of DETECTOR_KEYS) detectorToggles[key] = false;
+      for (const item of DETECTOR_GROUPS[0].items) detectorToggles[item.key] = true;
+      return;
+    }
+    if (preset === "recommended") {
+      for (const key of DETECTOR_KEYS) detectorToggles[key] = false;
+      for (const item of [...DETECTOR_GROUPS[0].items, ...DETECTOR_GROUPS[1].items]) {
+        detectorToggles[item.key] = true;
+      }
+      return;
+    }
+    for (const key of DETECTOR_KEYS) detectorToggles[key] = true;
+  }
 
   let learnedRules = $state([]);
   let rulesMsg = $state("");
@@ -689,141 +765,228 @@
         </section>
 
       {:else if activeTab === "review"}
-        <section class="card settings-card">
-          <header class="settings-section-head">
-            <h3 class="section-heading">Review</h3>
-            <p class="section-desc">Detectors and how findings show up on PRs.</p>
-          </header>
+        <div class="settings-stack review-stack">
+          <section class="card settings-card">
+            <header class="settings-section-head review-head">
+              <div>
+                <h3 class="section-heading">Review</h3>
+                <p class="section-desc">What Codasaurus checks on PRs, and how loud it is.</p>
+              </div>
+              <span class="review-count">{detectorsOn} of {DETECTOR_KEYS.length} detectors on</span>
+            </header>
 
-          <h4 class="settings-subhead">Detectors</h4>
-          <div class="detector-grid">
-            {#each Object.entries(detectorToggles) as [key, val]}
-              <div class="detector-row">
-                <span>{formatLabel(key)}</span>
-                <label class="toggle">
-                  <div class="toggle-track" class:on={val ?? false} role="checkbox" aria-checked={val ?? false}
-                    tabindex="0"
-                    onclick={() => canEditSettings && (detectorToggles[key] = !(detectorToggles[key] ?? false))}
-                    onkeydown={(e) => { if (canEditSettings && e.key === 'Enter') detectorToggles[key] = !(detectorToggles[key] ?? false); }}>
-                    <div class="toggle-knob"></div>
+            <div class="review-presets" role="group" aria-label="Detector presets">
+              <button type="button" class="chip" disabled={!canEditSettings} onclick={() => setDetectorPreset("recommended")}>Recommended</button>
+              <button type="button" class="chip" disabled={!canEditSettings} onclick={() => setDetectorPreset("safety")}>Safety only</button>
+              <button type="button" class="chip" disabled={!canEditSettings} onclick={() => setDetectorPreset("all")}>All on</button>
+              <button type="button" class="chip" disabled={!canEditSettings} onclick={() => setDetectorPreset("off")}>All off</button>
+            </div>
+
+            {#each DETECTOR_GROUPS as group}
+              <div class="detector-group">
+                <div class="detector-group-head">
+                  <div>
+                    <h4 class="settings-subhead tight">{group.title}</h4>
+                    <p class="group-desc">{group.desc}</p>
                   </div>
-                </label>
+                  <div class="group-actions">
+                    <button type="button" class="linkish" disabled={!canEditSettings} onclick={() => setDetectorGroup(group.id, true)}>All on</button>
+                    <button type="button" class="linkish" disabled={!canEditSettings} onclick={() => setDetectorGroup(group.id, false)}>All off</button>
+                  </div>
+                </div>
+                <div class="detector-cards">
+                  {#each group.items as item}
+                    <div class="detector-card" class:on={detectorToggles[item.key]}>
+                      <div class="detector-card-text">
+                        <span class="detector-card-label">{item.label}</span>
+                        <span class="detector-card-blurb">{item.blurb}</span>
+                      </div>
+                      <label class="toggle">
+                        <div
+                          class="toggle-track"
+                          class:on={detectorToggles[item.key] ?? false}
+                          role="checkbox"
+                          aria-checked={detectorToggles[item.key] ?? false}
+                          aria-label={item.label}
+                          tabindex="0"
+                          onclick={() =>
+                            canEditSettings &&
+                            (detectorToggles[item.key] = !(detectorToggles[item.key] ?? false))}
+                          onkeydown={(e) => {
+                            if (canEditSettings && e.key === "Enter")
+                              detectorToggles[item.key] = !(detectorToggles[item.key] ?? false);
+                          }}
+                        >
+                          <div class="toggle-knob"></div>
+                        </div>
+                      </label>
+                    </div>
+                  {/each}
+                </div>
               </div>
             {/each}
-          </div>
+          </section>
 
-          <h4 class="settings-subhead">Policy</h4>
-          <div class="form-row-2">
-            <div class="form-group">
-              <label for="review-strictness">Strictness</label>
-              <select id="review-strictness" bind:value={reviewStrictness} disabled={!canEditSettings}>
-                <option value="lenient">Lenient</option>
-                <option value="balanced">Balanced</option>
-                <option value="strict">Strict</option>
-                <option value="nitpick">Nitpick</option>
-              </select>
+          <section class="card settings-card">
+            <header class="settings-section-head">
+              <h3 class="section-heading">Tone &amp; thresholds</h3>
+              <p class="section-desc">How many findings to surface, and how strict the bar is.</p>
+            </header>
+
+            <h4 class="settings-subhead tight">Strictness</h4>
+            <div class="strictness-grid" role="radiogroup" aria-label="Review strictness">
+              {#each STRICTNESS_OPTIONS as opt}
+                <button
+                  type="button"
+                  class="strictness-card"
+                  class:active={reviewStrictness === opt.id}
+                  role="radio"
+                  aria-checked={reviewStrictness === opt.id}
+                  disabled={!canEditSettings}
+                  onclick={() => (reviewStrictness = opt.id)}
+                >
+                  <strong>{opt.label}</strong>
+                  <span>{opt.blurb}</span>
+                </button>
+              {/each}
+            </div>
+
+            <div class="form-row-2" style="margin-top: 20px">
+              <div class="form-group">
+                <label for="default-severity">Minimum severity posted</label>
+                <select id="default-severity" bind:value={defaultSeverity} disabled={!canEditSettings}>
+                  <option value="blocking">Blocking only</option>
+                  <option value="warning">Warning and above</option>
+                  <option value="info">Include info</option>
+                </select>
+                <p class="field-hint">Findings below this level stay off the PR.</p>
+              </div>
+              <div class="form-group">
+                <label for="max-warnings">Warning budget</label>
+                <input id="max-warnings" type="number" min="0" bind:value={maxWarnings} disabled={!canEditSettings} />
+                <p class="field-hint">Cap on warning-level comments per review.</p>
+              </div>
             </div>
             <div class="form-group">
-              <label for="default-severity">Min severity</label>
-              <select id="default-severity" bind:value={defaultSeverity} disabled={!canEditSettings}>
-                <option value="blocking">Blocking</option>
-                <option value="warning">Warning</option>
-                <option value="info">Info</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-row-2">
-            <div class="form-group">
-              <label for="max-warnings">Max warnings</label>
-              <input id="max-warnings" type="number" min="0" bind:value={maxWarnings} disabled={!canEditSettings} />
-            </div>
-            <div class="form-group">
-              <label for="max-blocking">Max blocking</label>
+              <label for="max-blocking">Blocking budget</label>
               <input id="max-blocking" type="number" min="0" bind:value={maxBlocking} disabled={!canEditSettings} />
-            </div>
-          </div>
-          <div class="form-group">
-            <label for="custom-instructions">Custom instructions</label>
-            <textarea id="custom-instructions" rows="3" bind:value={customInstructions} placeholder="Prefer small PRs…" disabled={!canEditSettings}></textarea>
-          </div>
-
-          <div class="toggle-stack">
-            <div class="detector-row">
-              <span>Auto-apply PR labels</span>
-              <label class="toggle">
-                <div class="toggle-track" class:on={autoLabels} role="checkbox" aria-checked={autoLabels}
-                  tabindex="0"
-                  onclick={() => toggleFlag((v) => (autoLabels = v), autoLabels)}
-                  onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (autoLabels = v), autoLabels); }}>
-                  <div class="toggle-knob"></div>
-                </div>
-              </label>
-            </div>
-            <div class="detector-row">
-              <span>Request CODEOWNERS</span>
-              <label class="toggle">
-                <div class="toggle-track" class:on={requestReviewers} role="checkbox" aria-checked={requestReviewers}
-                  tabindex="0"
-                  onclick={() => toggleFlag((v) => (requestReviewers = v), requestReviewers)}
-                  onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (requestReviewers = v), requestReviewers); }}>
-                  <div class="toggle-knob"></div>
-                </div>
-              </label>
-            </div>
-            <div class="detector-row">
-              <span>Create Check Runs</span>
-              <label class="toggle">
-                <div class="toggle-track" class:on={createCheckRun} role="checkbox" aria-checked={createCheckRun}
-                  tabindex="0"
-                  onclick={() => toggleFlag((v) => (createCheckRun = v), createCheckRun)}
-                  onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (createCheckRun = v), createCheckRun); }}>
-                  <div class="toggle-knob"></div>
-                </div>
-              </label>
-            </div>
-          </div>
-
-          <details class="settings-advanced">
-            <summary>More review options</summary>
-            <div class="form-group">
-              <label for="forbidden-paths">Forbidden path prefixes</label>
-              <input id="forbidden-paths" type="text" bind:value={forbiddenPaths} placeholder="vendor/,secrets/" disabled={!canEditSettings} />
+              <p class="field-hint">0 means no extra cap beyond detector output.</p>
             </div>
             <div class="form-group">
-              <label for="exclude-patterns">Exclude path patterns</label>
-              <input id="exclude-patterns" type="text" bind:value={excludePatterns} placeholder="vendor/,*.lock,dist/" disabled={!canEditSettings} />
+              <label for="custom-instructions">Custom instructions</label>
+              <textarea
+                id="custom-instructions"
+                rows="3"
+                bind:value={customInstructions}
+                placeholder="e.g. Prefer small PRs. Ignore generated protobuf files."
+                disabled={!canEditSettings}
+              ></textarea>
+              <p class="field-hint">Appended to the reviewer prompt for every PR.</p>
             </div>
-            <div class="toggle-stack">
-              <div class="detector-row">
-                <span>Update PR description on describe</span>
+          </section>
+
+          <section class="card settings-card">
+            <header class="settings-section-head">
+              <h3 class="section-heading">PR actions</h3>
+              <p class="section-desc">What happens on GitHub besides inline comments.</p>
+            </header>
+            <div class="action-list">
+              <div class="action-row">
+                <div>
+                  <span class="action-label">Auto-apply labels</span>
+                  <span class="action-blurb">Tag PRs from review outcome (e.g. risk labels).</span>
+                </div>
                 <label class="toggle">
-                  <div class="toggle-track" class:on={updatePrDescription} role="checkbox" aria-checked={updatePrDescription}
+                  <div class="toggle-track" class:on={autoLabels} role="checkbox" aria-checked={autoLabels}
                     tabindex="0"
-                    onclick={() => toggleFlag((v) => (updatePrDescription = v), updatePrDescription)}
-                    onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (updatePrDescription = v), updatePrDescription); }}>
+                    onclick={() => toggleFlag((v) => (autoLabels = v), autoLabels)}
+                    onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (autoLabels = v), autoLabels); }}>
                     <div class="toggle-knob"></div>
                   </div>
                 </label>
               </div>
-              <div class="detector-row">
-                <span>Allow @codasaurus fix</span>
+              <div class="action-row">
+                <div>
+                  <span class="action-label">Request CODEOWNERS</span>
+                  <span class="action-blurb">Ask owners to review when the bot finishes.</span>
+                </div>
                 <label class="toggle">
-                  <div class="toggle-track" class:on={allowAutoFix} role="checkbox" aria-checked={allowAutoFix}
+                  <div class="toggle-track" class:on={requestReviewers} role="checkbox" aria-checked={requestReviewers}
                     tabindex="0"
-                    onclick={() => toggleFlag((v) => (allowAutoFix = v), allowAutoFix)}
-                    onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (allowAutoFix = v), allowAutoFix); }}>
+                    onclick={() => toggleFlag((v) => (requestReviewers = v), requestReviewers)}
+                    onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (requestReviewers = v), requestReviewers); }}>
+                    <div class="toggle-knob"></div>
+                  </div>
+                </label>
+              </div>
+              <div class="action-row">
+                <div>
+                  <span class="action-label">Check runs</span>
+                  <span class="action-blurb">Show a GitHub check with pass/fail status.</span>
+                </div>
+                <label class="toggle">
+                  <div class="toggle-track" class:on={createCheckRun} role="checkbox" aria-checked={createCheckRun}
+                    tabindex="0"
+                    onclick={() => toggleFlag((v) => (createCheckRun = v), createCheckRun)}
+                    onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (createCheckRun = v), createCheckRun); }}>
                     <div class="toggle-knob"></div>
                   </div>
                 </label>
               </div>
             </div>
-          </details>
 
-          <div class="save-row">
-            <button onclick={saveReview} disabled={reviewSaving || !canEditSettings}>{reviewSaving ? "Saving…" : "Save"}</button>
+            <details class="settings-advanced">
+              <summary>Paths, describe, and autofix</summary>
+              <div class="form-group">
+                <label for="forbidden-paths">Forbidden path prefixes</label>
+                <input id="forbidden-paths" type="text" bind:value={forbiddenPaths} placeholder="vendor/,secrets/" disabled={!canEditSettings} />
+                <p class="field-hint">Touching these paths can fail the review.</p>
+              </div>
+              <div class="form-group">
+                <label for="exclude-patterns">Exclude path patterns</label>
+                <input id="exclude-patterns" type="text" bind:value={excludePatterns} placeholder="vendor/,*.lock,dist/" disabled={!canEditSettings} />
+                <p class="field-hint">Skip these files when scanning the diff.</p>
+              </div>
+              <div class="action-list">
+                <div class="action-row">
+                  <div>
+                    <span class="action-label">Update PR body on describe</span>
+                    <span class="action-blurb">Slash describe can rewrite the PR description.</span>
+                  </div>
+                  <label class="toggle">
+                    <div class="toggle-track" class:on={updatePrDescription} role="checkbox" aria-checked={updatePrDescription}
+                      tabindex="0"
+                      onclick={() => toggleFlag((v) => (updatePrDescription = v), updatePrDescription)}
+                      onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (updatePrDescription = v), updatePrDescription); }}>
+                      <div class="toggle-knob"></div>
+                    </div>
+                  </label>
+                </div>
+                <div class="action-row">
+                  <div>
+                    <span class="action-label">Allow @codasaurus fix</span>
+                    <span class="action-blurb">Lets the bot push autofix commits when asked.</span>
+                  </div>
+                  <label class="toggle">
+                    <div class="toggle-track" class:on={allowAutoFix} role="checkbox" aria-checked={allowAutoFix}
+                      tabindex="0"
+                      onclick={() => toggleFlag((v) => (allowAutoFix = v), allowAutoFix)}
+                      onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (allowAutoFix = v), allowAutoFix); }}>
+                      <div class="toggle-knob"></div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </details>
+          </section>
+
+          <div class="review-save-bar">
+            <button class="primary" onclick={saveReview} disabled={reviewSaving || !canEditSettings}>
+              {reviewSaving ? "Saving…" : "Save review settings"}
+            </button>
             {#if reviewMsg}<span class="save-msg" class:error={reviewMsg !== "Saved"}>{reviewMsg}</span>{/if}
           </div>
-        </section>
+        </div>
 
       {:else if activeTab === "connections"}
         <div class="settings-stack">
@@ -1176,6 +1339,11 @@
   .settings-shell {
     width: 100%;
     max-width: 1120px;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
 
   .settings-page-head {
@@ -1184,7 +1352,8 @@
     justify-content: space-between;
     gap: 20px;
     flex-wrap: wrap;
-    margin-bottom: 24px;
+    margin-bottom: 20px;
+    flex-shrink: 0;
   }
 
   .settings-filter input {
@@ -1212,19 +1381,22 @@
     display: grid;
     grid-template-columns: 220px minmax(0, 1fr);
     gap: 28px;
-    align-items: start;
+    flex: 1;
+    min-height: 0;
+    align-items: stretch;
   }
 
   .settings-side-nav {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    position: sticky;
-    top: 0;
     padding: 4px;
     border: 1px solid var(--border);
     border-radius: 12px;
     background: color-mix(in srgb, var(--bg-secondary) 45%, transparent);
+    align-self: start;
+    max-height: 100%;
+    overflow-y: auto;
   }
 
   .settings-side-item {
@@ -1271,6 +1443,10 @@
 
   .settings-main {
     min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 4px;
+    scrollbar-gutter: stable;
   }
 
   .settings-panel {
@@ -1289,6 +1465,10 @@
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
+  }
+
+  .settings-subhead.tight {
+    margin: 0 0 4px;
   }
 
   .section-desc {
@@ -1345,13 +1525,6 @@
     font-family: var(--font-mono);
   }
 
-  .detector-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0 28px;
-    margin-bottom: 4px;
-  }
-
   .detector-list {
     margin: 0;
   }
@@ -1370,12 +1543,222 @@
     border-bottom: none;
   }
 
-  .toggle-stack {
-    margin-top: 8px;
+  .review-stack {
+    padding-bottom: 8px;
   }
 
-  .toggle-stack .detector-row {
+  .review-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .review-count {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    white-space: nowrap;
+  }
+
+  .review-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+
+  .chip {
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+
+  .chip:hover:not(:disabled) {
+    color: var(--text-primary);
+    border-color: var(--text-muted);
+  }
+
+  .chip:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .detector-group {
+    margin-top: 8px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-light);
+  }
+
+  .detector-group:first-of-type {
+    border-top: none;
+    padding-top: 0;
+  }
+
+  .detector-group-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .group-desc {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+
+  .group-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .detector-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .detector-card {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--bg-secondary) 35%, transparent);
+  }
+
+  .detector-card.on {
+    border-color: color-mix(in srgb, var(--accent-soft) 35%, var(--border));
+  }
+
+  .detector-card-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .detector-card-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .detector-card-blurb {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.35;
+  }
+
+  .strictness-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .strictness-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    text-align: left;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+
+  .strictness-card strong {
+    font-size: 14px;
+    color: var(--text-primary);
+  }
+
+  .strictness-card span {
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--text-muted);
+  }
+
+  .strictness-card:hover:not(:disabled) {
+    border-color: var(--text-muted);
+  }
+
+  .strictness-card.active {
+    border-color: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-soft) 50%, transparent);
+    background: color-mix(in srgb, var(--accent-soft) 8%, var(--bg-primary));
+  }
+
+  .strictness-card:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .field-hint {
+    margin: 6px 0 0;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.35;
+  }
+
+  .action-list {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .action-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 0;
     border-bottom: 1px solid var(--border-light);
+  }
+
+  .action-row:last-child {
+    border-bottom: none;
+  }
+
+  .action-label {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .action-blurb {
+    display: block;
+    margin-top: 3px;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.35;
+  }
+
+  .review-save-bar {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 0 4px;
+    background: linear-gradient(to top, var(--bg-primary) 70%, transparent);
   }
 
   .search-wrap {
@@ -1467,16 +1850,35 @@
   }
 
   @media (max-width: 900px) {
+    .settings-shell {
+      flex: none;
+      min-height: auto;
+      overflow: visible;
+    }
+
     .settings-body {
       grid-template-columns: 1fr;
+      flex: none;
+      min-height: auto;
+    }
+
+    .settings-main {
+      overflow: visible;
+      min-height: auto;
+      padding-right: 0;
     }
 
     .settings-side-nav {
-      position: static;
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      max-height: none;
       flex-direction: row;
       overflow-x: auto;
       gap: 6px;
       padding: 8px;
+      align-self: stretch;
+      background: var(--bg-primary);
     }
 
     .settings-side-item {
@@ -1488,7 +1890,8 @@
       box-shadow: inset 0 -2px var(--accent-soft);
     }
 
-    .detector-grid,
+    .detector-cards,
+    .strictness-grid,
     .form-row-2,
     .settings-meta-grid {
       grid-template-columns: 1fr;

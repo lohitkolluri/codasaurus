@@ -826,6 +826,7 @@ body,
 }
 
 .settings-readonly-banner {
+    flex-shrink: 0;
     margin-bottom: 14px;
     padding: 10px 14px;
     border: 1px solid var(--border);
