@@ -95,7 +95,7 @@
         <section class="section-block trust-panel">
           <div class="page-toolbar compact" style="margin-bottom: var(--space-4)">
             <div>
-              
+
               <h2 class="page-title" style="font-size: var(--text-xl); margin: 0">Finding quality</h2>
             </div>
           </div>
@@ -131,6 +131,66 @@
             />
           </div>
         </section>
+
+        {#if stats.analytics}
+        <section class="section-block">
+          <div class="page-toolbar compact" style="margin-bottom: var(--space-4)">
+            <div>
+              <p class="eyebrow">Team</p>
+              <h2 class="page-title" style="font-size: var(--text-xl); margin: 0">Review analytics</h2>
+              <p class="page-description">Postgres rollups — no external analytics SaaS.</p>
+            </div>
+          </div>
+          <div class="stats-row">
+            <StatsCard label="Reviews (7d)" value={stats.analytics.weekly_digest?.reviews ?? stats.reviews_last_7_days ?? 0} />
+            <StatsCard label="Findings (7d)" value={stats.analytics.findings_last_7_days ?? 0} />
+            <StatsCard
+              label="Dismiss rate (7d)"
+              value={stats.analytics.dismiss_rate_last_7_days != null
+                ? `${Math.round(stats.analytics.dismiss_rate_last_7_days)}%`
+                : "-"}
+              hint="Dismissals ÷ findings this week"
+            />
+            <StatsCard label="Dismissals (7d)" value={stats.analytics.weekly_digest?.dismissals ?? stats.dismissals_last_7_days ?? 0} />
+          </div>
+
+          {#if (stats.analytics.reviews_by_day ?? []).length > 0}
+            <div class="analytics-panel" style="margin-top: var(--space-5)">
+              <h3 class="section-heading" style="font-size: var(--text-base)">Reviews / day (14d)</h3>
+              <div class="analytics-bars" role="img" aria-label="Reviews per day">
+                {#each stats.analytics.reviews_by_day as row}
+                  {@const max = Math.max(...stats.analytics.reviews_by_day.map((r) => r.reviews || 0), 1)}
+                  <div class="analytics-bar-col" title={`${row.day}: ${row.reviews}`}>
+                    <div
+                      class="analytics-bar"
+                      style={`height: ${Math.max(4, Math.round((row.reviews / max) * 72))}px`}
+                    ></div>
+                    <span class="analytics-bar-label">{String(row.day).slice(5)}</span>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
+
+          {#if (stats.analytics.findings_by_detector ?? []).length > 0}
+            <div class="analytics-panel" style="margin-top: var(--space-5)">
+              <h3 class="section-heading" style="font-size: var(--text-base)">Findings by detector</h3>
+              <ul class="analytics-detectors">
+                {#each stats.analytics.findings_by_detector as d}
+                  {@const maxD = Math.max(...stats.analytics.findings_by_detector.map((x) => x.count || 0), 1)}
+                  <li>
+                    <span class="analytics-det-name">{d.detector}</span>
+                    <div class="analytics-det-track">
+                      <div class="analytics-det-fill" style={`width: ${Math.round((d.count / maxD) * 100)}%`}></div>
+                    </div>
+                    <span class="analytics-det-count">{d.count}</span>
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
+        </section>
+        {/if}
 
         <section class="section-block">
           <div class="page-toolbar compact">

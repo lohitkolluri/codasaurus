@@ -244,6 +244,45 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     migrate_v11_timestamptz_and_indexes(pool).await?;
     migrate_v12_roles_and_invites(pool).await?;
     migrate_v13_bootstrap_owner(pool).await?;
+    migrate_v14_repo_scoped_learning(pool).await?;
+    Ok(())
+}
+
+/// v14: optional repo scope on dismissals and learned rules.
+async fn migrate_v14_repo_scoped_learning(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
+    if current.unwrap_or(0) >= 14 {
+        return Ok(());
+    }
+
+    let _ = sqlx::query(
+        "ALTER TABLE dismissed_findings ADD COLUMN IF NOT EXISTS repo_full_name TEXT",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
+        "ALTER TABLE learned_rules ADD COLUMN IF NOT EXISTS repo_full_name TEXT",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_dismissed_repo ON dismissed_findings(repo_full_name)",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_learned_repo ON learned_rules(repo_full_name)",
+    )
+    .execute(pool)
+    .await;
+
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (14) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

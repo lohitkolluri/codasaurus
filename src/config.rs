@@ -78,9 +78,15 @@ pub struct CheckConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BehaviorConfig {
-    /// Exit with non-zero on any finding
+    /// Exit with non-zero on any finding (CLI); also maps to `strict` review preset when
+    /// `review_strictness` is unset.
     #[serde(default)]
     pub strict: bool,
+
+    /// Review personality: `lenient` | `balanced` | `strict` | `nitpick`.
+    /// Overridden by dashboard `review_strictness` when set.
+    #[serde(default)]
+    pub review_strictness: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -174,7 +180,10 @@ impl Default for Config {
                 iac: true,
                 exclude_patterns: default_exclude_patterns(),
             },
-            behavior: BehaviorConfig { strict: false },
+            behavior: BehaviorConfig {
+                strict: false,
+                review_strictness: None,
+            },
             registry: RegistryConfig {
                 cache_ttl_secs: 3600,
             },
@@ -208,10 +217,19 @@ fn apply_enabled_flag(checks: &mut CheckConfig, key: &str, value: &str) {
 }
 
 fn apply_behavior_flag(behavior: &mut BehaviorConfig, key: &str, value: &str) {
-    if key == "default_severity" {
-        // "blocking" means treat warnings as blocking (strict-ish); stored for bot policy
-        let _ = value;
-        let _ = behavior;
+    match key {
+        "review_strictness" => {
+            let v = value.trim();
+            if !v.is_empty() {
+                behavior.review_strictness = Some(v.to_string());
+            }
+        }
+        "default_severity" => {
+            // Stored for bot policy / PolicyPack — not a BehaviorConfig field.
+            let _ = value;
+            let _ = behavior;
+        }
+        _ => {}
     }
 }
 

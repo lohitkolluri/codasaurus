@@ -172,6 +172,13 @@
                   <div class="finding-message">{finding.message}</div>
                   {#if finding.code_snippet}
                     <div class="code-snippet">{finding.code_snippet}</div>
+                    {#if review.repo_full_name && review.pr_number && finding.fingerprint}
+                      <p style="font-size:12px;color:var(--text-muted);margin-top:8px">
+                        Apply on the PR:
+                        <code>@codasaurus fix {(finding.fingerprint.includes(":") ? finding.fingerprint.split(":").pop() : finding.fingerprint).slice(0,12)}</code>
+                        (or use GitHub’s Apply suggestion). Requires allow_auto_fix.
+                      </p>
+                    {/if}
                   {/if}
                 </div>
               {/each}

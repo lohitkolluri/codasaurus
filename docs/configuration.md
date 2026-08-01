@@ -83,22 +83,22 @@ Dashboard **Settings → LLM** writes `llm_provider`, `llm_model`, `llm_model_ch
 | `OIDC_CLIENT_SECRET` | Client secret                                   |
 | `PUBLIC_URL`         | Base URL for invite links and IdP redirect URIs |
 
-The first account is created as the **bootstrap owner** (shown as **Superuser**) in the [onboarding wizard](setup-onboarding.md). That account cannot be demoted or removed until bootstrap is transferred to another owner. Additional members join via **invite links** (Settings → Team). No SMTP required.
+The first account is created as the **bootstrap owner** (shown as **Superuser**) in the [onboarding wizard](setup-onboarding.md). That account cannot be demoted or removed until bootstrap is transferred to another owner. Additional members join via **invite links** (Team page). No SMTP required.
 
 #### Roles
 
-| Role | Can do |
-| ---- | ------ |
+| Role                            | Can do                                                                            |
+| ------------------------------- | --------------------------------------------------------------------------------- |
 | **Superuser** (bootstrap owner) | Same as Owner; cannot be demoted/removed; can transfer bootstrap to another owner |
-| **Owner** | Everything: settings, GitHub config, invites, role changes |
-| **Maintainer** | Sync/enable repos, dismiss findings, delete learning rules (read settings) |
-| **Viewer** | Read dashboard, repos, reviews, audit (no mutations) |
+| **Owner**                       | Everything: settings, GitHub config, invites, role changes                        |
+| **Maintainer**                  | Sync/enable repos, dismiss findings, delete learning rules (read settings)        |
+| **Viewer**                      | Read dashboard, repos, reviews, audit (no mutations)                              |
 
 New OIDC users are provisioned as **viewer** unless a pending invite matches their email (then the invite role is used). Existing roles are preserved on re-login.
 
 #### Invite links
 
-Owners create a link under Settings → Team. Optional email lock. Links expire in 7 days. Accept at `/#/invite/<token>`.
+Owners create a link under **Team → Invite member**. Optional email lock. Links expire in 7 days. Accept at `/#/invite/<token>`.
 
 ### Runtime tuning
 
@@ -133,9 +133,26 @@ phantom_deps = true
 vulnerabilities = true
 secrets = true
 iac = true
+
+[behavior]
+review_strictness = "balanced"
 ```
 
+Full field reference: [codasaurus-toml.md](codasaurus-toml.md).
+
 Per-repo overlays and policy packs are edited in the dashboard (`config_json`, forbidden paths, severity caps, auto-labels, Check Runs, `@codasaurus fix`).
+
+## Offline / air-gap hardening
+
+Use this checklist when GitHub Enterprise is reachable but the public internet is not (or you want Tier-1-only):
+
+1. Set dashboard **Settings → Policy → Offline / air-gap mode**, or `CODASAURUS_OFFLINE=1`.
+2. Leave LLM keys empty (or clear `openrouter_api_key` / `llm_base_url`).
+3. Expect registry/OSV to be **cache-only** — warm caches on a network-connected host if needed, or accept soft misses.
+4. Confirm `/health` reports `egress_profile: offline`.
+5. Contents / Checks / PR APIs still talk to GitHub (or GHE); that is intentional for a GitHub App.
+
+Do **not** enable `allow_auto_fix` in air-gap until Contents Write is granted and you accept branch commits from the bot.
 
 ## Offline / egress profiles
 
@@ -146,6 +163,14 @@ Per-repo overlays and policy packs are edited in the dashboard (`config_json`, f
 | `offline`        | `CODASAURUS_OFFLINE` or dashboard `offline_mode`: no LLM; registries/OSV fail-closed or cache-only |
 | `byok-only`      | LLM endpoint/key configured; Tier‑1 network allowed                                                |
 | `full`           | Not offline; no LLM configured (Tier‑1 only)                                                       |
+
+## Weekly digest (dashboard)
+
+The Dashboard **Review analytics** panel rolls up the last 7 days from Postgres (`reviews`, `findings`, `dismissed_findings`). No Slack required — open the dashboard after a Render wake. On a PR you can also ask:
+
+```text
+@codasaurus digest
+```
 
 ## Docker
 

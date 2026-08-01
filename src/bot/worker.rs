@@ -94,6 +94,7 @@ async fn process_queued_review(
             installation: None,
             comment: None,
             issue: None,
+            reaction: None,
             repositories: None,
             repositories_added: None,
         };
@@ -166,6 +167,7 @@ pub(crate) async fn run_webhook_review_inline(
             installation: None,
             comment: None,
             issue: None,
+            reaction: None,
             repositories: None,
             repositories_added: None,
         };

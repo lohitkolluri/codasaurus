@@ -1,13 +1,15 @@
 <script>
   import { link, location } from "svelte-spa-router";
   import { currentUser } from "../stores/auth.js";
-  import { LayoutDashboard, FolderGit2, GitPullRequest, Settings, ClipboardList } from "lucide-svelte";
+  import { LayoutDashboard, FolderGit2, GitPullRequest, Users, Settings, ClipboardList } from "lucide-svelte";
   import BrandMark from "./BrandMark.svelte";
+  import UserAvatar from "./UserAvatar.svelte";
 
   const navItems = [
     { path: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { path: "/app/repos", label: "Repositories", icon: FolderGit2 },
     { path: "/app/reviews", label: "Reviews", icon: GitPullRequest },
+    { path: "/app/team", label: "Team", icon: Users },
     { path: "/app/settings", label: "Settings", icon: Settings },
     { path: "/app/audit", label: "Audit log", icon: ClipboardList },
   ];
@@ -47,7 +49,12 @@
     </ul>
   </nav>
   <div class="sidebar-footer">
-    <div class="sidebar-user">{($currentUser?.email) ?? ""}</div>
+    {#if $currentUser}
+      <div class="sidebar-user">
+        <UserAvatar email={$currentUser.email} size={28} />
+        <span class="sidebar-user-email">{$currentUser.email}</span>
+      </div>
+    {/if}
   </div>
 </aside>
 
@@ -70,6 +77,13 @@
   }
 
   .sidebar-user {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .sidebar-user-email {
     font-size: 12px;
     color: var(--text-muted);
     overflow: hidden;

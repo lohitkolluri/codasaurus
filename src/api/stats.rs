@@ -113,5 +113,96 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
         );
     }
 
+    // Team analytics: daily series, detector hits, weekly digest summary.
+    #[derive(sqlx::FromRow)]
+    struct DayCount {
+        day: chrono::NaiveDate,
+        count: i64,
+    }
+    let reviews_by_day = crate::db::db_fetch_all!(
+        &state.pool,
+        DayCount,
+        "SELECT (created_at AT TIME ZONE 'UTC')::date AS day, COUNT(*)::bigint AS count
+         FROM reviews
+         WHERE created_at >= NOW() - INTERVAL '14 days'
+         GROUP BY 1
+         ORDER BY 1 ASC"
+    )
+    .unwrap_or_default();
+
+    #[derive(sqlx::FromRow)]
+    struct DetectorCount {
+        detector: String,
+        count: i64,
+    }
+    let findings_by_detector = crate::db::db_fetch_all!(
+        &state.pool,
+        DetectorCount,
+        "SELECT detector, COUNT(*)::bigint AS count
+         FROM findings
+         GROUP BY detector
+         ORDER BY count DESC
+         LIMIT 12"
+    )
+    .unwrap_or_default();
+
+    let findings_last_7: i64 = crate::db::db_scalar!(
+        &state.pool,
+        i64,
+        "SELECT COUNT(*) FROM findings f
+         INNER JOIN reviews r ON r.id = f.review_id
+         WHERE r.created_at >= NOW() - INTERVAL '7 days'"
+    )
+    .unwrap_or(0);
+
+    if let Some(obj) = core.as_object_mut() {
+        let series: Vec<serde_json::Value> = reviews_by_day
+            .into_iter()
+            .map(|d| {
+                json!({
+                    "day": d.day.to_string(),
+                    "reviews": d.count,
+                })
+            })
+            .collect();
+        let detectors: Vec<serde_json::Value> = findings_by_detector
+            .into_iter()
+            .map(|d| {
+                json!({
+                    "detector": d.detector,
+                    "count": d.count,
+                })
+            })
+            .collect();
+        let dismiss_week = obj
+            .get("dismissals_last_7_days")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let reviews_week = obj
+            .get("reviews_last_7_days")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let dismiss_rate = if findings_last_7 == 0 {
+            None
+        } else {
+            Some((dismiss_week as f64 / findings_last_7 as f64) * 100.0)
+        };
+        obj.insert(
+            "analytics".into(),
+            json!({
+                "reviews_by_day": series,
+                "findings_by_detector": detectors,
+                "findings_last_7_days": findings_last_7,
+                "dismiss_rate_last_7_days": dismiss_rate,
+                "weekly_digest": {
+                    "reviews": reviews_week,
+                    "findings": findings_last_7,
+                    "dismissals": dismiss_week,
+                    "note": "Postgres-backed rollup for the last 7 days. Open the dashboard after Render wake.",
+                },
+            }),
+        );
+    }
+
     Ok(Json(core))
 }

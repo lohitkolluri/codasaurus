@@ -627,13 +627,18 @@ tr:hover td {
 .header-user {
     font-size: var(--text-sm);
     color: var(--text-secondary);
-    max-width: 280px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    max-width: 320px;
     display: inline-flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
+}
+
+.header-user-email {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
 }
 
 .role-badge {
@@ -1144,6 +1149,91 @@ tr:hover td {
 
 /* ── 25. Auth / Login ───────────────────────────────────────────── */
 
+/* Minimal centered sign-in (preferred) */
+.auth-minimal {
+    position: relative;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-8) var(--space-5);
+    overflow: hidden;
+}
+
+.auth-minimal-bg {
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(
+            ellipse 70% 55% at 50% -10%,
+            color-mix(in srgb, var(--accent-soft) 10%, transparent),
+            transparent 60%
+        ),
+        radial-gradient(
+            ellipse 50% 40% at 100% 100%,
+            color-mix(in srgb, var(--text-muted) 8%, transparent),
+            transparent 55%
+        ),
+        var(--bg-primary);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.auth-minimal-inner {
+    position: relative;
+    z-index: 1;
+    width: min(360px, 100%);
+    animation: auth-rise 0.45s var(--ease-spring) both;
+}
+
+.auth-minimal-brand {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
+}
+
+.auth-minimal-brand :global(svg) {
+    color: var(--accent-soft);
+}
+
+.auth-minimal-brand h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(28px, 5vw, 36px);
+    font-weight: var(--weight-bold);
+    letter-spacing: -0.045em;
+    line-height: 1.1;
+}
+
+.auth-minimal-lead {
+    margin: 0 0 var(--space-6);
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+
+.auth-minimal .auth-submit,
+.auth-minimal .auth-sso {
+    width: 100%;
+}
+
+.auth-minimal .login-invite-hint {
+    margin-top: var(--space-6);
+    text-align: left;
+}
+
+.auth-minimal .login-invite-hint a {
+    color: var(--text-secondary);
+    text-decoration: none;
+}
+
+.auth-minimal .login-invite-hint a:hover {
+    color: var(--text-primary);
+}
+
+/* Legacy split shell (kept for any residual use) */
 .auth-shell {
     display: grid;
     grid-template-columns: 1fr;
@@ -1156,13 +1246,12 @@ tr:hover td {
     position: relative;
     overflow: hidden;
     padding: var(--space-12) var(--space-10);
-    background:
-        linear-gradient(
-            160deg,
-            color-mix(in srgb, var(--accent-soft) 12%, var(--bg-secondary)) 0%,
-            var(--bg-secondary) 42%,
-            var(--bg-primary) 100%
-        );
+    background: linear-gradient(
+        160deg,
+        color-mix(in srgb, var(--accent-soft) 12%, var(--bg-secondary)) 0%,
+        var(--bg-secondary) 42%,
+        var(--bg-primary) 100%
+    );
     color: var(--text-primary);
 }
 
@@ -1170,10 +1259,21 @@ tr:hover td {
     position: absolute;
     inset: 0;
     background-image:
-        linear-gradient(color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px),
-        linear-gradient(90deg, color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px);
+        linear-gradient(
+            color-mix(in srgb, var(--border) 70%, transparent) 1px,
+            transparent 1px
+        ),
+        linear-gradient(
+            90deg,
+            color-mix(in srgb, var(--border) 70%, transparent) 1px,
+            transparent 1px
+        );
     background-size: 48px 48px;
-    mask-image: radial-gradient(ellipse 80% 70% at 30% 40%, black 20%, transparent 75%);
+    mask-image: radial-gradient(
+        ellipse 80% 70% at 30% 40%,
+        black 20%,
+        transparent 75%
+    );
     opacity: 0.55;
     pointer-events: none;
 }
@@ -2200,6 +2300,88 @@ tr:hover td {
     line-height: 1.4;
 }
 
+.analytics-panel {
+    padding: var(--space-4) 0;
+}
+
+.analytics-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    min-height: 88px;
+    padding-top: var(--space-3);
+    overflow-x: auto;
+}
+
+.analytics-bar-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    min-width: 28px;
+    flex: 1;
+}
+
+.analytics-bar {
+    width: 100%;
+    max-width: 20px;
+    border-radius: 4px 4px 0 0;
+    background: color-mix(in srgb, var(--text-primary) 55%, transparent);
+    transition: height var(--dur-med) var(--ease-spring);
+}
+
+.analytics-bar-label {
+    font-size: 9px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.analytics-detectors {
+    list-style: none;
+    margin: var(--space-3) 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.analytics-detectors li {
+    display: grid;
+    grid-template-columns: minmax(100px, 160px) 1fr 40px;
+    gap: 10px;
+    align-items: center;
+    font-size: var(--text-sm);
+}
+
+.analytics-det-name {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.analytics-det-track {
+    height: 8px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--text-muted) 18%, transparent);
+    overflow: hidden;
+}
+
+.analytics-det-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: var(--text-primary);
+    opacity: 0.65;
+}
+
+.analytics-det-count {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+    font-size: var(--text-xs);
+}
+
 .header-btn svg {
     transition: transform var(--dur-med) var(--ease-spring);
 }
@@ -2210,6 +2392,156 @@ tr:hover td {
 
 .header-btn:active svg {
     transform: rotate(0) scale(0.95);
+}
+
+/* ── Landing (public marketing) ─────────────────────────────────── */
+
+.landing {
+    position: relative;
+    min-height: 100vh;
+    padding: 0 clamp(20px, 4vw, 48px) 64px;
+    overflow: hidden;
+}
+
+.landing-bg {
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(
+            ellipse 80% 50% at 20% 0%,
+            color-mix(in srgb, var(--text-primary) 8%, transparent),
+            transparent
+        ),
+        radial-gradient(
+            ellipse 60% 40% at 90% 20%,
+            color-mix(in srgb, var(--text-muted) 12%, transparent),
+            transparent
+        ),
+        linear-gradient(
+            165deg,
+            var(--bg) 0%,
+            color-mix(in srgb, var(--bg) 88%, #1a1f2e) 100%
+        );
+    pointer-events: none;
+    z-index: 0;
+}
+
+.landing-nav,
+.landing-hero,
+.landing-points {
+    position: relative;
+    z-index: 1;
+}
+
+.landing-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 0;
+}
+
+.landing-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: var(--weight-semibold);
+    color: var(--text-primary);
+    text-decoration: none;
+}
+
+.landing-nav-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: var(--text-sm);
+}
+
+.landing-nav-actions a {
+    color: var(--text-muted);
+    text-decoration: none;
+}
+
+.landing-nav-actions a:hover {
+    color: var(--text-primary);
+}
+
+.landing-hero {
+    max-width: 720px;
+    padding: clamp(48px, 12vh, 120px) 0 48px;
+}
+
+.landing-kicker {
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin: 0 0 12px;
+}
+
+.landing-title {
+    font-family: var(--font-display);
+    font-size: clamp(40px, 8vw, 64px);
+    font-weight: var(--weight-bold);
+    letter-spacing: -0.03em;
+    margin: 0 0 16px;
+    line-height: 1.05;
+}
+
+.landing-lead {
+    font-size: clamp(16px, 2.2vw, 20px);
+    color: var(--text-muted);
+    line-height: 1.55;
+    margin: 0 0 28px;
+    max-width: 36em;
+}
+
+.landing-ctas {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.landing-cta,
+.landing-cta-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    text-decoration: none;
+}
+
+.landing-cta {
+    background: var(--text-primary);
+    color: var(--bg);
+}
+
+.landing-cta-secondary {
+    border: 1px solid color-mix(in srgb, var(--text-muted) 35%, transparent);
+    color: var(--text-primary);
+}
+
+.landing-points {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 28px;
+    max-width: 960px;
+    padding-top: 24px;
+    border-top: 1px solid color-mix(in srgb, var(--text-muted) 20%, transparent);
+}
+
+.landing-points h2 {
+    font-size: var(--text-lg);
+    margin: 0 0 8px;
+}
+
+.landing-points p {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    line-height: 1.5;
 }
 
 /* ── 33. Reduced Motion ────────────────────────────────────────── */

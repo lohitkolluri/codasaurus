@@ -12,6 +12,8 @@ pub struct PolicyPack {
     pub forbidden_paths: Vec<String>,
     pub request_reviewers: bool,
     pub create_check_run: bool,
+    /// Optional repo override for review personality.
+    pub review_strictness: Option<String>,
 }
 
 impl Default for PolicyPack {
@@ -23,6 +25,7 @@ impl Default for PolicyPack {
             forbidden_paths: Vec::new(),
             request_reviewers: true,
             create_check_run: true,
+            review_strictness: None,
         }
     }
 }
@@ -41,6 +44,8 @@ struct PolicyJson {
     create_check_run: Option<bool>,
     #[serde(default)]
     min_severity: Option<String>,
+    #[serde(default)]
+    review_strictness: Option<String>,
 }
 
 impl PolicyPack {
@@ -82,6 +87,7 @@ impl PolicyPack {
             if let Ok(Some(v)) = crate::db::config::get_config(pool, "create_check_run").await {
                 pack.create_check_run = parse_bool(&v, true);
             }
+            // review_strictness is applied by the caller via strictness::apply_to_pack
         }
 
         if let Some(raw) = repo_config_json {
@@ -106,6 +112,11 @@ impl PolicyPack {
                         if let Some(s) = pj.min_severity {
                             if matches!(s.as_str(), "blocking" | "warning" | "info") {
                                 pack.min_severity = s;
+                            }
+                        }
+                        if let Some(s) = pj.review_strictness {
+                            if !s.trim().is_empty() {
+                                pack.review_strictness = Some(s);
                             }
                         }
                     }

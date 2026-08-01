@@ -24,8 +24,9 @@ pub(crate) enum BotCommand {
     Security,
     AddDocs,
     Similar,
-    Fix,
+    Fix(Option<String>),
     Impact,
+    Digest,
     Ask(String),
     Ignore(Option<String>),
     Help,
@@ -53,12 +54,15 @@ pub(crate) fn parse_bot_command(body: &str) -> Option<BotCommand> {
     {
         return Some(BotCommand::Impact);
     }
+    if lower.contains("digest") || lower.contains("weekly") {
+        return Some(BotCommand::Digest);
+    }
     if lower.contains("@codasaurus fix")
         || lower.contains("@codasaurus-bot fix")
         || lower.contains(" autofix")
         || lower.contains(" apply_fix")
     {
-        return Some(BotCommand::Fix);
+        return Some(BotCommand::Fix(extract_fix_fingerprint(body)));
     }
     if lower.contains("security") {
         return Some(BotCommand::Security);
@@ -134,6 +138,32 @@ fn extract_ignore_fingerprint(body: &str) -> Option<String> {
     None
 }
 
+fn extract_fix_fingerprint(body: &str) -> Option<String> {
+    for prefix in [
+        "@codasaurus fix ",
+        "@codasaurus-bot fix ",
+        "@codasaurus autofix ",
+        "@codasaurus apply_fix ",
+    ] {
+        if let Some(rest) = body.split(prefix).nth(1) {
+            let fp = rest.split_whitespace().next().unwrap_or("").trim();
+            if !fp.is_empty() && fp.len() >= 8 && !fp.starts_with('<') {
+                return Some(fp.to_string());
+            }
+        }
+        let lower = body.to_ascii_lowercase();
+        let p = prefix.to_ascii_lowercase();
+        if let Some(idx) = lower.find(&p) {
+            let rest = &body[idx + prefix.len()..];
+            let fp = rest.split_whitespace().next().unwrap_or("").trim();
+            if !fp.is_empty() && fp.len() >= 8 && !fp.starts_with('<') {
+                return Some(fp.to_string());
+            }
+        }
+    }
+    None
+}
+
 pub(crate) async fn handle_bot_command(
     ctx: WebhookContext,
     pr_number: i64,
@@ -153,8 +183,9 @@ pub(crate) async fn handle_bot_command(
         BotCommand::Security => spawn_security(ctx, pr_number, timeout_secs).await,
         BotCommand::AddDocs => spawn_add_docs(ctx, pr_number, timeout_secs).await,
         BotCommand::Similar => spawn_similar(ctx, pr_number, timeout_secs).await,
-        BotCommand::Fix => spawn_fix(ctx, pr_number, timeout_secs).await,
+        BotCommand::Fix(fp) => spawn_fix(ctx, pr_number, fp, timeout_secs).await,
         BotCommand::Impact => spawn_impact(ctx, pr_number, timeout_secs).await,
+        BotCommand::Digest => spawn_digest(ctx, pr_number).await,
     }
 }
 
@@ -889,6 +920,7 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
             installation: None,
             comment: None,
             issue: None,
+            reaction: None,
             repositories: None,
             repositories_added: None,
         };
@@ -925,7 +957,13 @@ async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64, fingerprint: 
             if let Some(pool) = bot_db_pool() {
                 let store = LearningStore::from_pool(pool);
                 store
-                    .dismiss_fingerprint(fp, "manual", &ctx.repo_full_name, "dismissed via comment")
+                    .dismiss_fingerprint_for_repo(
+                        fp,
+                        "manual",
+                        &ctx.repo_full_name,
+                        "dismissed via comment",
+                        Some(&ctx.repo_full_name),
+                    )
                     .await?;
                 format!(
                     "### Codasaurus dismiss\n\nFinding `{fp}` will be filtered on future reviews.\n\n<sub>`@codasaurus help`</sub>"
@@ -960,6 +998,55 @@ async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64, fingerprint: 
         Ok(Ok(())) => tracing::info!(pr = pr_number, "ignore command handled"),
         Ok(Err(e)) => tracing::error!(pr = pr_number, error = %e, "ignore command failed"),
         Err(_) => tracing::error!(pr = pr_number, "ignore command timed out"),
+    }
+}
+
+async fn spawn_digest(ctx: WebhookContext, pr_number: i64) {
+    match timeout(Duration::from_secs(60), async move {
+        let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
+        let body = if let Some(pool) = bot_db_pool() {
+            let stats = crate::db::reviews::get_stats(pool).await.unwrap_or_else(|_| {
+                serde_json::json!({})
+            });
+            let reviews = stats
+                .get("reviews_last_7_days")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let dismissals = stats
+                .get("dismissals_last_7_days")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let findings = stats
+                .get("total_findings")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let pass = stats
+                .get("pass_rate")
+                .and_then(|v| v.as_f64())
+                .map(|p| format!("{:.0}%", p))
+                .unwrap_or_else(|| "-".into());
+            format!(
+                "### Codasaurus digest (7 days)\n\n\
+                 | Metric | Value |\n\
+                 | --- | --- |\n\
+                 | Reviews | {reviews} |\n\
+                 | Active findings (all time rows) | {findings} |\n\
+                 | Dismissals | {dismissals} |\n\
+                 | Pass rate (all time) | {pass} |\n\n\
+                 Open the dashboard **Review analytics** panel for detector breakdowns.\n\n\
+                 <sub>`@codasaurus help`</sub>"
+            )
+        } else {
+            "### Codasaurus digest\n\n> Database unavailable.".into()
+        };
+        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &body).await?;
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+    {
+        Ok(Ok(())) => tracing::info!(pr = pr_number, "digest posted"),
+        Ok(Err(e)) => tracing::error!(pr = pr_number, error = %e, "digest failed"),
+        Err(_) => tracing::error!(pr = pr_number, "digest timed out"),
     }
 }
 
@@ -1127,7 +1214,12 @@ async fn fetch_changed_paths_list(
         .collect())
 }
 
-async fn spawn_fix(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
+async fn spawn_fix(
+    ctx: WebhookContext,
+    pr_number: i64,
+    fingerprint: Option<String>,
+    timeout_secs: u64,
+) {
     let Ok(_permit) = REVIEW_PERMITS.acquire().await else {
         tracing::error!("review semaphore closed");
         return;
@@ -1220,21 +1312,32 @@ async fn spawn_fix(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
             }
         }
         let findings = crate::detectors::run_all(&parsed, &config);
+        let fp_filter = fingerprint.as_deref();
         let with_codemod: Vec<_> = findings
             .findings
             .into_iter()
-            .filter(|f| f.codemod.as_ref().is_some_and(|c| !c.is_empty()) && f.line > 0)
-            .take(8)
+            .filter(|f| {
+                let has_code = f.codemod.as_ref().is_some_and(|c| !c.is_empty()) && f.line > 0;
+                if !has_code || f.detector == "phantom-deps" {
+                    return false;
+                }
+                if let Some(want) = fp_filter {
+                    let full = f.fingerprint();
+                    full.starts_with(want) || want.starts_with(&full[..want.len().min(full.len())])
+                } else {
+                    true
+                }
+            })
+            .take(if fp_filter.is_some() { 1 } else { 8 })
             .collect();
 
         if with_codemod.is_empty() {
-            post_issue_comment(
-                &token,
-                &ctx.repo_full_name,
-                pr_number,
-                "### Codasaurus fix\n\n> No applyable codemods on this PR.\n\nEnable detectors that emit replacements (e.g. stale-api), then re-run review.",
-            )
-            .await?;
+            let msg = if fp_filter.is_some() {
+                "### Codasaurus fix\n\n> No applyable codemod matched that fingerprint.\n\nUse GitHub **Apply suggestion** on the finding, or `@codasaurus fix` without a fingerprint."
+            } else {
+                "### Codasaurus fix\n\n> No applyable codemods on this PR.\n\nEnable detectors that emit replacements (e.g. stale-api), then re-run review."
+            };
+            post_issue_comment(&token, &ctx.repo_full_name, pr_number, msg).await?;
             return Ok(());
         }
 
@@ -1272,7 +1375,8 @@ async fn spawn_fix(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
                 if idx < lines.len() {
                     lines[idx] = codemod.trim_end().to_string();
                     changed = true;
-                    applied.push(format!("`{path}:{}`", f.line));
+                    let short: String = f.fingerprint().chars().take(12).collect();
+                    applied.push(format!("{path}:{} (`{short}`)", f.line));
                 }
             }
             if !changed {
@@ -1365,7 +1469,11 @@ mod tests {
         ));
         assert!(matches!(
             parse_bot_command("@codasaurus fix"),
-            Some(BotCommand::Fix)
+            Some(BotCommand::Fix(None))
         ));
+        match parse_bot_command("@codasaurus fix abcdef012345") {
+            Some(BotCommand::Fix(Some(fp))) => assert!(fp.starts_with("abcdef")),
+            other => panic!("expected Fix(Some), got {other:?}"),
+        }
     }
 }

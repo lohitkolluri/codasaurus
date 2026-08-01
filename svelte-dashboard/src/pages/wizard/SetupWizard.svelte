@@ -20,7 +20,7 @@
 
   function startSetup() {
     if (status?.complete) {
-      push("/login");
+      push("/");
       return;
     }
     const next = firstIncomplete(status);

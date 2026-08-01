@@ -20,6 +20,8 @@ mod policy;
 pub(crate) mod provenance;
 mod quality;
 pub(crate) use quality::{apply_signal_budget, SignalBudget};
+mod reactions;
+pub(crate) mod strictness;
 pub mod queue;
 pub(crate) mod related_prs;
 pub(crate) mod repo_context;
@@ -184,6 +186,8 @@ pub(crate) struct WebhookPayload {
     comment: Option<serde_json::Value>,
     #[serde(rename = "issue")]
     issue: Option<serde_json::Value>,
+    /// `reaction` webhook event payload
+    reaction: Option<serde_json::Value>,
     /// Sent in `installation.created` event
     repositories: Option<Vec<serde_json::Value>>,
     /// Sent in `installation_repositories.added` event
@@ -370,6 +374,44 @@ pub(crate) async fn handle_webhook(
                     });
                 }
             }
+        }
+    } else if event == "reaction" && payload.action == "created" {
+        let content = payload
+            .reaction
+            .as_ref()
+            .and_then(|r| r.get("content"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("");
+        let comment_body = payload
+            .comment
+            .as_ref()
+            .and_then(|c| c.get("body"))
+            .and_then(|b| b.as_str())
+            .unwrap_or("");
+        let repo_full_name = payload
+            .repo
+            .as_ref()
+            .and_then(|r| r["full_name"].as_str())
+            .unwrap_or("")
+            .to_string();
+        if !content.is_empty() && !comment_body.is_empty() && !repo_full_name.is_empty() {
+            let content = content.to_string();
+            let comment_body = comment_body.to_string();
+            tokio::spawn(async move {
+                if let Some(pool) = bot_db_pool() {
+                    if let Err(e) = reactions::handle_reaction_event(
+                        pool,
+                        "created",
+                        &content,
+                        &comment_body,
+                        &repo_full_name,
+                    )
+                    .await
+                    {
+                        tracing::warn!(error = %e, "reaction learning failed");
+                    }
+                }
+            });
         }
     } else if event == "installation" && payload.action == "created" {
         tokio::spawn(handle_installation_created(

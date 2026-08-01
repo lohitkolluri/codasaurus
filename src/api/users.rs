@@ -58,7 +58,8 @@ async fn list_users(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    rbac::require_owner(&state, &headers).await?;
+    // Any signed-in member can see the roster; mutations stay owner-only.
+    rbac::require_role(&state.pool, &headers, rbac::MinRole::Viewer).await?;
     let users = db::users::list_users(&state.pool).await?;
     let items: Vec<serde_json::Value> = users
         .into_iter()

@@ -268,10 +268,24 @@ pub async fn get_stats(pool: &DbPool) -> Result<serde_json::Value, sqlx::Error> 
 
     let total_findings: i64 = db_scalar!(pool, i64, "SELECT COUNT(*) FROM findings")?;
 
+    let reviews_last_7_days: i64 = db_scalar!(
+        pool,
+        i64,
+        "SELECT COUNT(*) FROM reviews WHERE created_at >= NOW() - INTERVAL '7 days'"
+    )?;
+
+    let dismissals_last_7_days: i64 = db_scalar!(
+        pool,
+        i64,
+        "SELECT COUNT(*) FROM dismissed_findings WHERE dismissed_at >= NOW() - INTERVAL '7 days'"
+    )?;
+
     Ok(serde_json::json!({
         "total_repos": total_repos,
         "total_reviews_today": total_reviews_today,
         "pass_rate": pass_rate,
         "total_findings": total_findings,
+        "reviews_last_7_days": reviews_last_7_days,
+        "dismissals_last_7_days": dismissals_last_7_days,
     }))
 }

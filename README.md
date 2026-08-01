@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  Tier-1 detectors first · optional BYOK LLM · zero seat tax<br>
-  <code>@codasaurus</code> on any PR · Svelte dashboard · PostgreSQL
+  Tier-1 detectors first · optional BYOK LLM · zero seat tax · run for $0<br>
+  <code>@codasaurus</code> on any PR · Svelte dashboard · PostgreSQL only
 </p>
 
 <p align="center">
@@ -80,6 +80,7 @@ codasaurus serve | health | version
 | [Run for free](docs/run-for-free.md)                    | Always-free host + Postgres        |
 | [Database](docs/database.md)                            | PostgreSQL, pool, schema           |
 | [Configuration](docs/configuration.md)                  | Env vars, TOML, offline, OIDC      |
+| [`.codasaurus.toml` schema](docs/codasaurus-toml.md)    | In-repo config reference           |
 | [Commands](docs/commands.md)                            | `@codasaurus` on PRs               |
 | [Backup and restore](docs/operations-backup-restore.md) | Postgres backup, HA, health        |
 
@@ -92,11 +93,11 @@ Full index: [docs/README.md](docs/README.md).
 ```text
 @codasaurus review      @codasaurus describe     @codasaurus improve
 @codasaurus security    @codasaurus impact       @codasaurus similar
-@codasaurus ask …       @codasaurus fix          @codasaurus ignore <fp>
+@codasaurus ask …       @codasaurus fix [fp]     @codasaurus ignore <fp>
 @codasaurus help
 ```
 
-Also: `summarize`, `labels`, `changelog`, `add_docs`. Full table in [docs/commands.md](docs/commands.md).
+Also: `summarize`, `labels`, `changelog`, `add_docs`. React 👎 on a finding comment to dismiss. Full table in [docs/commands.md](docs/commands.md).
 
 ---
 

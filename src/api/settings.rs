@@ -83,6 +83,7 @@ async fn set_setting(
         "llm_daily_budget_usd",
         "public_url",
         "default_severity",
+        "review_strictness",
         "max_warnings",
         "max_blocking",
         "forbidden_paths",
@@ -117,6 +118,17 @@ async fn set_setting(
         return Ok(Json(
             json!({ "status": "ok", "key": key, "skipped": "unchanged" }),
         ));
+    }
+    if key == "review_strictness" {
+        let v = body.value.trim().to_ascii_lowercase();
+        if !matches!(
+            v.as_str(),
+            "lenient" | "balanced" | "strict" | "nitpick" | ""
+        ) {
+            return Err(ApiError::bad_request(
+                "review_strictness must be lenient|balanced|strict|nitpick",
+            ));
+        }
     }
     if key == "llm_daily_budget_usd" && !body.value.trim().is_empty() {
         body.value

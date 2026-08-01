@@ -138,13 +138,28 @@ pub async fn review_pr_with_options(
     }
     crate::registry::set_offline_mode(offline_mode);
 
-    let policy_pack = crate::bot::policy::PolicyPack::load(
+    let mut policy_pack = crate::bot::policy::PolicyPack::load(
         pool,
         repo_config_json.as_deref(),
         config.pre_merge.max_blocking,
         config.pre_merge.max_warnings,
     )
     .await;
+    let strictness = {
+        let from_repo = policy_pack.review_strictness.as_deref();
+        if let Some(s) = from_repo {
+            crate::bot::strictness::ReviewStrictness::parse(s)
+        } else {
+            crate::bot::strictness::load(
+                pool,
+                config.behavior.strict,
+                config.behavior.review_strictness.as_deref(),
+            )
+            .await
+        }
+    };
+    strictness.apply_to_pack(&mut policy_pack);
+    tracing::info!(strictness = %strictness.as_str(), "review strictness applied");
     let policy = crate::config::BotPolicy {
         min_severity: policy_pack.min_severity.clone(),
     };
@@ -426,9 +441,15 @@ pub async fn review_pr_with_options(
     } else {
         let cfg = config.clone();
         let parsed = parsed_files_collected.clone();
-        tokio::task::spawn_blocking(move || detectors::run_all(&parsed, &cfg))
-            .await
-            .map_err(|e| anyhow::anyhow!("detector task join error: {e}"))?
+        let repo_for_learning = repo_name.to_string();
+        tokio::task::spawn_blocking(move || {
+            crate::learning::store::set_filter_repo(Some(repo_for_learning));
+            let out = detectors::run_all(&parsed, &cfg);
+            crate::learning::store::set_filter_repo(None);
+            out
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("detector task join error: {e}"))?
     };
 
     if want_guidelines && !remote_ctx.guidelines.is_empty() {
@@ -521,6 +542,7 @@ pub async fn review_pr_with_options(
     let agent_signal =
         crate::bot::agent_mode::detect_agent_pr(&pr_title, &pr_body, &commit_messages, pr_author);
     let mut budget = crate::bot::SignalBudget::default();
+    budget = strictness.signal_budget(budget);
     if agent_signal.is_agent {
         budget = crate::bot::agent_mode::agent_signal_budget(budget);
         tracing::info!(
@@ -602,6 +624,13 @@ pub async fn review_pr_with_options(
                     Some(format!("Org custom instructions:\n{instr}\n\n{existing}"));
             }
         }
+        let tone = strictness.llm_tone_hint();
+        let existing = review_ctx.repo_context.take().unwrap_or_default();
+        review_ctx.repo_context = Some(format!("{tone}\n\n{existing}"));
+    } else {
+        let tone = strictness.llm_tone_hint();
+        let existing = review_ctx.repo_context.take().unwrap_or_default();
+        review_ctx.repo_context = Some(format!("{tone}\n\n{existing}"));
     }
     let issue_assessment = crate::bot::issue_assessment::assess_linked_issues(
         &pr_title,

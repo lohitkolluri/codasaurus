@@ -6,6 +6,7 @@
 
   // Pages
   import Login from "./pages/Login.svelte";
+  import Landing from "./pages/Landing.svelte";
   import NotFound from "./pages/NotFound.svelte";
 
   // Wizard
@@ -24,6 +25,7 @@
   import ReviewDetail from "./pages/app/ReviewDetail.svelte";
   import Settings from "./pages/app/Settings.svelte";
   import AuditLog from "./pages/app/AuditLog.svelte";
+  import Team from "./pages/app/Team.svelte";
   import InviteAccept from "./pages/InviteAccept.svelte";
 
   let loading = $state(true);
@@ -48,12 +50,12 @@
     // If setup is already complete, don't trap users on the wizard hub.
     try {
       const loc = window.location.hash.replace(/^#/, "") || "/";
-      if (loc === "/" || loc === "/setup") {
+      if (loc === "/setup") {
         const status = await fetch("/api/setup/status", { credentials: "same-origin" }).then((r) =>
           r.ok ? r.json() : null,
         );
         if (status?.complete) {
-          push($currentUser ? "/app/dashboard" : "/login");
+          push($currentUser ? "/app/dashboard" : "/");
         }
       }
     } catch {
@@ -62,7 +64,7 @@
   });
 
   const routes = {
-    "/": SetupWizard,
+    "/": Landing,
     "/setup": SetupWizard,
     "/setup/database": SetupDatabase,
     "/setup/llm": SetupLLM,
@@ -78,6 +80,7 @@
     "/app/reviews/:id": ReviewDetail,
     "/app/settings": Settings,
     "/app/settings/github": Settings,
+    "/app/team": Team,
     "/app/audit": AuditLog,
     "*": NotFound,
   };

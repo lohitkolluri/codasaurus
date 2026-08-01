@@ -2,6 +2,7 @@
   import { currentUser, logout, roleLabel } from "../stores/auth.js";
   import { push } from "svelte-spa-router";
   import { Sun, Moon, LogOut } from "lucide-svelte";
+  import UserAvatar from "./UserAvatar.svelte";
 
   let { title = "" } = $props();
   let theme = $state(typeof localStorage !== "undefined" ? (localStorage.getItem("codasaurus-theme") ?? "dark") : "dark");
@@ -26,7 +27,8 @@
   <div class="top-header-right">
     {#if $currentUser}
       <span class="header-user">
-        {$currentUser.email}
+        <UserAvatar email={$currentUser.email} size={24} />
+        <span class="header-user-email">{$currentUser.email}</span>
         {#if $currentUser.role}
           <span class="role-badge" class:bootstrap={!!$currentUser.is_bootstrap}>
             {roleLabel($currentUser.role, $currentUser.is_bootstrap)}

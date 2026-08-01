@@ -491,17 +491,19 @@ fn build_manifest(public_url: &str) -> serde_json::Value {
         "default_permissions": {
             "pull_requests": "write",
             "checks": "write",
-            "contents": "read",
+            "contents": "write",
             "issues": "read",
             "metadata": "read",
-            "emails": "read"
+            "emails": "read",
+            "reactions": "read"
         },
         "default_events": [
             "pull_request",
             "issue_comment",
             "push",
             "check_run",
-            "check_suite"
+            "check_suite",
+            "reaction"
         ]
     })
 }

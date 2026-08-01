@@ -14,7 +14,7 @@
     { id: "detectors", label: "Detectors" },
     { id: "policy", label: "Policy" },
     { id: "github", label: "GitHub" },
-    { id: "team", label: "Team" },
+    { id: "account", label: "Account" },
     { id: "learning", label: "Learning" },
   ];
 
@@ -67,6 +67,7 @@
 
   let maxWarnings = $state("20");
   let maxBlocking = $state("0");
+  let reviewStrictness = $state("balanced");
   let forbiddenPaths = $state("");
   let autoLabels = $state(true);
   let requestReviewers = $state(true);
@@ -86,14 +87,6 @@
   let clearingGithub = $state(false);
   let confirmClearGithub = $state(false);
 
-  let members = $state([]);
-  let pendingInvites = $state([]);
-  let teamMsg = $state("");
-  let inviteEmail = $state("");
-  let inviteRole = $state("viewer");
-  let inviteCreating = $state(false);
-  let lastInviteUrl = $state("");
-  let confirmRemoveId = $state(null);
   let pwCurrent = $state("");
   let pwNew = $state("");
   let pwMsg = $state("");
@@ -167,96 +160,6 @@
     }
   }
 
-  async function loadTeam() {
-    if (!$isOwner) return;
-    try {
-      const [u, inv] = await Promise.all([
-        api.get("/api/users"),
-        api.get("/api/users/invites"),
-      ]);
-      members = u.users || [];
-      pendingInvites = inv.invites || [];
-    } catch {
-      members = [];
-      pendingInvites = [];
-    }
-  }
-
-  async function createInvite() {
-    inviteCreating = true;
-    teamMsg = "";
-    lastInviteUrl = "";
-    try {
-      const res = await api.post("/api/users/invites", {
-        email: inviteEmail.trim() || null,
-        role: inviteRole,
-      });
-      lastInviteUrl = res.url || "";
-      teamMsg = "Invite created. Copy the link and share it.";
-      inviteEmail = "";
-      await loadTeam();
-    } catch (err) {
-      teamMsg = err.message || "Invite failed";
-    } finally {
-      inviteCreating = false;
-    }
-  }
-
-  async function copyInviteUrl() {
-    if (!lastInviteUrl) return;
-    try {
-      await navigator.clipboard.writeText(lastInviteUrl);
-      teamMsg = "Invite link copied";
-    } catch {
-      teamMsg = "Copy failed. Select the URL manually.";
-    }
-  }
-
-  async function revokeInvite(id) {
-    teamMsg = "";
-    try {
-      await api.delete(`/api/users/invites/${id}`);
-      teamMsg = "Invite revoked";
-      await loadTeam();
-    } catch (err) {
-      teamMsg = err.message || "Revoke failed";
-    }
-  }
-
-  async function changeMemberRole(id, role) {
-    teamMsg = "";
-    try {
-      await api.patch(`/api/users/${id}`, { role });
-      teamMsg = "Role updated";
-      await loadTeam();
-    } catch (err) {
-      teamMsg = err.message || "Role change failed";
-    }
-  }
-
-  async function transferBootstrap(id) {
-    teamMsg = "";
-    try {
-      await api.post(`/api/users/${id}/transfer-bootstrap`);
-      teamMsg = "Bootstrap / superuser transferred";
-      await loadTeam();
-    } catch (err) {
-      teamMsg = err.message || "Transfer failed";
-    }
-  }
-
-  async function removeMember(id) {
-    teamMsg = "";
-    try {
-      await api.delete(`/api/users/${id}`);
-      confirmRemoveId = null;
-      teamMsg = "Member removed";
-      await loadTeam();
-    } catch (err) {
-      teamMsg = err.message || "Remove failed";
-    }
-  }
-
   async function changePassword() {
     pwSaving = true;
     pwMsg = "";
@@ -305,6 +208,7 @@
         defaultSeverity = data.default_severity ?? "warning";
         maxWarnings = data.max_warnings ?? "20";
         maxBlocking = data.max_blocking ?? "0";
+        reviewStrictness = data.review_strictness ?? "balanced";
         forbiddenPaths = data.forbidden_paths ?? "";
         autoLabels = data.auto_labels_enabled !== "false";
         requestReviewers = data.request_reviewers !== "false";
@@ -324,7 +228,6 @@
         error = err.message || "Failed to load settings";
       } finally {
         loading = false;
-        await loadTeam();
         applyDeepLink();
       }
     })();
@@ -379,6 +282,7 @@
     policySaving = true; policyMsg = "";
     try {
       const updates = [
+        api.put("/api/settings/review_strictness", { value: reviewStrictness }),
         api.put("/api/settings/max_warnings", { value: maxWarnings }),
         api.put("/api/settings/max_blocking", { value: maxBlocking }),
         api.put("/api/settings/forbidden_paths", { value: forbiddenPaths }),
@@ -450,7 +354,7 @@
         <div class="page-toolbar compact settings-hero">
           <div>
             <h1 class="page-title">Settings</h1>
-            <p class="page-description">LLM, detectors, policy, GitHub App, team, and learned rules.</p>
+            <p class="page-description">LLM, detectors, policy, GitHub App, account, and learned rules.</p>
           </div>
         </div>
 
@@ -622,8 +526,18 @@
           <section class="card settings-card">
             <header class="settings-section-head">
               <h3 class="section-heading">Policy</h3>
-              <p class="section-desc">Caps, paths, labels, and offline mode.</p>
+              <p class="section-desc">Strictness, caps, paths, labels, and offline mode.</p>
             </header>
+            <div class="form-group">
+              <label for="review-strictness">Review strictness</label>
+              <select id="review-strictness" bind:value={reviewStrictness}>
+                <option value="lenient">Lenient — fewer nits, warnings+</option>
+                <option value="balanced">Balanced — default</option>
+                <option value="strict">Strict — more thorough</option>
+                <option value="nitpick">Nitpick — include style/info</option>
+              </select>
+              <p class="section-desc" style="margin-top:6px">Also set via <code>[behavior] review_strictness</code> in <code>.codasaurus.toml</code>.</p>
+            </div>
             <div class="form-group">
               <label for="max-warnings">Max warnings (soft cap)</label>
               <input id="max-warnings" type="number" min="0" bind:value={maxWarnings} />
@@ -775,24 +689,19 @@
               </div>
             {/if}
           </section>
-          {:else if activeTab === "team"}
+          {:else if activeTab === "account"}
           <section class="card settings-card">
             <header class="settings-section-head">
-              <h3 class="section-heading">Team</h3>
-              <p class="section-desc">Owners, maintainers, and viewers. Invite with a shareable link (no email required).</p>
+              <h3 class="section-heading">Account</h3>
+              <p class="section-desc">
+                Signed in as {roleLabel($currentUser?.role, $currentUser?.is_bootstrap)} · {$currentUser?.email}.
+                Manage members on the <a href="#/app/team">Team</a> page.
+              </p>
             </header>
-
-            <div class="settings-meta-grid" style="margin-bottom:16px">
-              <div>
-                <span class="meta-label">Your access</span>
-                <p class="meta-value">{roleLabel($currentUser?.role, $currentUser?.is_bootstrap)} · {$currentUser?.email}</p>
-              </div>
-            </div>
-
             {#if $currentUser?.auth_provider !== "oidc"}
               <div class="form-group">
-                <label for="pw-current">Change password</label>
-                <input id="pw-current" type="password" bind:value={pwCurrent} placeholder="Current password" autocomplete="current-password" />
+                <label for="pw-current">Current password</label>
+                <input id="pw-current" type="password" bind:value={pwCurrent} autocomplete="current-password" />
               </div>
               <div class="form-group">
                 <label for="pw-new">New password</label>
@@ -804,91 +713,8 @@
                 </button>
                 {#if pwMsg}<span class="save-msg" class:error={pwMsg !== "Password updated"}>{pwMsg}</span>{/if}
               </div>
-            {/if}
-
-            {#if $isOwner}
-              <h4 class="team-subhead">Members</h4>
-              <div class="detector-list">
-                {#each members as m}
-                  <div class="detector-row">
-                    <span>
-                      <strong>{m.email}</strong>
-                      <span class="role-badge" class:bootstrap={!!m.is_bootstrap}>{roleLabel(m.role, m.is_bootstrap)}</span>
-                      <br /><span class="muted">{m.auth_provider} · joined {m.created_at?.slice?.(0, 10) || ""}</span>
-                    </span>
-                    <div class="team-actions">
-                      {#if m.is_bootstrap}
-                        <span class="muted">Protected</span>
-                      {:else}
-                        <select
-                          value={m.role}
-                          aria-label={`Role for ${m.email}`}
-                          onchange={(e) => changeMemberRole(m.id, e.target.value)}
-                        >
-                          <option value="owner">Owner</option>
-                          <option value="maintainer">Maintainer</option>
-                          <option value="viewer">Viewer</option>
-                        </select>
-                        {#if $currentUser?.is_bootstrap && m.role === "owner"}
-                          <button class="linkish" onclick={() => transferBootstrap(m.id)}>Make superuser</button>
-                        {/if}
-                        {#if confirmRemoveId === m.id}
-                          <button class="danger" onclick={() => removeMember(m.id)}>Confirm</button>
-                          <button onclick={() => (confirmRemoveId = null)}>Cancel</button>
-                        {:else}
-                          <button class="linkish" onclick={() => (confirmRemoveId = m.id)}>Remove</button>
-                        {/if}
-                      {/if}
-                    </div>
-                  </div>
-                {/each}
-              </div>
-
-              <h4 class="team-subhead">Invite link</h4>
-              <div class="settings-llm-grid">
-                <div class="form-group">
-                  <label for="invite-email">Email (optional lock)</label>
-                  <input id="invite-email" type="email" bind:value={inviteEmail} placeholder="optional@company.com" />
-                </div>
-                <div class="form-group">
-                  <label for="invite-role">Role</label>
-                  <select id="invite-role" bind:value={inviteRole}>
-                    <option value="viewer">Viewer</option>
-                    <option value="maintainer">Maintainer</option>
-                    <option value="owner">Owner</option>
-                  </select>
-                </div>
-              </div>
-              <div class="save-row">
-                <button class="primary" onclick={createInvite} disabled={inviteCreating}>
-                  {inviteCreating ? "Creating…" : "Create invite link"}
-                </button>
-                {#if lastInviteUrl}
-                  <button onclick={copyInviteUrl}>Copy invite link</button>
-                {/if}
-              </div>
-              {#if lastInviteUrl}
-                <p class="field-hint" style="word-break:break-all">{lastInviteUrl}</p>
-              {/if}
-
-              {#if pendingInvites.length > 0}
-                <h4 class="team-subhead">Pending invites</h4>
-                <div class="detector-list">
-                  {#each pendingInvites as inv}
-                    <div class="detector-row">
-                      <span>
-                        <strong>{inv.email || "Open link"}</strong>
-                        <span class="role-badge">{roleLabel(inv.role)}</span>
-                        <br /><span class="muted">expires {inv.expires_at?.slice?.(0, 10) || ""} · by {inv.created_by}</span>
-                      </span>
-                      <button class="linkish" onclick={() => revokeInvite(inv.id)}>Revoke</button>
-                    </div>
-                  {/each}
-                </div>
-              {/if}
-              {#if teamMsg}<p class="save-msg" class:error={/fail|error|Revoke failed|Invite failed|Role change|Remove failed/i.test(teamMsg)}>{teamMsg}</p>{/if}
             {:else}
-              <p class="empty-note">Only owners can invite members or change roles.</p>
+              <p class="empty-note">SSO account — password is managed by your identity provider.</p>
             {/if}
           </section>
           {:else if activeTab === "learning"}
@@ -998,20 +824,6 @@
   .search-item:hover, .search-item.active { background: var(--bg-secondary); }
   .empty-note { font-size: 13px; color: var(--text-muted); }
   .muted { font-size: 12px; color: var(--text-muted); }
-  .team-subhead {
-    margin: 20px 0 10px;
-    font-size: 14px;
-    font-weight: 600;
-  }
-  .team-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .team-actions select {
-    font-size: 13px;
-    padding: 4px 8px;
-  }
   .linkish {
     background: none;
     border: none;

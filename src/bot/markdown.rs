@@ -35,7 +35,8 @@ pub fn commands_details() -> String {
      | `@codasaurus add_docs` | Docs stubs |\n\
      | `@codasaurus similar` | Related PRs |\n\
      | `@codasaurus impact` | Blast-radius estimate |\n\
-     | `@codasaurus fix` | Apply codemods (opt-in) |\n\
+     | `@codasaurus fix` / `fix <fp>` | Apply codemods (opt-in) |\n\
+     | `@codasaurus digest` | Weekly rollup |\n\
      | `@codasaurus ask …` | Ask about this PR |\n\
      | `@codasaurus ignore <fp>` | Dismiss a finding |\n\
      | `@codasaurus help` | Full command list |\n\n\
@@ -52,17 +53,26 @@ pub fn inline_finding_comment(f: &Finding) -> String {
     let fp = short_fp(f);
     let provenance = crate::bot::provenance::provenance_line(f);
 
+    let fix_cta = if f.codemod.as_ref().is_some_and(|c| !c.is_empty()) {
+        format!(" · `@codasaurus fix {fp}`")
+    } else {
+        String::new()
+    };
     let mut body = format!(
         "**{title}** · {badge}\n\n\
          {why}\n\n\
          **Fix:** {action}\n\n\
          <details>\n<summary>Provenance</summary>\n\n{provenance}\n\n</details>\n\n\
          ---\n\
-         <sub>`fingerprint: {fp}` · `@codasaurus ignore {fp}`</sub>"
+         <sub>`fingerprint: {fp}` · `@codasaurus ignore {fp}`{fix_cta} · 👎 to dismiss</sub>"
     );
 
     if let Some(ref code) = f.codemod {
-        let _ = write!(body, "\n\n```suggestion\n{}\n```", code.trim_end());
+        let _ = write!(
+            body,
+            "\n\n```suggestion\n{}\n```\n\n<sub>Or reply `@codasaurus fix {fp}` (needs Contents Write + allow_auto_fix).</sub>",
+            code.trim_end()
+        );
     }
 
     body
@@ -403,9 +413,11 @@ pub fn help_body() -> String {
      | `add_docs` | README / docs stubs |\n\
      | `similar` | Related PRs by path history |\n\
      | `impact` | Blast-radius estimate |\n\
-     | `fix` | Apply available codemods (opt-in) |\n\
+     | `fix` / `fix <fp>` | Apply available codemods (opt-in) |\n\
+     | `digest` | Weekly review rollup |\n\
      | `ask …` | Answer a question about this PR |\n\
      | `ignore <fp>` | Dismiss a finding by fingerprint |\n\
+     | 👎 / `-1` on a finding | Learn dismiss (reaction) |\n\
      | `help` | Show this help |\n\n\
      <sub>Self-hosted · BYOK · fail-closed offline mode</sub>\n"
         .into()
