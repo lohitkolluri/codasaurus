@@ -20,6 +20,10 @@ static CACHE_TTL: LazyLock<Mutex<u64>> = LazyLock::new(|| Mutex::new(3600));
 static CACHE: LazyLock<RwLock<HashMap<String, (bool, Instant)>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
+/// OSV vulnerability responses — previously uncached (every review re-hit api.osv.dev).
+static OSV_CACHE: LazyLock<RwLock<HashMap<String, (Vec<OsvVulnerability>, Instant)>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
 /// Shared HTTP client used by all registry lookups (npm, PyPI, crates.io, OSV).
 static CLIENT: LazyLock<Option<reqwest::blocking::Client>> = LazyLock::new(|| {
     match reqwest::blocking::Client::builder()
@@ -179,6 +183,20 @@ pub struct OsvVulnerability {
 }
 
 fn check_osv(ecosystem: &str, package: &str) -> Result<Vec<OsvVulnerability>> {
+    let cache_key = format!("{ecosystem}:{package}");
+    let ttl_secs = get_cache_ttl();
+    {
+        let cache = OSV_CACHE.read().unwrap_or_else(|e| {
+            eprintln!("Warning: OSV cache RwLock poisoned");
+            e.into_inner()
+        });
+        if let Some((vulns, time)) = cache.get(&cache_key) {
+            if time.elapsed() < Duration::from_secs(ttl_secs) {
+                return Ok(vulns.clone());
+            }
+        }
+    }
+
     let client = CLIENT.as_ref().ok_or_else(|| {
         anyhow::anyhow!("registry HTTP client not available (failed to initialize)")
     })?;
@@ -207,6 +225,30 @@ fn check_osv(ecosystem: &str, package: &str) -> Result<Vec<OsvVulnerability>> {
     let vulns = data["vulns"].as_array().map_or_else(Vec::new, |arr| {
         arr.iter().filter_map(extract_osv_vuln).collect()
     });
+
+    {
+        let mut cache = OSV_CACHE.write().unwrap_or_else(|e| {
+            eprintln!("Warning: OSV cache RwLock poisoned");
+            e.into_inner()
+        });
+        cache.insert(cache_key, (vulns.clone(), Instant::now()));
+        if cache.len() > CACHE_MAX_SIZE {
+            let ttl = Duration::from_secs(ttl_secs);
+            let now = Instant::now();
+            cache.retain(|_, (_, time)| now.duration_since(*time) < ttl);
+            if cache.len() > CACHE_MAX_SIZE {
+                let target = CACHE_MAX_SIZE / 2;
+                let mut keys: Vec<(String, Instant)> = cache
+                    .iter()
+                    .map(|(k, (_, t))| (k.clone(), *t))
+                    .collect();
+                keys.sort_unstable_by_key(|(_, t)| *t);
+                for (k, _) in keys.into_iter().take(cache.len().saturating_sub(target)) {
+                    cache.remove(&k);
+                }
+            }
+        }
+    }
 
     Ok(vulns)
 }

@@ -81,8 +81,9 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     findings
 }
 
-fn build_dep_map(files: &[ParsedFile]) -> std::collections::HashMap<String, Vec<String>> {
-    let mut map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+fn build_dep_map(files: &[ParsedFile]) -> std::collections::HashMap<String, std::collections::HashSet<String>> {
+    let mut map: std::collections::HashMap<String, std::collections::HashSet<String>> =
+        std::collections::HashMap::new();
 
     for file in files {
         let path = file.path.to_lowercase();

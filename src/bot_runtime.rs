@@ -14,7 +14,7 @@ impl Default for BotRuntimeConfig {
         Self {
             review_timeout_secs: env_u64("CODASAURUS_REVIEW_TIMEOUT_SECS", 300),
             max_inline_comments: env_usize("CODASAURUS_MAX_INLINE_COMMENTS", 8),
-            max_reviewer_files: env_usize("CODASAURUS_MAX_REVIEWER_FILES", 50),
+            max_reviewer_files: env_usize("CODASAURUS_MAX_REVIEWER_FILES", 8),
             max_comment_bytes: env_usize("CODASAURUS_MAX_COMMENT_BYTES", 64000),
             max_llm_diff_chars: env_usize("CODASAURUS_MAX_LLM_DIFF_CHARS", 8000),
         }

@@ -12,7 +12,7 @@ const PER_PAGE: usize = 100;
 /// GitHub exposes at most 3,000 PR files (30 pages of 100).
 const MAX_PR_FILE_PAGES: usize = 30;
 /// Bound reviewer discovery to avoid exhausting an installation's API quota on a large PR.
-const MAX_REVIEWER_FILES: usize = 50;
+const MAX_REVIEWER_FILES: usize = 8;
 
 /// Build a production-configured GitHub API client with timeouts and pooling.
 static GITHUB_CLIENT: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
@@ -139,7 +139,7 @@ async fn post_or_update_comment(
     let headers = github_api_headers(auth_header)?;
 
     if let Some(ref s) = state {
-        if let Ok(Some(comment_id)) = s.get_comment_id(repo_name, pr_number) {
+        if let Ok(Some(comment_id)) = s.get_comment_id_async(repo_name, pr_number).await {
             let update_url =
                 format!("https://api.github.com/repos/{repo_name}/issues/comments/{comment_id}");
             let update_ok = retry_async(
@@ -188,7 +188,7 @@ async fn post_or_update_comment(
     let comment_id = resp["id"].as_i64().unwrap_or(0);
     if comment_id > 0 {
         if let Some(ref s) = state {
-            if let Err(e) = s.set_comment_id(repo_name, pr_number, comment_id) {
+            if let Err(e) = s.set_comment_id_async(repo_name, pr_number, comment_id).await {
                 eprintln!("Warning: failed to store comment ID: {e}");
             }
         }
@@ -205,16 +205,22 @@ async fn suggest_reviewers(
     repo_name: &str,
     files: &[serde_json::Value],
     pr_author: &str,
+    max_files: usize,
 ) -> Vec<String> {
     use std::collections::HashMap;
     use std::sync::Arc;
     use tokio::sync::Semaphore;
 
-    let author_counts = Arc::new(std::sync::Mutex::new(HashMap::<String, usize>::new()));
-    let semaphore = Arc::new(Semaphore::new(10)); // max 10 concurrent requests
+    let max_files = max_files.clamp(0, MAX_REVIEWER_FILES).max(0);
+    if max_files == 0 || files.is_empty() {
+        return Vec::new();
+    }
 
-    let mut handles = Vec::with_capacity(files.len().min(MAX_REVIEWER_FILES));
-    for file in files.iter().take(MAX_REVIEWER_FILES) {
+    let author_counts = Arc::new(std::sync::Mutex::new(HashMap::<String, usize>::new()));
+    let semaphore = Arc::new(Semaphore::new(5)); // keep GitHub fan-out modest
+
+    let mut handles = Vec::with_capacity(files.len().min(max_files));
+    for file in files.iter().take(max_files) {
         let filename = match file["filename"].as_str() {
             Some(f) if !f.is_empty() => f.to_string(),
             _ => continue,
@@ -366,6 +372,11 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     let policy = crate::config::Config::bot_policy(pool).await;
     let runtime = crate::bot_runtime::BotRuntimeConfig::default();
 
+    // Host cwd is not the PR repo — guidelines detector would scan the wrong tree.
+    if pool.is_some() {
+        config.checks.guidelines = false;
+    }
+
     let client = GITHUB_CLIENT
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("GitHub API client not available (failed to initialize)"))?;
@@ -400,13 +411,15 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         }
     }
 
-    // Run cross-file detectors once. This lets dependency checks see manifest
-    // files and prevents repository-level guideline findings from repeating for
-    // every changed file.
+    // Registry/OSV use blocking HTTP — keep them off the Tokio worker threads.
     let mut findings = if parsed_files_collected.is_empty() {
         Findings::new()
     } else {
-        detectors::run_all(&parsed_files_collected, &config)
+        let cfg = config.clone();
+        let parsed = parsed_files_collected.clone();
+        tokio::task::spawn_blocking(move || detectors::run_all(&parsed, &cfg))
+            .await
+            .map_err(|e| anyhow::anyhow!("detector task join error: {e}"))?
     };
 
     // Apply default_severity floor from dashboard settings
@@ -452,7 +465,15 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     );
     findings.findings.extend(slop_findings);
 
-    let reviewers = suggest_reviewers(client, &auth_header, repo_name, &files, pr_author).await;
+    let reviewers = suggest_reviewers(
+        client,
+        &auth_header,
+        repo_name,
+        &files,
+        pr_author,
+        runtime.max_reviewer_files.min(MAX_REVIEWER_FILES),
+    )
+    .await;
 
     let mut review_comments: Vec<serde_json::Value> = Vec::new();
     let mut has_blocking = false;
@@ -529,7 +550,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         .await?;
         if !head_sha.is_empty() {
             if let Some(ref s) = state {
-                if let Err(e) = s.set_reviewed_sha(repo_name, pr_number, head_sha) {
+                if let Err(e) = s.set_reviewed_sha_async(repo_name, pr_number, head_sha).await {
                     eprintln!("Warning: failed to store reviewed SHA: {e}");
                 };
             }
@@ -599,7 +620,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     // Record the reviewed commit SHA for incremental review
     if !head_sha.is_empty() {
         if let Some(ref s) = state {
-            if let Err(e) = s.set_reviewed_sha(repo_name, pr_number, head_sha) {
+            if let Err(e) = s.set_reviewed_sha_async(repo_name, pr_number, head_sha).await {
                 eprintln!("Warning: failed to store reviewed SHA: {e}");
             };
         }
@@ -674,7 +695,14 @@ async fn generate_and_post_summary(
     state: &Option<ReviewState>,
 ) -> Result<()> {
     let mut findings_text = String::new();
-    for f in &findings.findings {
+    // Prefer blocking findings first; cap volume for token cost.
+    let mut ordered: Vec<&Finding> = findings.findings.iter().collect();
+    ordered.sort_by_key(|f| match f.severity {
+        "blocking" => 0,
+        "warning" => 1,
+        _ => 2,
+    });
+    for f in ordered.iter().take(40) {
         let _ = writeln!(
             findings_text,
             "- {}: {} (line {})",
@@ -754,35 +782,33 @@ async fn save_review_to_db(
         Ok(r) => r,
         Err(_) => return,
     };
-    for f in &findings.findings {
-        if let Err(e) = crate::db::reviews::create_finding(
-            pool,
-            &crate::db::models::FindingCreate {
-                review_id: review.id,
-                fingerprint: Some(format!("{}:{}", review.id, f.fingerprint())),
-                file_path: f.file.clone(),
-                line_start: if f.line > 0 {
-                    Some(f.line as i64)
-                } else {
-                    None
-                },
-                line_end: None,
-                column_start: None,
-                column_end: None,
-                severity: f.severity.to_string(),
-                detector: f.detector.clone(),
-                rule_id: None,
-                message: crate::bot::markdown::redact_secrets(&f.message),
-                suggested_fix: f.suggestion.clone(),
-                code_snippet: f.codemod.clone(),
-                context: None,
-                category: None,
+    let batch: Vec<crate::db::models::FindingCreate> = findings
+        .findings
+        .iter()
+        .map(|f| crate::db::models::FindingCreate {
+            review_id: review.id,
+            fingerprint: Some(format!("{}:{}", review.id, f.fingerprint())),
+            file_path: f.file.clone(),
+            line_start: if f.line > 0 {
+                Some(f.line as i64)
+            } else {
+                None
             },
-        )
-        .await
-        {
-            eprintln!("Warning: failed to persist finding '{}': {}", f.detector, e);
-        }
+            line_end: None,
+            column_start: None,
+            column_end: None,
+            severity: f.severity.to_string(),
+            detector: f.detector.clone(),
+            rule_id: None,
+            message: crate::bot::markdown::redact_secrets(&f.message),
+            suggested_fix: f.suggestion.clone(),
+            code_snippet: f.codemod.clone(),
+            context: None,
+            category: None,
+        })
+        .collect();
+    if let Err(e) = crate::db::reviews::create_findings_batch(pool, &batch).await {
+        eprintln!("Warning: failed to persist findings batch: {e}");
     }
     let status = if has_blocking { "failed" } else { "passed" };
     if let Err(e) = crate::db::reviews::update_review(

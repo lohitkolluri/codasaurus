@@ -65,24 +65,43 @@ async fn list_reviews(
     let total: i64 = count_reviews(&state.pool, repo_id, status).await?;
     let total_pages = ((total as f64) / (limit as f64)).ceil() as i64;
 
-    // Enrich each review with its repo name
-    let mut enriched: Vec<serde_json::Value> = Vec::new();
-    for r in &reviews {
-        let repo_name: Option<String> =
-            sqlx::query_scalar("SELECT full_name FROM repos WHERE id = ?")
-                .bind(r.repo_id)
-                .fetch_optional(&state.pool.0)
-                .await
-                .ok()
-                .flatten();
-        let name = repo_name.clone().unwrap_or_default();
-        let mut v = serde_json::to_value(r).unwrap_or_default();
-        if let Some(obj) = v.as_object_mut() {
-            obj.insert("repo_name".into(), json!(name));
-            obj.insert("repo_full_name".into(), json!(name));
+    // Batch-load repo names (avoid N+1).
+    let mut name_by_id: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
+    let unique_ids: Vec<i64> = {
+        let mut ids: Vec<i64> = reviews.iter().map(|r| r.repo_id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    };
+    if !unique_ids.is_empty() {
+        let placeholders = std::iter::repeat("?")
+            .take(unique_ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!("SELECT id, full_name FROM repos WHERE id IN ({placeholders})");
+        let mut q = sqlx::query_as::<_, (i64, String)>(&sql);
+        for id in &unique_ids {
+            q = q.bind(id);
         }
-        enriched.push(v);
+        if let Ok(rows) = q.fetch_all(&state.pool.0).await {
+            for (id, name) in rows {
+                name_by_id.insert(id, name);
+            }
+        }
     }
+
+    let enriched: Vec<serde_json::Value> = reviews
+        .iter()
+        .map(|r| {
+            let name = name_by_id.get(&r.repo_id).cloned().unwrap_or_default();
+            let mut v = serde_json::to_value(r).unwrap_or_default();
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("repo_name".into(), json!(name.clone()));
+                obj.insert("repo_full_name".into(), json!(name));
+            }
+            v
+        })
+        .collect();
 
     Ok(Json(json!({
         "reviews": enriched,

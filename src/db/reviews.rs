@@ -189,6 +189,42 @@ pub async fn create_finding(
     .await
 }
 
+/// Persist many findings in one transaction (avoids N+1 round-trips on large reviews).
+pub async fn create_findings_batch(
+    pool: &DbPool,
+    findings: &[FindingCreate],
+) -> Result<(), sqlx::Error> {
+    if findings.is_empty() {
+        return Ok(());
+    }
+    let mut tx = pool.0.begin().await?;
+    for finding in findings {
+        sqlx::query(
+            "INSERT INTO findings (review_id, fingerprint, file_path, line_start, line_end, column_start, column_end, severity, detector, rule_id, message, suggested_fix, code_snippet, context, category)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(finding.review_id)
+        .bind(&finding.fingerprint)
+        .bind(&finding.file_path)
+        .bind(finding.line_start)
+        .bind(finding.line_end)
+        .bind(finding.column_start)
+        .bind(finding.column_end)
+        .bind(&finding.severity)
+        .bind(&finding.detector)
+        .bind(&finding.rule_id)
+        .bind(&finding.message)
+        .bind(&finding.suggested_fix)
+        .bind(&finding.code_snippet)
+        .bind(&finding.context)
+        .bind(&finding.category)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 pub async fn get_stats(pool: &DbPool) -> Result<serde_json::Value, sqlx::Error> {
     let total_repos: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM repos WHERE active = 1")
         .fetch_one(&pool.0)

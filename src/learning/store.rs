@@ -162,11 +162,24 @@ impl LearningStore {
             return Ok(Vec::new());
         }
 
+        let fingerprints: Vec<String> = findings.iter().map(|f| f.fingerprint()).collect();
         let mut dismissed_set = std::collections::HashSet::new();
-        {
-            let rows: Vec<(String,)> = sqlx::query_as("SELECT fingerprint FROM dismissed_findings")
-                .fetch_all(&self.pool)
-                .await?;
+
+        // Query only fingerprints present in this review (avoids full-table scan as dismissals grow).
+        // SQLite binds are capped; chunk to stay safe.
+        for chunk in fingerprints.chunks(400) {
+            let placeholders = std::iter::repeat("?")
+                .take(chunk.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "SELECT fingerprint FROM dismissed_findings WHERE fingerprint IN ({placeholders})"
+            );
+            let mut q = sqlx::query_as::<_, (String,)>(&sql);
+            for fp in chunk {
+                q = q.bind(fp);
+            }
+            let rows = q.fetch_all(&self.pool).await?;
             for (fp,) in rows {
                 dismissed_set.insert(fp);
             }

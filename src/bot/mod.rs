@@ -32,6 +32,18 @@ async fn pr_lock(repo: &str, pr_number: i64) -> Arc<Mutex<()>> {
         .clone()
 }
 
+/// Drop idle PR lock entries so the map does not grow forever on long-lived serve.
+async fn prune_pr_lock(repo: &str, pr_number: i64) {
+    let key = format!("{repo}:{pr_number}");
+    let mut map = PR_LOCKS.lock().await;
+    if let Some(lock) = map.get(&key) {
+        // Only this map entry holds the Arc (no active holders).
+        if Arc::strong_count(lock) == 1 {
+            map.remove(&key);
+        }
+    }
+}
+
 /// Persist delivery ID; returns true if this delivery was already seen.
 async fn is_duplicate_delivery(delivery_id: &str) -> bool {
     let Some(pool) = CONFIG_POOL.get() else {
@@ -46,7 +58,17 @@ async fn is_duplicate_delivery(delivery_id: &str) -> bool {
     .await;
 
     match result {
-        Ok(r) => r.rows_affected() == 0,
+        Ok(r) => {
+            // Opportunistic prune so the dedup table cannot grow forever.
+            if r.rows_affected() > 0 {
+                let _ = sqlx::query(
+                    "DELETE FROM webhook_deliveries WHERE received_at < datetime('now', '-14 days')",
+                )
+                .execute(&pool.0)
+                .await;
+            }
+            r.rows_affected() == 0
+        }
         Err(e) => {
             tracing::warn!(error = %e, "failed to record webhook delivery");
             false
@@ -255,6 +277,11 @@ pub(crate) async fn handle_webhook(
                 );
                 let _enter = span.enter();
 
+                let Ok(_permit) = REVIEW_PERMITS.acquire().await else {
+                    tracing::error!("review semaphore closed");
+                    return;
+                };
+
                 if repo_full_name != "unknown" {
                     ensure_repo_exists(&repo_full_name, inst_id, &repo_val).await;
                 }
@@ -262,6 +289,7 @@ pub(crate) async fn handle_webhook(
                 let lock = pr_lock(&repo_full_name, pr_number).await;
                 let _guard = lock.lock().await;
 
+                let repo_for_prune = repo_full_name.clone();
                 match timeout(Duration::from_secs(timeout_secs), async move {
                     let token = get_installation_token(&cfg, inst_id).await?;
                     let wrapped = WebhookPayload {
@@ -282,6 +310,9 @@ pub(crate) async fn handle_webhook(
                     Ok(Err(e)) => tracing::error!(error = %e, "review failed"),
                     Err(_) => tracing::error!("review timed out"),
                 }
+
+                drop(_guard);
+                prune_pr_lock(&repo_for_prune, pr_number).await;
             });
         }
     } else if event == "issue_comment" && payload.action == "created" {
@@ -533,7 +564,8 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
         tracing::error!("review semaphore closed");
         return;
     };
-    let lock = pr_lock(&ctx.repo_full_name, pr_number).await;
+    let repo_name = ctx.repo_full_name.clone();
+    let lock = pr_lock(&repo_name, pr_number).await;
     let _guard = lock.lock().await;
 
     match timeout(Duration::from_secs(timeout_secs), async move {
@@ -565,6 +597,9 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
         Ok(Err(e)) => tracing::error!(pr = pr_number, error = %e, "comment-triggered review failed"),
         Err(_) => tracing::error!(pr = pr_number, "comment-triggered review timed out"),
     }
+
+    drop(_guard);
+    prune_pr_lock(&repo_name, pr_number).await;
 }
 
 async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64, fingerprint: Option<String>) {

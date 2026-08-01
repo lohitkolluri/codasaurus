@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS repos (
 
 CREATE INDEX IF NOT EXISTS idx_repos_owner ON repos(owner);
 CREATE INDEX IF NOT EXISTS idx_repos_active ON repos(active);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_repos_full_name ON repos(full_name);
 
 CREATE TABLE IF NOT EXISTS reviews (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -239,6 +240,27 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         // Migrate reviewed_commits: add status column if upgrading from old side DB isn't needed;
         // main-DB table is created fresh above.
         sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (3)")
+            .execute(pool)
+            .await?;
+    }
+
+    if current < 4 {
+        // Deduplicate before unique index (keep lowest id per full_name).
+        sqlx::query(
+            "DELETE FROM repos WHERE id NOT IN (SELECT MIN(id) FROM repos GROUP BY full_name)",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS idx_repos_full_name ON repos(full_name)")
+            .execute(pool)
+            .await?;
+        // Bound webhook dedup table growth
+        let _ = sqlx::query(
+            "DELETE FROM webhook_deliveries WHERE received_at < datetime('now', '-14 days')",
+        )
+        .execute(pool)
+        .await;
+        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (4)")
             .execute(pool)
             .await?;
     }
