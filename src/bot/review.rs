@@ -476,7 +476,13 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         );
     }
 
-    // Registry/OSV use blocking HTTP — keep them off the Tokio worker threads.
+    // Warm registry/OSV caches concurrently before sync detectors run.
+    let prefetch_pairs = collect_registry_pairs(&parsed_files_collected);
+    if !prefetch_pairs.is_empty() {
+        crate::registry::prefetch_packages(&prefetch_pairs).await;
+    }
+
+    // Detectors stay sync but registry hits are now mostly cache; still isolate on a worker.
     let mut findings = if parsed_files_collected.is_empty() {
         Findings::new()
     } else {
@@ -738,6 +744,37 @@ fn urlencoding_encode(s: &str) -> String {
                 out.push(b as char);
             }
             _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Unique (registry, package) pairs for concurrent cache warming.
+fn collect_registry_pairs(files: &[crate::parser::ParsedFile]) -> Vec<(String, String)> {
+    use std::collections::HashSet;
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for file in files {
+        let registry = match file.language.as_str() {
+            "javascript" | "typescript" | "tsx" | "jsx" => "npm",
+            "python" => "pypi",
+            "rust" => "crates.io",
+            _ => continue,
+        };
+        for import in &file.imports {
+            let Some(package) = crate::detectors::extract_package_name(&import.name) else {
+                continue;
+            };
+            if package.starts_with('.') || package.starts_with('/') {
+                continue;
+            }
+            if crate::detectors::hallucinated_imports::is_builtin(&package, registry) {
+                continue;
+            }
+            let key = (registry.to_string(), package);
+            if seen.insert(key.clone()) {
+                out.push(key);
+            }
         }
     }
     out

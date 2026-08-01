@@ -1,10 +1,8 @@
 use anyhow::{Context, Result};
 
-pub fn check(package: &str) -> Result<Option<bool>> {
+pub async fn check_async(package: &str) -> Result<Option<bool>> {
     let url = format!("https://registry.npmjs.org/{package}");
-    let client = super::CLIENT
-        .as_ref()
-        .context("registry HTTP client not available (failed to initialize)")?;
+    let client = super::async_client().context("registry HTTP client not available")?;
     let resp = client
         .head(&url)
         .header("Accept", "application/vnd.npm.install-v1+json")
@@ -12,7 +10,8 @@ pub fn check(package: &str) -> Result<Option<bool>> {
             "User-Agent",
             concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
         )
-        .send()?;
+        .send()
+        .await?;
     match resp.status().as_u16() {
         200 | 301 | 302 => Ok(Some(true)),
         404 | 410 => Ok(Some(false)),
