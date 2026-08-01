@@ -3,25 +3,31 @@
 use crate::retry::{is_reqwest_error_retryable, retry_async, RetryConfig};
 use anyhow::Result;
 use base64::Engine;
-use reqwest::header::HeaderMap;
+use reqwest::header::{HeaderMap, HeaderValue, IF_NONE_MATCH};
+use std::collections::HashMap;
+use std::sync::{LazyLock, RwLock};
+use std::time::{Duration, Instant};
 
 /// Soft cap so we never pull huge binaries / lockfiles into memory.
 const MAX_FILE_BYTES: usize = 512_000;
+const GH_CACHE_MAX: usize = 2_000;
+const GH_CACHE_TTL: Duration = Duration::from_secs(3_600);
 
-/// GET `/repos/{repo}/contents/{path}?ref=` and decode file content.
-/// Returns `Ok(None)` on 404 or unsupported types (directory / symlink).
-pub async fn fetch_repo_file(
-    client: &reqwest::Client,
-    headers: &HeaderMap,
-    repo: &str,
-    path: &str,
-    git_ref: &str,
-) -> Result<Option<String>> {
-    if path.is_empty() || git_ref.is_empty() {
-        return Ok(None);
-    }
-    let encoded = path
-        .split('/')
+struct GhCacheEntry {
+    etag: String,
+    body: String,
+    at: Instant,
+}
+
+static GH_CONTENTS_CACHE: LazyLock<RwLock<HashMap<String, GhCacheEntry>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
+fn cache_key(repo: &str, path: &str, git_ref: &str) -> String {
+    format!("{repo}\0{path}\0{git_ref}")
+}
+
+fn encode_path_segments(path: &str) -> String {
+    path.split('/')
         .map(|seg| {
             let mut out = String::new();
             for b in seg.bytes() {
@@ -35,37 +41,10 @@ pub async fn fetch_repo_file(
             out
         })
         .collect::<Vec<_>>()
-        .join("/");
+        .join("/")
+}
 
-    let url = format!(
-        "https://api.github.com/repos/{repo}/contents/{encoded}?ref={}",
-        urlencoding_query(git_ref)
-    );
-
-    let resp = retry_async(
-        &RetryConfig::api_default(),
-        "fetch_repo_file",
-        &is_reqwest_error_retryable,
-        || async {
-            client
-                .get(&url)
-                .headers(headers.clone())
-                .send()
-                .await
-                .map_err(Into::into)
-        },
-    )
-    .await?;
-
-    if resp.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(None);
-    }
-    if !resp.status().is_success() {
-        tracing::debug!(status = %resp.status(), path, "contents API non-success");
-        return Ok(None);
-    }
-
-    let body: serde_json::Value = resp.json().await?;
+fn decode_contents_json(path: &str, body: &serde_json::Value) -> Result<Option<String>> {
     if body.get("type").and_then(|t| t.as_str()) != Some("file") {
         return Ok(None);
     }
@@ -78,7 +57,6 @@ pub async fn fetch_repo_file(
         Some(c) => c,
         None => return Ok(None),
     };
-    // GitHub returns base64 with newlines
     let cleaned: String = encoded.chars().filter(|c| !c.is_whitespace()).collect();
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(cleaned)
@@ -87,6 +65,113 @@ pub async fn fetch_repo_file(
         return Ok(None);
     }
     Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
+}
+
+fn store_gh_cache(key: String, etag: String, body: String) {
+    let mut cache = GH_CONTENTS_CACHE.write().unwrap_or_else(|e| e.into_inner());
+    cache.insert(
+        key,
+        GhCacheEntry {
+            etag,
+            body,
+            at: Instant::now(),
+        },
+    );
+    if cache.len() > GH_CACHE_MAX {
+        let now = Instant::now();
+        cache.retain(|_, e| now.duration_since(e.at) < GH_CACHE_TTL);
+        if cache.len() > GH_CACHE_MAX {
+            let mut keys: Vec<(String, Instant)> =
+                cache.iter().map(|(k, e)| (k.clone(), e.at)).collect();
+            keys.sort_unstable_by_key(|(_, t)| *t);
+            let drop_n = cache.len() - GH_CACHE_MAX / 2;
+            for (k, _) in keys.into_iter().take(drop_n) {
+                cache.remove(&k);
+            }
+        }
+    }
+}
+
+/// GET `/repos/{repo}/contents/{path}?ref=` and decode file content.
+/// Returns `Ok(None)` on 404 or unsupported types (directory / symlink).
+/// Uses ETag / `If-None-Match` so unchanged blobs return 304 without counting
+/// against the primary GitHub rate limit ([GitHub conditional requests](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api)).
+pub async fn fetch_repo_file(
+    client: &reqwest::Client,
+    headers: &HeaderMap,
+    repo: &str,
+    path: &str,
+    git_ref: &str,
+) -> Result<Option<String>> {
+    if path.is_empty() || git_ref.is_empty() {
+        return Ok(None);
+    }
+    let key = cache_key(repo, path, git_ref);
+    let cached_etag = {
+        let cache = GH_CONTENTS_CACHE.read().unwrap_or_else(|e| e.into_inner());
+        cache.get(&key).and_then(|e| {
+            if e.at.elapsed() < GH_CACHE_TTL {
+                Some(e.etag.clone())
+            } else {
+                None
+            }
+        })
+    };
+
+    let encoded = encode_path_segments(path);
+    let url = format!(
+        "https://api.github.com/repos/{repo}/contents/{encoded}?ref={}",
+        urlencoding_query(git_ref)
+    );
+
+    let resp = retry_async(
+        &RetryConfig::api_default(),
+        "fetch_repo_file",
+        &is_reqwest_error_retryable,
+        || async {
+            let mut req = client.get(&url).headers(headers.clone());
+            if let Some(ref etag) = cached_etag {
+                if let Ok(v) = HeaderValue::from_str(etag) {
+                    req = req.header(IF_NONE_MATCH, v);
+                }
+            }
+            req.send().await.map_err(Into::into)
+        },
+    )
+    .await?;
+
+    if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
+        let cache = GH_CONTENTS_CACHE.read().unwrap_or_else(|e| e.into_inner());
+        if let Some(e) = cache.get(&key) {
+            crate::metrics::record_github_cache_hit();
+            return Ok(Some(e.body.clone()));
+        }
+        // Rare: 304 without local body — fall through as miss.
+    }
+
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        crate::metrics::record_github_cache_miss();
+        return Ok(None);
+    }
+    if !resp.status().is_success() {
+        tracing::debug!(status = %resp.status(), path, "contents API non-success");
+        crate::metrics::record_github_cache_miss();
+        return Ok(None);
+    }
+
+    crate::metrics::record_github_cache_miss();
+    let etag = resp
+        .headers()
+        .get("etag")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let body: serde_json::Value = resp.json().await?;
+    let content = decode_contents_json(path, &body)?;
+    if let (Some(text), true) = (&content, !etag.is_empty()) {
+        store_gh_cache(key, etag, text.clone());
+    }
+    Ok(content)
 }
 
 /// Fetch file content and blob SHA (needed for Contents API updates).

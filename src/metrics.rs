@@ -13,6 +13,13 @@ static GITHUB_RETRIES: AtomicU64 = AtomicU64::new(0);
 static LLM_REQUESTS: AtomicU64 = AtomicU64::new(0);
 static LLM_ERRORS: AtomicU64 = AtomicU64::new(0);
 static LLM_PROMPT_CHARS: AtomicU64 = AtomicU64::new(0);
+static LLM_SPEND_MICRODOLLARS: AtomicU64 = AtomicU64::new(0);
+static REGISTRY_CACHE_HITS: AtomicU64 = AtomicU64::new(0);
+static REGISTRY_CACHE_MISSES: AtomicU64 = AtomicU64::new(0);
+static OSV_CACHE_HITS: AtomicU64 = AtomicU64::new(0);
+static OSV_CACHE_MISSES: AtomicU64 = AtomicU64::new(0);
+static GITHUB_CACHE_HITS: AtomicU64 = AtomicU64::new(0);
+static GITHUB_CACHE_MISSES: AtomicU64 = AtomicU64::new(0);
 static QUEUE_ENQUEUED: AtomicU64 = AtomicU64::new(0);
 static QUEUE_COMPLETED: AtomicU64 = AtomicU64::new(0);
 static DISMISSALS_TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -55,13 +62,52 @@ pub fn record_github_retry() {
     GITHUB_RETRIES.fetch_add(1, Ordering::Relaxed);
 }
 
-pub fn record_llm_request(prompt_chars: usize) {
+pub fn record_llm_request(prompt_chars: usize, max_out_tokens: u32, strong: bool) {
     LLM_REQUESTS.fetch_add(1, Ordering::Relaxed);
     LLM_PROMPT_CHARS.fetch_add(prompt_chars as u64, Ordering::Relaxed);
+    let micros = crate::llm::estimate_spend_microdollars(prompt_chars, max_out_tokens, strong);
+    LLM_SPEND_MICRODOLLARS.fetch_add(micros, Ordering::Relaxed);
 }
 
 pub fn record_llm_error() {
     LLM_ERRORS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_registry_cache_hit() {
+    REGISTRY_CACHE_HITS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_registry_cache_miss() {
+    REGISTRY_CACHE_MISSES.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_osv_cache_hit() {
+    OSV_CACHE_HITS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_osv_cache_miss() {
+    OSV_CACHE_MISSES.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_github_cache_hit() {
+    GITHUB_CACHE_HITS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_github_cache_miss() {
+    GITHUB_CACHE_MISSES.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Estimated spend in USD since process start (observability only).
+pub fn llm_spend_usd_estimate() -> f64 {
+    LLM_SPEND_MICRODOLLARS.load(Ordering::Relaxed) as f64 / 1_000_000.0
+}
+
+pub fn llm_request_count() -> u64 {
+    LLM_REQUESTS.load(Ordering::Relaxed)
+}
+
+pub fn llm_prompt_chars_total() -> u64 {
+    LLM_PROMPT_CHARS.load(Ordering::Relaxed)
 }
 
 pub fn record_queue_enqueued() {
@@ -125,6 +171,7 @@ pub fn render_prometheus() -> String {
     };
     let q_pending = QUEUE_PENDING.load(Ordering::Relaxed);
     let q_running = QUEUE_RUNNING.load(Ordering::Relaxed);
+    let spend_usd = llm_spend_usd_estimate();
 
     format!(
         "# HELP codasaurus_up Codasaurus process is up\n\
@@ -164,6 +211,27 @@ pub fn render_prometheus() -> String {
          # HELP codasaurus_llm_prompt_chars_total Approximate prompt characters sent\n\
          # TYPE codasaurus_llm_prompt_chars_total counter\n\
          codasaurus_llm_prompt_chars_total {}\n\
+         # HELP codasaurus_llm_spend_usd_estimate Estimated LLM spend since process start (rough)\n\
+         # TYPE codasaurus_llm_spend_usd_estimate counter\n\
+         codasaurus_llm_spend_usd_estimate {spend_usd:.6}\n\
+         # HELP codasaurus_registry_cache_hits_total Package registry cache hits\n\
+         # TYPE codasaurus_registry_cache_hits_total counter\n\
+         codasaurus_registry_cache_hits_total {}\n\
+         # HELP codasaurus_registry_cache_misses_total Package registry cache misses\n\
+         # TYPE codasaurus_registry_cache_misses_total counter\n\
+         codasaurus_registry_cache_misses_total {}\n\
+         # HELP codasaurus_osv_cache_hits_total OSV cache hits\n\
+         # TYPE codasaurus_osv_cache_hits_total counter\n\
+         codasaurus_osv_cache_hits_total {}\n\
+         # HELP codasaurus_osv_cache_misses_total OSV cache misses\n\
+         # TYPE codasaurus_osv_cache_misses_total counter\n\
+         codasaurus_osv_cache_misses_total {}\n\
+         # HELP codasaurus_github_cache_hits_total GitHub Contents conditional/cache hits\n\
+         # TYPE codasaurus_github_cache_hits_total counter\n\
+         codasaurus_github_cache_hits_total {}\n\
+         # HELP codasaurus_github_cache_misses_total GitHub Contents cache misses\n\
+         # TYPE codasaurus_github_cache_misses_total counter\n\
+         codasaurus_github_cache_misses_total {}\n\
          # HELP codasaurus_queue_enqueued_total Review jobs enqueued\n\
          # TYPE codasaurus_queue_enqueued_total counter\n\
          codasaurus_queue_enqueued_total {}\n\
@@ -192,6 +260,12 @@ pub fn render_prometheus() -> String {
         LLM_REQUESTS.load(Ordering::Relaxed),
         LLM_ERRORS.load(Ordering::Relaxed),
         LLM_PROMPT_CHARS.load(Ordering::Relaxed),
+        REGISTRY_CACHE_HITS.load(Ordering::Relaxed),
+        REGISTRY_CACHE_MISSES.load(Ordering::Relaxed),
+        OSV_CACHE_HITS.load(Ordering::Relaxed),
+        OSV_CACHE_MISSES.load(Ordering::Relaxed),
+        GITHUB_CACHE_HITS.load(Ordering::Relaxed),
+        GITHUB_CACHE_MISSES.load(Ordering::Relaxed),
         QUEUE_ENQUEUED.load(Ordering::Relaxed),
         QUEUE_COMPLETED.load(Ordering::Relaxed),
     )
@@ -215,5 +289,8 @@ mod tests {
         assert!(body.contains("codasaurus_github_429_total"));
         assert!(body.contains("codasaurus_queue_depth"));
         assert!(body.contains("codasaurus_fp_proxy_ratio"));
+        assert!(body.contains("codasaurus_llm_spend_usd_estimate"));
+        assert!(body.contains("codasaurus_registry_cache_hits_total"));
+        assert!(body.contains("codasaurus_github_cache_hits_total"));
     }
 }

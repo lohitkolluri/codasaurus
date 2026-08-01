@@ -103,6 +103,15 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
                 "note": "Proxy metrics: dismissals table vs current findings rows — not a lifetime cohort.",
             }),
         );
+        obj.insert(
+            "llm".into(),
+            json!({
+                "requests": crate::metrics::llm_request_count(),
+                "prompt_chars": crate::metrics::llm_prompt_chars_total(),
+                "spend_usd_estimate": crate::metrics::llm_spend_usd_estimate(),
+                "note": "Process-local estimates since last restart; not billing truth.",
+            }),
+        );
     }
 
     Ok(Json(core))

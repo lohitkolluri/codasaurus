@@ -17,14 +17,23 @@ use tokio::sync::Semaphore;
 const CACHE_MAX_SIZE: usize = 10_000;
 /// Bound concurrent registry/OSV fan-out when warming caches for large PRs.
 const PREFETCH_CONCURRENCY: usize = 12;
+/// Short TTL for transient failures so we don't stampede npm/OSV on outages.
+const SOFT_FAIL_TTL_SECS: u64 = 120;
 
 mod crates_io;
 mod npm;
 mod pypi;
 
+#[derive(Clone, Copy)]
+enum PkgCacheVal {
+    Exists(bool),
+    /// Network/unknown failure — do not treat as "package missing".
+    SoftFail,
+}
+
 static CACHE_TTL: LazyLock<Mutex<u64>> = LazyLock::new(|| Mutex::new(3600));
 
-static CACHE: LazyLock<RwLock<HashMap<String, (bool, Instant)>>> =
+static CACHE: LazyLock<RwLock<HashMap<String, (PkgCacheVal, Instant)>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
 /// When true, registry/OSV never open sockets — cache hits only (air-gap).
@@ -109,15 +118,25 @@ pub async fn check_package_async(registry: &str, package: &str) -> Result<Option
             e.into_inner()
         });
         if let Some((result, time)) = cache.get(&cache_key) {
-            if time.elapsed() < Duration::from_secs(ttl_secs) {
-                return Ok(Some(*result));
-            }
-            if offline_mode() {
-                // Stale cache still usable offline.
-                return Ok(Some(*result));
+            let age = time.elapsed();
+            match result {
+                PkgCacheVal::Exists(exists) => {
+                    if age < Duration::from_secs(ttl_secs) || offline_mode() {
+                        crate::metrics::record_registry_cache_hit();
+                        return Ok(Some(*exists));
+                    }
+                }
+                PkgCacheVal::SoftFail => {
+                    if age < Duration::from_secs(SOFT_FAIL_TTL_SECS) {
+                        crate::metrics::record_registry_cache_hit();
+                        return Ok(None);
+                    }
+                }
             }
         }
     }
+
+    crate::metrics::record_registry_cache_miss();
 
     if offline_mode() {
         return Ok(None);
@@ -130,12 +149,19 @@ pub async fn check_package_async(registry: &str, package: &str) -> Result<Option
         _ => return Ok(None),
     };
 
-    if let Ok(Some(exists)) = &result {
+    {
         let mut cache = CACHE.write().unwrap_or_else(|e| {
             eprintln!("Warning: cache RwLock poisoned");
             e.into_inner()
         });
-        cache.insert(cache_key, (*exists, Instant::now()));
+        match &result {
+            Ok(Some(exists)) => {
+                cache.insert(cache_key, (PkgCacheVal::Exists(*exists), Instant::now()));
+            }
+            Ok(None) | Err(_) => {
+                cache.insert(cache_key, (PkgCacheVal::SoftFail, Instant::now()));
+            }
+        }
         if cache.len() > CACHE_MAX_SIZE {
             evict_cache(&mut cache);
         }
@@ -184,10 +210,13 @@ pub async fn prefetch_packages(pairs: &[(String, String)]) {
     }
 }
 
-fn evict_cache(cache: &mut HashMap<String, (bool, Instant)>) {
+fn evict_cache(cache: &mut HashMap<String, (PkgCacheVal, Instant)>) {
     let ttl = Duration::from_secs(get_cache_ttl());
     let now = Instant::now();
-    cache.retain(|_, &mut (_, time)| now.duration_since(time) < ttl);
+    cache.retain(|_, &mut (val, time)| match val {
+        PkgCacheVal::SoftFail => now.duration_since(time) < Duration::from_secs(SOFT_FAIL_TTL_SECS),
+        PkgCacheVal::Exists(_) => now.duration_since(time) < ttl,
+    });
 
     let target_len = CACHE_MAX_SIZE / 2;
     if cache.len() <= target_len {
@@ -222,13 +251,17 @@ async fn check_osv_async(ecosystem: &str, package: &str) -> Result<Vec<OsvVulner
         });
         if let Some((vulns, time)) = cache.get(&cache_key) {
             if time.elapsed() < Duration::from_secs(ttl_secs) {
+                crate::metrics::record_osv_cache_hit();
                 return Ok(vulns.clone());
             }
             if offline_mode() {
+                crate::metrics::record_osv_cache_hit();
                 return Ok(vulns.clone());
             }
         }
     }
+
+    crate::metrics::record_osv_cache_miss();
 
     if offline_mode() {
         return Ok(vec![]);
@@ -344,7 +377,7 @@ mod tests {
         let mut cache = CACHE.write().unwrap();
         for i in 0..CACHE_MAX_SIZE + 100 {
             let key = format!("test:pkg-{i}");
-            cache.insert(key, (true, Instant::now()));
+            cache.insert(key, (PkgCacheVal::Exists(true), Instant::now()));
         }
         evict_cache(&mut cache);
         drop(cache);

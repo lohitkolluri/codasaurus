@@ -168,11 +168,12 @@ pub async fn review_pr_with_options(
     }
 
     let exclude = config.checks.exclude_patterns.clone();
+    let exclude_prepared = crate::detectors::prepare_exclude_patterns(&exclude);
     let files: Vec<serde_json::Value> = files
         .into_iter()
         .filter(|f| {
             let name = f["filename"].as_str().unwrap_or("");
-            !crate::detectors::is_excluded(name, &exclude)
+            !crate::detectors::is_excluded_prepared(name, &exclude_prepared)
         })
         .collect();
     if files.is_empty() {
@@ -184,6 +185,14 @@ pub async fn review_pr_with_options(
         .iter()
         .filter_map(|f| f["filename"].as_str().map(String::from))
         .collect();
+    let low_signal_only = crate::llm::all_paths_low_signal(&changed_paths);
+    if low_signal_only {
+        tracing::info!(
+            repo = repo_name,
+            pr = pr_number,
+            "low-signal PR (lockfile/vendor/generated) — skipping Contents fan-out, prefetch, and LLM"
+        );
+    }
 
     let mut parsed_files_collected: Vec<crate::parser::ParsedFile> = Vec::new();
     let mut already_have = std::collections::HashSet::new();
@@ -207,26 +216,28 @@ pub async fn review_pr_with_options(
 
     // Full-file fetch for critical paths (auth/crypto/IaC/Docker) when under size budget.
     let head_for_files = if head_sha.is_empty() { head_ref } else { head_sha };
-    for path in &changed_paths {
-        if !is_critical_full_file_path(path) {
-            continue;
-        }
-        if parsed_files_collected
-            .iter()
-            .any(|p| p.path == *path && p.raw_content.len() > 400)
-        {
-            continue;
-        }
-        match crate::bot::github_files::fetch_repo_file(client, &headers, repo_name, path, head_for_files)
-            .await
-        {
-            Ok(Some(content)) if !content.is_empty() => {
-                if let Ok(parsed) = crate::parser::parse_file(path, &content) {
-                    parsed_files_collected.retain(|p| p.path != *path);
-                    parsed_files_collected.push(parsed);
-                }
+    if !low_signal_only {
+        for path in &changed_paths {
+            if !is_critical_full_file_path(path) {
+                continue;
             }
-            _ => {}
+            if parsed_files_collected
+                .iter()
+                .any(|p| p.path == *path && p.raw_content.len() > 400)
+            {
+                continue;
+            }
+            match crate::bot::github_files::fetch_repo_file(client, &headers, repo_name, path, head_for_files)
+                .await
+            {
+                Ok(Some(content)) if !content.is_empty() => {
+                    if let Ok(parsed) = crate::parser::parse_file(path, &content) {
+                        parsed_files_collected.retain(|p| p.path != *path);
+                        parsed_files_collected.push(parsed);
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -267,46 +278,52 @@ pub async fn review_pr_with_options(
         }
     }
     let head_for_manifest = if head_sha.is_empty() { head_ref } else { head_sha };
-    for path in changed_paths
-        .iter()
-        .filter(|p| crate::bot::dep_delta::is_manifest_path(p))
-    {
-        let need_fetch = head_manifests
-            .get(path)
-            .map(|c| c.len() < 80)
-            .unwrap_or(true);
-        if !need_fetch {
-            continue;
-        }
-        if let Ok(Some(content)) = crate::bot::github_files::fetch_repo_file(
-            client,
-            &headers,
-            repo_name,
-            path,
-            head_for_manifest,
-        )
-        .await
+    if !low_signal_only {
+        for path in changed_paths
+            .iter()
+            .filter(|p| crate::bot::dep_delta::is_manifest_path(p))
         {
-            if !content.is_empty() {
-                head_manifests.insert(path.clone(), content);
+            let need_fetch = head_manifests
+                .get(path)
+                .map(|c| c.len() < 80)
+                .unwrap_or(true);
+            if !need_fetch {
+                continue;
+            }
+            if let Ok(Some(content)) = crate::bot::github_files::fetch_repo_file(
+                client,
+                &headers,
+                repo_name,
+                path,
+                head_for_manifest,
+            )
+            .await
+            {
+                if !content.is_empty() {
+                    head_manifests.insert(path.clone(), content);
+                }
             }
         }
     }
 
     // Repo awareness: manifests, CONTRIBUTING/AGENTS, CODEOWNERS, linked issues.
-    let (remote_ctx, bootstrapped) = crate::bot::repo_context::gather_remote_context(
-        client,
-        &headers,
-        repo_name,
-        base_sha,
-        head_ref,
-        &pr_title,
-        &pr_body,
-        &changed_paths,
-        &already_have,
-    )
-    .await
-    .unwrap_or_default();
+    let (remote_ctx, bootstrapped) = if low_signal_only {
+        (Default::default(), Vec::new())
+    } else {
+        crate::bot::repo_context::gather_remote_context(
+            client,
+            &headers,
+            repo_name,
+            base_sha,
+            head_ref,
+            &pr_title,
+            &pr_body,
+            &changed_paths,
+            &already_have,
+        )
+        .await
+        .unwrap_or_default()
+    };
 
     let mut dep_deltas: Vec<crate::bot::dep_delta::DepDelta> = Vec::new();
     for base in &bootstrapped {
@@ -379,7 +396,7 @@ pub async fn review_pr_with_options(
 
     // Warm registry/OSV caches concurrently before sync detectors run.
     let prefetch_pairs = collect_registry_pairs(&parsed_files_collected);
-    if !prefetch_pairs.is_empty() && !offline_mode {
+    if !prefetch_pairs.is_empty() && !offline_mode && !low_signal_only {
         crate::registry::prefetch_packages(&prefetch_pairs).await;
     }
 
@@ -836,7 +853,7 @@ pub async fn review_pr_with_options(
     }
 
     // Generate and post LLM summary if enabled for this repo and an API key is available
-    if repo_llm_enabled {
+    if repo_llm_enabled && !low_signal_only {
         if let Some(llm_cfg) = crate::llm::LlmConfig::from_db_or_env(pool).await {
             if let Err(e) = generate_and_post_summary(
                 client,
@@ -855,8 +872,14 @@ pub async fn review_pr_with_options(
                 tracing::warn!(error = %e, "failed to generate LLM summary");
             }
 
-            // Phase 1: optional review_diff when PR is under size budget.
-            if options.auto_review_diff && files.len() <= runtime.auto_improve_max_files {
+            // Phase 1: optional review_diff when PR is under size budget + cost gates.
+            if crate::llm::should_run_auto_improve(
+                has_blocking,
+                &changed_paths,
+                options.auto_review_diff,
+                files.len(),
+                runtime.auto_improve_max_files,
+            ) {
                 if let Err(e) = maybe_post_auto_improve(
                     client,
                     &auth_header,

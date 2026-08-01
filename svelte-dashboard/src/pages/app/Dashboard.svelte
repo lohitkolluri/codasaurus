@@ -118,6 +118,13 @@
             />
             <StatsCard label="Tier-1 findings" value={stats.trust?.tier1_findings ?? 0} tone="info" />
             <StatsCard label="Dismissals" value={stats.trust?.dismissals ?? 0} />
+            <StatsCard
+              label="LLM spend (est.)"
+              value={stats.llm?.spend_usd_estimate != null
+                ? `$${Number(stats.llm.spend_usd_estimate).toFixed(3)}`
+                : "—"}
+              hint={`${stats.llm?.requests ?? 0} requests · since restart`}
+            />
           </div>
         </section>
 

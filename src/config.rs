@@ -48,8 +48,12 @@ pub struct CheckConfig {
     pub boilerplate: bool,
 
     /// Detect stale/outdated API usage
-    #[serde(default = "default_false")]
+    #[serde(default = "default_true")]
     pub stale_api: bool,
+
+    /// Pattern-based risky APIs (eval, XSS sinks, SQL concat, TLS skip, …)
+    #[serde(default = "default_true")]
+    pub risky_patterns: bool,
 
     /// Detect TODO/FIXME placeholders left by AI
     #[serde(default = "default_true")]
@@ -124,10 +128,6 @@ fn default_true() -> bool {
     true
 }
 
-fn default_false() -> bool {
-    false
-}
-
 fn default_cache_ttl() -> u64 {
     3600
 }
@@ -166,7 +166,8 @@ impl Default for Config {
                 secrets: true,
                 over_engineering: true,
                 boilerplate: true,
-                stale_api: false,
+                stale_api: true,
+                risky_patterns: true,
                 todo_leaks: true,
                 guidelines: true,
                 graph: true,
@@ -195,6 +196,7 @@ fn apply_enabled_flag(checks: &mut CheckConfig, key: &str, value: &str) {
         "boilerplate_enabled" => checks.boilerplate = enabled,
         "todo_leaks_enabled" => checks.todo_leaks = enabled,
         "stale_api_enabled" => checks.stale_api = enabled,
+        "risky_patterns_enabled" => checks.risky_patterns = enabled,
         "guidelines_enabled" => checks.guidelines = enabled,
         "graph_enabled" => checks.graph = enabled,
         "iac_enabled" => checks.iac = enabled,
@@ -233,7 +235,8 @@ impl Default for RepoBotFlags {
         Self {
             llm_enabled: true,
             auto_describe: true,
-            auto_review_diff: true,
+            // Opt-in: auto review_diff is the largest LLM cost; enable per-repo when wanted.
+            auto_review_diff: false,
             auto_labels: true,
             update_pr_description: false,
             allow_auto_fix: false,
@@ -341,6 +344,7 @@ fn apply_detector_key(checks: &mut CheckConfig, key: &str, enabled: bool) {
         "boilerplate" => checks.boilerplate = enabled,
         "todo_leaks" => checks.todo_leaks = enabled,
         "stale_api" => checks.stale_api = enabled,
+        "risky_patterns" => checks.risky_patterns = enabled,
         "guidelines" => checks.guidelines = enabled,
         "graph" => checks.graph = enabled,
         "iac" => checks.iac = enabled,
@@ -429,7 +433,7 @@ mod tests {
         );
         assert!(!flags.llm_enabled);
         assert!(!flags.auto_describe);
-        assert!(flags.auto_review_diff);
+        assert!(!flags.auto_review_diff);
         assert!(!cfg.checks.secrets);
         assert!(!cfg.checks.graph);
         assert!(cfg.checks.hallucinated_imports);

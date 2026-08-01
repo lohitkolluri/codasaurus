@@ -11,6 +11,7 @@ pub mod guidelines;
 pub mod hallucinated_imports;
 pub mod iac;
 pub mod phantom_deps;
+pub mod risky_patterns;
 pub mod security;
 pub mod slop;
 pub mod stale_api;
@@ -132,6 +133,10 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
         all.extend(stale_api::detect(parsed_files));
     }
 
+    if config.checks.risky_patterns {
+        all.extend(risky_patterns::detect(parsed_files));
+    }
+
     if config.checks.graph {
         all.extend(graph::detect(parsed_files));
     }
@@ -175,23 +180,31 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
 /// Supports glob-style wildcards (`*.lock`), directory prefixes (`dist/`),
 /// and direct filename/path matches.
 pub fn is_excluded(path: &str, patterns: &[String]) -> bool {
+    let prepared = prepare_exclude_patterns(patterns);
+    is_excluded_prepared(path, &prepared)
+}
+
+/// Lowercase/trim exclusion patterns once for hot loops (many files per PR).
+pub fn prepare_exclude_patterns(patterns: &[String]) -> Vec<String> {
+    patterns
+        .iter()
+        .map(|p| p.trim().to_lowercase())
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+/// Like [`is_excluded`] but expects patterns already lowercased via [`prepare_exclude_patterns`].
+pub fn is_excluded_prepared(path: &str, patterns_lower: &[String]) -> bool {
     let path_lower = path.to_lowercase();
-    // Lowercase patterns once, then cache the result so subsequent calls
-    // with the same patterns don't re-allocate.
-    let lowered: Vec<String> = patterns.iter().map(|p| p.trim().to_lowercase()).collect();
-    lowered.iter().any(|p| {
-        // Direct match (path ends with the pattern)
+    patterns_lower.iter().any(|p| {
         if path_lower.ends_with(p) {
             return true;
         }
-        // Glob-style: *.lock -> ends_with .lock
         if let Some(ext) = p.strip_prefix('*') {
             if path_lower.ends_with(ext) {
                 return true;
             }
         }
-        // Directory prefix: dist/ -> contains /dist/ or starts with dist/
-        // Must match full directory segment so "dist/" doesn't match "distribution/"
         if p.ends_with('/') {
             let dir = &p[..p.len() - 1];
             if path_lower.starts_with(p) {
@@ -200,7 +213,6 @@ pub fn is_excluded(path: &str, patterns: &[String]) -> bool {
             if path_lower.contains(&format!("/{dir}/")) {
                 return true;
             }
-            // Also match if the path has a trailing slash
             if path_lower.ends_with(&format!("/{dir}")) {
                 return true;
             }

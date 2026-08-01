@@ -18,8 +18,14 @@ pub(crate) async fn maybe_post_auto_improve(
     max_diff_chars: usize,
     max_issues: usize,
 ) -> Result<()> {
+    let llm_files = crate::llm::filter_llm_files(files);
+    if llm_files.is_empty() {
+        tracing::info!("skipping auto review_diff: no high-signal patches after path filter");
+        return Ok(());
+    }
+
     let mut diff = String::new();
-    for f in files.iter().take(40) {
+    for f in llm_files.iter().take(40) {
         let name = f["filename"].as_str().unwrap_or("?");
         let patch = f["patch"].as_str().unwrap_or("");
         if patch.is_empty() {
@@ -39,7 +45,7 @@ pub(crate) async fn maybe_post_auto_improve(
         .iter()
         .filter_map(|f| f["filename"].as_str().map(str::to_string))
         .collect();
-    let file_contents: Vec<(String, String)> = files
+    let file_contents: Vec<(String, String)> = llm_files
         .iter()
         .filter_map(|f| {
             let name = f["filename"].as_str()?.to_string();
@@ -83,7 +89,7 @@ pub(crate) async fn maybe_post_auto_improve(
     text.push_str(
         "\n<details>\n<summary>Notes</summary>\n\n\
          LLM findings were re-verified against PR paths before posting.\n\
-         Disable with repo `config_json.auto_review_diff: false`.\n\n\
+         Enable with repo `config_json.auto_review_diff: true` (opt-in; skipped when Tier-1 blocks).\n\n\
          </details>\n",
     );
 

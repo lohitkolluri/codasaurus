@@ -72,6 +72,7 @@ CREATE INDEX IF NOT EXISTS idx_findings_review ON findings(review_id);
 CREATE INDEX IF NOT EXISTS idx_findings_file ON findings(file_path);
 CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
 CREATE INDEX IF NOT EXISTS idx_findings_fingerprint ON findings(fingerprint);
+CREATE INDEX IF NOT EXISTS idx_findings_detector ON findings(detector);
 
 CREATE TABLE IF NOT EXISTS dismissals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,6 +152,7 @@ CREATE TABLE IF NOT EXISTS learned_rules (
 );
 
 CREATE INDEX IF NOT EXISTS idx_dismissed_fingerprint ON dismissed_findings(fingerprint);
+CREATE INDEX IF NOT EXISTS idx_dismissed_detector ON dismissed_findings(detector);
 CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector);
 ";
 
@@ -358,6 +360,20 @@ pub async fn run_migrations_sqlite(pool: &SqlitePool) -> Result<(), sqlx::Error>
             .await?;
     }
 
+    if current < 9 {
+        for stmt in [
+            "CREATE INDEX IF NOT EXISTS idx_findings_detector ON findings(detector)",
+            "CREATE INDEX IF NOT EXISTS idx_dismissed_detector ON dismissed_findings(detector)",
+            "CREATE INDEX IF NOT EXISTS idx_webhook_received_at ON webhook_deliveries(received_at)",
+            "CREATE INDEX IF NOT EXISTS idx_review_jobs_status_updated ON review_jobs(status, updated_at)",
+        ] {
+            sqlx::query(stmt).execute(pool).await?;
+        }
+        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (9)")
+            .execute(pool)
+            .await?;
+    }
+
     Ok(())
 }
 
@@ -441,6 +457,7 @@ CREATE INDEX IF NOT EXISTS idx_findings_review ON findings(review_id);
 CREATE INDEX IF NOT EXISTS idx_findings_file ON findings(file_path);
 CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
 CREATE INDEX IF NOT EXISTS idx_findings_fingerprint ON findings(fingerprint);
+CREATE INDEX IF NOT EXISTS idx_findings_detector ON findings(detector);
 
 CREATE TABLE IF NOT EXISTS dismissals (
     id BIGSERIAL PRIMARY KEY,
@@ -487,6 +504,8 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
     received_at TEXT NOT NULL DEFAULT (NOW()::text)
 );
 
+CREATE INDEX IF NOT EXISTS idx_webhook_received_at ON webhook_deliveries(received_at);
+
 CREATE TABLE IF NOT EXISTS review_comments (
     repo_pr TEXT PRIMARY KEY,
     comment_id BIGINT NOT NULL,
@@ -522,6 +541,7 @@ CREATE TABLE IF NOT EXISTS learned_rules (
 );
 
 CREATE INDEX IF NOT EXISTS idx_dismissed_fingerprint ON dismissed_findings(fingerprint);
+CREATE INDEX IF NOT EXISTS idx_dismissed_detector ON dismissed_findings(detector);
 CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector);
 
 CREATE TABLE IF NOT EXISTS review_jobs (
@@ -543,6 +563,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_review_jobs_repo_pr_sha
     ON review_jobs(repo, pr_number, head_sha);
 CREATE INDEX IF NOT EXISTS idx_review_jobs_status_created
     ON review_jobs(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_review_jobs_status_updated
+    ON review_jobs(status, updated_at);
 "#;
 
 pub async fn run_migrations_postgres(pool: &PgPool) -> Result<(), sqlx::Error> {
@@ -551,6 +573,20 @@ pub async fn run_migrations_postgres(pool: &PgPool) -> Result<(), sqlx::Error> {
     }
     sqlx::query(
         "INSERT INTO schema_version (version) VALUES (8) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
+
+    for stmt in [
+        "CREATE INDEX IF NOT EXISTS idx_findings_detector ON findings(detector)",
+        "CREATE INDEX IF NOT EXISTS idx_dismissed_detector ON dismissed_findings(detector)",
+        "CREATE INDEX IF NOT EXISTS idx_webhook_received_at ON webhook_deliveries(received_at)",
+        "CREATE INDEX IF NOT EXISTS idx_review_jobs_status_updated ON review_jobs(status, updated_at)",
+    ] {
+        sqlx::query(stmt).execute(pool).await?;
+    }
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (9) ON CONFLICT (version) DO NOTHING",
     )
     .execute(pool)
     .await?;

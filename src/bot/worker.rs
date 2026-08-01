@@ -17,9 +17,11 @@ pub(crate) static QUEUE_NOTIFY: std::sync::LazyLock<tokio::sync::Notify> =
 pub fn start_review_worker(pool: crate::db::DbPool, bot_cfg: BotConfig) {
     tokio::spawn(async move {
         tracing::info!("review queue worker started");
+        let mut idle_ticks: u64 = 0;
         loop {
             match queue::claim_next(&pool, 600).await {
                 Ok(Some(job)) => {
+                    idle_ticks = 0;
                     let cfg = bot_cfg.clone();
                     let timeout_secs = BotRuntimeConfig::default().review_timeout_secs;
                     process_queued_review(
@@ -36,6 +38,11 @@ pub fn start_review_worker(pool: crate::db::DbPool, bot_cfg: BotConfig) {
                     .await;
                 }
                 Ok(None) => {
+                    idle_ticks = idle_ticks.saturating_add(1);
+                    // ~every 60s of idle (2s poll × 30)
+                    if idle_ticks % 30 == 0 {
+                        crate::bot::maintenance::run_periodic_cleanup(&pool).await;
+                    }
                     tokio::select! {
                         _ = QUEUE_NOTIFY.notified() => {}
                         _ = tokio::time::sleep(Duration::from_secs(2)) => {}

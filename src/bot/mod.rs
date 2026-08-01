@@ -13,6 +13,7 @@ pub(crate) mod dep_delta;
 mod github_extra;
 pub(crate) mod github_files;
 mod issue_assessment;
+pub(crate) mod maintenance;
 pub(crate) mod markdown;
 pub(crate) mod offline;
 mod policy;

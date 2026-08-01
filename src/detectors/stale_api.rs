@@ -182,6 +182,42 @@ static STALE_PATTERNS: LazyLock<Vec<StalePattern>> = LazyLock::new(|| {
             "`util.promisify` is deprecated in favor of `fs.promises` and native Promise APIs.",
             "Use native Promise-based APIs instead of `util.promisify`.",
         ),
+        // --- Modern framework / API drift (replaces common LLM nits) ---
+        StalePattern::new(
+            "react-createClass",
+            "warning",
+            r"React\.createClass\s*\(",
+            "`React.createClass` is removed from modern React. Use functions or ES6 classes.",
+            "Convert to a function component or `class extends React.Component`.",
+        ),
+        StalePattern::new(
+            "jquery-ajax",
+            "info",
+            r"\$\.ajax\s*\(",
+            "`$.ajax` is legacy; prefer `fetch` / native HTTP clients.",
+            "Replace jQuery AJAX with `fetch` or your app's HTTP helper.",
+        ),
+        StalePattern::new(
+            "moment-js",
+            "info",
+            r#"from\s+['"]moment['"]|require\s*\(\s*['"]moment['"]\s*\)"#,
+            "`moment` is in maintenance mode. Prefer `Temporal`, `dayjs`, or `date-fns`.",
+            "Migrate away from Moment.js to a lighter date library.",
+        ),
+        StalePattern::new(
+            "enzyme",
+            "info",
+            r#"from\s+['"]enzyme['"]|require\s*\(\s*['"]enzyme['"]\s*\)"#,
+            "Enzyme is unmaintained for modern React. Prefer Testing Library / Playwright.",
+            "Replace Enzyme with `@testing-library/react`.",
+        ),
+        StalePattern::new(
+            "python-asyncio-get-event-loop",
+            "info",
+            r"asyncio\.get_event_loop\s*\(\s*\)",
+            "`asyncio.get_event_loop()` is discouraged; use `get_running_loop()` / `asyncio.run()`.",
+            "Prefer `asyncio.run()` or `asyncio.get_running_loop()`.",
+        ),
     ]
 });
 

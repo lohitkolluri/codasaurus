@@ -18,7 +18,7 @@
   let detectors = $state({});
   let llmEnabled = $state(true);
   let autoDescribe = $state(true);
-  let autoReviewDiff = $state(true);
+  let autoReviewDiff = $state(false);
   let autoLabels = $state(true);
   let updatePrDescription = $state(false);
   let allowAutoFix = $state(false);
@@ -51,7 +51,7 @@
       } else {
         const DETECTOR_KEYS = [
           "hallucinated_imports", "phantom_deps", "vulnerabilities", "secrets",
-          "over_engineering", "boilerplate", "todo_leaks", "stale_api", "graph", "guidelines", "iac",
+          "over_engineering", "boilerplate", "todo_leaks", "stale_api", "risky_patterns", "graph", "guidelines", "iac",
         ];
         const defaults = {};
         for (const key of DETECTOR_KEYS) {
@@ -61,7 +61,7 @@
       }
       llmEnabled = cfg.llm_enabled ?? true;
       autoDescribe = cfg.auto_describe ?? true;
-      autoReviewDiff = cfg.auto_review_diff ?? true;
+      autoReviewDiff = cfg.auto_review_diff ?? false;
       autoLabels = cfg.auto_labels ?? true;
       updatePrDescription = cfg.update_pr_description ?? false;
       allowAutoFix = cfg.allow_auto_fix ?? false;
@@ -186,7 +186,7 @@
                 <div class="toggle-knob"></div>
               </div>
             </label>
-            <span>Auto LLM review_diff</span>
+            <span>Auto LLM review_diff (opt-in · costly)</span>
           </div>
           <div class="llm-row">
             <label class="toggle">

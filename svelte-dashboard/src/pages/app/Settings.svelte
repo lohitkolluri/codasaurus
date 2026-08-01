@@ -14,6 +14,7 @@
   let llmProvider = $state("openrouter");
   let llmKey = $state("");
   let llmModel = $state("");
+  let llmModelCheap = $state("");
   let llmBaseUrl = $state("");
   let llmSaving = $state(false);
   let llmMsg = $state("");
@@ -40,7 +41,7 @@
 
   const DETECTOR_KEYS = [
     "hallucinated_imports", "phantom_deps", "vulnerabilities", "secrets",
-    "over_engineering", "boilerplate", "todo_leaks", "stale_api", "graph", "guidelines", "iac",
+    "over_engineering", "boilerplate", "todo_leaks", "stale_api", "risky_patterns", "graph", "guidelines", "iac",
   ];
 
   let maxWarnings = $state("20");
@@ -102,6 +103,7 @@
       llmProvider = data.llm_provider ?? "openrouter";
       llmKey = data.openrouter_api_key ?? data.llm_api_key ?? "";
       llmModel = data.llm_model ?? "";
+      llmModelCheap = data.llm_model_cheap ?? "";
       llmBaseUrl = data.llm_base_url ?? "";
       modelSearch = llmModel;
       if (llmProvider === "openrouter") loadModels();
@@ -143,6 +145,7 @@
         api.put("/api/settings/llm_provider", { value: llmProvider }),
         api.put("/api/settings/openrouter_api_key", { value: llmKey }),
         api.put("/api/settings/llm_model", { value: llmModel }),
+        api.put("/api/settings/llm_model_cheap", { value: llmModelCheap }),
         api.put("/api/settings/llm_base_url", { value: llmBaseUrl }),
       ];
       const results = await Promise.allSettled(updates);
@@ -244,7 +247,7 @@
               <input id="llm-key" type="password" bind:value={llmKey} placeholder="sk-..." />
             </div>
             <div class="form-group model-search">
-              <label for="llm-model">Model</label>
+              <label for="llm-model">Model (review_diff)</label>
               {#if llmProvider === "openrouter"}
                 <div class="search-wrap">
                   <input id="llm-model" type="text" bind:value={modelSearch}
@@ -268,6 +271,11 @@
               {:else}
                 <input id="llm-model" type="text" bind:value={llmModel} />
               {/if}
+            </div>
+            <div class="form-group">
+              <label for="llm-model-cheap">Cheap model (summarize / describe / ask)</label>
+              <input id="llm-model-cheap" type="text" bind:value={llmModelCheap}
+                placeholder="e.g. openai/gpt-4o-mini or anthropic/claude-haiku-4.5" />
             </div>
             <div class="form-group">
               <label for="llm-url">Base URL</label>
