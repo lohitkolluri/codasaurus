@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { push } from "svelte-spa-router";
   import { login } from "../stores/auth.js";
+  import BrandMark from "../lib/BrandMark.svelte";
 
   let email = $state("");
   let password = $state("");
@@ -42,28 +43,31 @@
 
 <div class="login-page">
   <div class="login-card">
-    <h1>Codasaurus</h1>
-    <p class="subtitle">AI Code Review Platform</p>
+    <div class="login-brand">
+      <BrandMark size={40} />
+      <h1>Codasaurus</h1>
+    </div>
+    <p class="subtitle">Self-hosted PR review agent</p>
 
     {#if error}
-      <div class="login-error">{error}</div>
+      <div class="login-error" role="alert">{error}</div>
     {/if}
 
     {#if oidcEnabled}
-      <button type="button" class="primary" style="width:100%;margin-bottom:16px" onclick={ssoLogin}>
+      <button type="button" class="primary" style="width:100%" onclick={ssoLogin}>
         Sign in with SSO
       </button>
-      <p class="subtitle" style="margin-bottom:12px">or use email / password</p>
+      <div class="login-divider">or email</div>
     {/if}
 
     <form onsubmit={handleSubmit}>
       <div class="form-group">
         <label for="email">Email</label>
-        <input id="email" type="email" bind:value={email} required placeholder="you@example.com" />
+        <input id="email" type="email" bind:value={email} required placeholder="you@example.com" autocomplete="username" />
       </div>
       <div class="form-group">
         <label for="password">Password</label>
-        <input id="password" type="password" bind:value={password} required />
+        <input id="password" type="password" bind:value={password} required autocomplete="current-password" />
       </div>
       <button type="submit" class="primary" style="width:100%;margin-top:8px" disabled={submitting}>
         {submitting ? "Signing in…" : "Sign In"}

@@ -101,6 +101,7 @@ async fn set_setting(
         "update_pr_description",
         "custom_instructions",
         "allow_auto_fix",
+        "offline_mode",
     ];
     if !ALLOWED_KEYS.contains(&key.as_str()) {
         return Err(ApiError::bad_request(format!("Unknown setting: {key}")));
@@ -117,6 +118,13 @@ async fn set_setting(
             .map_err(ApiError::bad_request)?;
     }
     db::config::set_config(&state.pool, &key, &body.value).await?;
+    if key == "offline_mode" {
+        let on = matches!(
+            body.value.to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        );
+        crate::registry::set_offline_mode(on);
+    }
 
     Ok(Json(json!({ "status": "ok", "key": key })))
 }

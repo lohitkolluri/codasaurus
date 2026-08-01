@@ -138,7 +138,7 @@
       </div>
 
       {#if syncMsg}
-        <p style="font-size:13px;margin-bottom:8px;color:{syncError ? 'var(--error)' : 'var(--success)'}">{syncMsg}</p>
+        <p class="inline-flash" class:error={syncError}>{syncMsg}</p>
       {/if}
 
       {#if repos.length > 0}
@@ -173,7 +173,11 @@
               {#each filtered as repo}
                 <tr onclick={() => openRepo(repo.id)}>
                   <td class="repo-cell">
-                    <span class="repo-icon">📦</span>
+                    <span class="repo-icon" aria-hidden="true">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                      </svg>
+                    </span>
                     <span class="repo-name">{repo.full_name}</span>
                   </td>
                   <td><code>{repo.default_branch ?? "main"}</code></td>
@@ -290,8 +294,23 @@
     gap: 8px;
   }
   .repo-icon {
-    font-size: 14px;
+    display: inline-grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--accent-soft);
+    flex-shrink: 0;
   }
+  .inline-flash {
+    font-size: 13px;
+    margin-bottom: 12px;
+    color: var(--success);
+    animation: rise-in 120ms var(--ease-out) both;
+  }
+  .inline-flash.error { color: var(--error); }
   .repo-name {
     font-weight: 600;
   }

@@ -87,6 +87,7 @@ fn annotation_level(severity: &str) -> &'static str {
 }
 
 /// Create a completed Check Run with annotations mirroring findings.
+/// `summary_extra` is appended (e.g. dependency delta markdown); pass `""` if none.
 pub async fn create_findings_check_run(
     client: &reqwest::Client,
     headers: &HeaderMap,
@@ -94,6 +95,7 @@ pub async fn create_findings_check_run(
     head_sha: &str,
     findings: &[Finding],
     has_blocking: bool,
+    summary_extra: &str,
 ) -> Result<()> {
     if head_sha.is_empty() {
         return Ok(());
@@ -123,10 +125,19 @@ pub async fn create_findings_check_run(
         "success"
     };
 
-    let summary = format!(
-        "Codasaurus found **{blocking}** blocking, **{warning}** warning, **{info}** info.\n\n\
+    let mut summary = format!(
+        "### Codasaurus check\n\n\
+         | Blocking | Warning | Info |\n\
+         | ---: | ---: | ---: |\n\
+         | **{blocking}** | {warning} | {info} |\n\n\
          Inline review comments and walkthrough are on the PR."
     );
+    if !summary_extra.trim().is_empty() {
+        // GitHub check-run summary soft limit ~64KB; keep appendix short.
+        let extra: String = summary_extra.chars().take(4_000).collect();
+        summary.push_str("\n\n---\n\n");
+        summary.push_str(&extra);
+    }
 
     let url = format!("https://api.github.com/repos/{repo}/check-runs");
     let body = serde_json::json!({

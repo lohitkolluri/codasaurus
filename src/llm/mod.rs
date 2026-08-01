@@ -118,8 +118,23 @@ impl LlmConfig {
     }
 
     /// Prefer dashboard DB settings, fall back to environment.
+    /// Returns `None` when offline mode or `llm_provider=disabled` (fail-closed).
     pub async fn from_db_or_env(pool: Option<&crate::db::DbPool>) -> Option<Self> {
         if let Some(pool) = pool {
+            let db_off = crate::db::config::get_config(pool, "offline_mode")
+                .await
+                .ok()
+                .flatten();
+            if crate::bot::offline::offline_mode_from_env_and_db(db_off.as_deref()) {
+                tracing::info!("offline_mode: skipping LLM config (fail-closed)");
+                return None;
+            }
+            if let Ok(Some(provider)) = crate::db::config::get_config(pool, "llm_provider").await {
+                if provider.eq_ignore_ascii_case("disabled") {
+                    tracing::info!("llm_provider=disabled: skipping LLM config");
+                    return None;
+                }
+            }
             // One round-trip instead of three sequential get_config calls.
             if let Ok(entries) = crate::db::config::get_all_config(pool).await {
                 let mut api_key = None;
@@ -147,6 +162,8 @@ impl LlmConfig {
                     }
                 }
             }
+        } else if crate::bot::offline::offline_mode_from_env_and_db(None) {
+            return None;
         }
         Self::from_env()
     }
@@ -708,4 +725,21 @@ async fn chat_completion_text(
         .filter(|s| !s.is_empty())
         .context("LLM response missing content")
         .inspect_err(|_| crate::metrics::record_llm_error())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn offline_mode_blocks_llm_config_without_pool() {
+        let prev = std::env::var("CODASAURUS_OFFLINE").ok();
+        std::env::set_var("CODASAURUS_OFFLINE", "1");
+        let cfg = LlmConfig::from_db_or_env(None).await;
+        match prev {
+            Some(v) => std::env::set_var("CODASAURUS_OFFLINE", v),
+            None => std::env::remove_var("CODASAURUS_OFFLINE"),
+        }
+        assert!(cfg.is_none(), "offline must fail-closed for LLM");
+    }
 }

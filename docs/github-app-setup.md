@@ -1,71 +1,61 @@
-# Codasaurus — GitHub App Setup
+# GitHub App setup
 
-## 1. GitHub App Registration
+## 1. Create the App
 
-1. Go to **Settings → Developer settings → GitHub Apps → New GitHub App**
-2. Fill in:
-   - **GitHub App name:** `codasaurus` (or your choice)
-   - **Homepage URL:** `https://github.com/lohitkolluri/codasaurus`
-   - **Webhook URL:** `https://your-deployment.com/webhook` (replace with your actual URL)
-   - **Webhook secret:** generate a random string (e.g. `openssl rand -hex 32`)
-3. **Permissions:**
-   - Pull requests: **Read & Write**
-   - Contents: **Read**
-   - Issues: **Read & Write**
-   - Checks: **Read & Write** (Check Run annotations)
-   - Metadata: **Read**
-4. **Subscribe to events:**
-   - Pull request
-   - Issue comment
-5. **Where can this app be installed:** Any account
+**Settings → Developer settings → GitHub Apps → New GitHub App**
 
-## 2. Generate a Private Key
+| Field          | Value                       |
+| -------------- | --------------------------- |
+| Name           | `codasaurus` (or yours)     |
+| Homepage       | your repo or deployment URL |
+| Webhook URL    | `https://<host>/webhook`    |
+| Webhook secret | `openssl rand -hex 32`      |
+| Logo           | upload `assets/logo.png`    |
 
-- Scroll to **Private keys** and click **Generate a private key**
-- A `.pem` file will download — store it securely and never commit it
+**Permissions**
 
-## 3. Installation
+- Pull requests — Read & Write
+- Contents — Read (& Write if you use `@codasaurus fix`)
+- Issues — Read & Write
+- Checks — Read & Write
+- Metadata — Read
 
-- After creating the app, go to the app's settings page
-- Under **Install App**, click **Install** next to your account/organization
-- Select the repositories you want the bot to monitor
+**Events:** Pull request · Issue comment
 
-## 4. Deployment
+Install on Any account (or Only this account).
 
-### Option A: Docker
+## 2. Private key
 
-```bash
-docker-compose up
-```
+Generate a private key under the App settings. Store the `.pem` securely — never commit it.
 
-### Option B: Fly.io
+## 3. Install
+
+**Install App** → pick org/user → select repos Codasaurus should review.
+
+## 4. Run Codasaurus
 
 ```bash
-fly deploy
+docker compose up
+# or
+cargo build --release && ./target/release/codasaurus serve --port 3000
 ```
 
-### Option C: Railway / Render
+| Variable                                     | Required | Notes                                 |
+| -------------------------------------------- | -------- | ------------------------------------- |
+| `GITHUB_APP_ID`                              | yes      | Numeric App ID                        |
+| `GITHUB_APP_PRIVATE_KEY`                     | yes      | Full PEM (literal newlines)           |
+| `GITHUB_WEBHOOK_SECRET`                      | yes      | Same secret as registration           |
+| `DATABASE_URL`                               | no       | SQLite default; or `postgres://…`     |
+| `OPENROUTER_API_KEY` / `CODASAURUS_BASE_URL` | no       | BYOK LLM                              |
+| `OIDC_*` / `PUBLIC_URL`                      | no       | SSO                                   |
+| `CODASAURUS_OFFLINE`                         | no       | Fail-closed: no LLM / registry egress |
 
-Point the platform at the repo root, set the start command to your server binary, and configure the environment variables in the dashboard.
+Dashboard setup wizard can also store App credentials.
 
-## 5. Environment Variables
-
-| Variable | Required | Description |
-|---|---|---|
-| `GITHUB_APP_ID` | Yes | Numeric App ID from the GitHub App settings page |
-| `GITHUB_APP_PRIVATE_KEY` | Yes | The full contents of the `.pem` file (or `-----BEGIN RSA PRIVATE KEY-----` block, with literal newlines) |
-| `GITHUB_WEBHOOK_SECRET` | Yes | The webhook secret you set during registration |
-| `OPENROUTER_API_KEY` | No | API key for OpenRouter (used for AI-powered review) |
-| `ENVIRONMENT` | No | `dev` or `prod` — controls logging verbosity, etc. |
-
-## 6. Verification
-
-Once deployed, verify the server is running:
+## 5. Verify
 
 ```bash
-curl https://your-deployment.com/health
+curl -s http://localhost:3000/health
 ```
 
-Expected response: `ok`
-
-Then open a pull request on one of the installed repositories. The bot should receive the webhook event and post a review.
+Expect JSON with `"status":"ok"` and an `egress_profile`. Open a PR on an installed repo — Codasaurus should post a review.

@@ -64,6 +64,20 @@ pub async fn serve(
         println!("  GitHub bot configured");
     }
 
+    // Apply offline mode before accepting traffic so slash commands honor the DB flag.
+    {
+        let db_off = crate::db::config::get_config(&pool, "offline_mode")
+            .await
+            .ok()
+            .flatten();
+        let offline = crate::bot::offline::offline_mode_from_env_and_db(db_off.as_deref());
+        crate::registry::set_offline_mode(offline);
+        if offline {
+            tracing::info!("offline_mode enabled at boot — registry/OSV fail-closed");
+            println!("  Offline mode: enabled (fail-closed)");
+        }
+    }
+
     let app = build_router(pool, bot_config);
 
     let addr: SocketAddr = format!("{host}:{port}").parse()?;
@@ -218,6 +232,34 @@ async fn health_handler() -> impl IntoResponse {
     } else {
         StatusCode::SERVICE_UNAVAILABLE
     };
+
+    let mut offline = crate::bot::offline::offline_mode_from_env_and_db(None);
+    let mut llm_disabled = false;
+    let mut has_llm_endpoint = false;
+    if let Some(pool) = crate::bot::CONFIG_POOL.get() {
+        let db_off = crate::db::config::get_config(pool, "offline_mode")
+            .await
+            .ok()
+            .flatten();
+        offline = crate::bot::offline::offline_mode_from_env_and_db(db_off.as_deref());
+        if let Ok(Some(p)) = crate::db::config::get_config(pool, "llm_provider").await {
+            llm_disabled = p.eq_ignore_ascii_case("disabled");
+        }
+        if let Ok(Some(url)) = crate::db::config::get_config(pool, "llm_base_url").await {
+            has_llm_endpoint = !url.trim().is_empty();
+        }
+        if let Ok(Some(key)) = crate::db::config::get_config(pool, "openrouter_api_key").await {
+            if !key.trim().is_empty() {
+                has_llm_endpoint = true;
+            }
+        }
+    }
+    // Read-only: do not mutate global offline flag from health probes.
+    let profile =
+        crate::bot::offline::resolve_egress_profile(offline, llm_disabled, has_llm_endpoint);
+    let llm_allowed = !llm_disabled && has_llm_endpoint && !offline;
+    let egress = crate::bot::offline::health_json(profile, offline, llm_allowed);
+
     (
         status,
         axum::Json(serde_json::json!({
@@ -225,6 +267,10 @@ async fn health_handler() -> impl IntoResponse {
             "db": db_ok,
             "data_dir": data_dir_ok,
             "version": env!("CARGO_PKG_VERSION"),
+            "egress_profile": egress["egress_profile"],
+            "offline_mode": egress["offline_mode"],
+            "network": egress["network"],
+            "note": egress["note"],
         })),
     )
 }

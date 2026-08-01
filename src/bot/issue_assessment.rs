@@ -77,18 +77,18 @@ pub fn assessment_markdown(rows: &[(IssueContext, IssueVerdict)]) -> String {
     if rows.is_empty() {
         return String::new();
     }
-    let mut out = String::from("#### Linked issue assessment\n\n");
-    out.push_str("| Ticket | Verdict |\n| --- | --- |\n");
+    let mut out = String::from("#### Linked issues\n\n");
+    out.push_str("| Ticket | Assessment |\n| --- | --- |\n");
     for (issue, verdict) in rows {
         let label = if issue.number > 0 {
             format!("#{} — {}", issue.number, issue.title)
         } else {
             issue.title.clone()
         };
+        let chip = format!("`{}`", verdict.as_str());
         out.push_str(&format!(
-            "| {} | `{}` |\n",
+            "| {} | {chip} |\n",
             label.replace('|', "\\|"),
-            verdict.as_str()
         ));
     }
     out.push('\n');

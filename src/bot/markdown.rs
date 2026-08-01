@@ -5,7 +5,7 @@ use crate::config::Config;
 use crate::detectors::{Finding, Findings};
 use std::fmt::Write;
 
-/// Severity badge without emoji noise.
+/// Severity badge — monospace chips, no emoji noise.
 pub fn severity_badge(severity: &str) -> &'static str {
     match severity {
         "blocking" => "`blocking`",
@@ -20,6 +20,29 @@ pub fn short_fp(finding: &Finding) -> String {
     fp.chars().take(12).collect()
 }
 
+/// Shared compact commands footer for review / describe comments.
+pub fn commands_details() -> String {
+    "<details>\n<summary><strong>Commands</strong></summary>\n\n\
+     | Command | Action |\n\
+     | --- | --- |\n\
+     | `@codasaurus review` | Re-run review |\n\
+     | `@codasaurus describe` | Walkthrough / summary |\n\
+     | `@codasaurus summarize` | Executive summary |\n\
+     | `@codasaurus improve` | Actionable suggestions |\n\
+     | `@codasaurus security` | Secrets / vuln scan |\n\
+     | `@codasaurus labels` | Suggest labels |\n\
+     | `@codasaurus changelog` | Keep a Changelog draft |\n\
+     | `@codasaurus add_docs` | Docs stubs |\n\
+     | `@codasaurus similar` | Related PRs |\n\
+     | `@codasaurus impact` | Blast-radius estimate |\n\
+     | `@codasaurus fix` | Apply codemods (opt-in) |\n\
+     | `@codasaurus ask …` | Ask about this PR |\n\
+     | `@codasaurus ignore <fp>` | Dismiss a finding |\n\
+     | `@codasaurus help` | Full command list |\n\n\
+     </details>\n"
+        .into()
+}
+
 /// Inline finding comment — scannable, actionable, dismissable.
 pub fn inline_finding_comment(f: &Finding) -> String {
     let badge = severity_badge(f.severity);
@@ -27,9 +50,15 @@ pub fn inline_finding_comment(f: &Finding) -> String {
     let why = finding_why(f);
     let action = finding_action(f);
     let fp = short_fp(f);
+    let provenance = crate::bot::provenance::provenance_line(f);
 
     let mut body = format!(
-        "**{title}** · {badge}\n\n{why}\n\n**Fix:** {action}\n\n---\n`fingerprint: {fp}` · dismiss with `@codasaurus ignore {fp}`"
+        "**{title}** · {badge}\n\n\
+         {why}\n\n\
+         **Fix:** {action}\n\n\
+         <details>\n<summary>Provenance</summary>\n\n{provenance}\n\n</details>\n\n\
+         ---\n\
+         <sub>`fingerprint: {fp}` · `@codasaurus ignore {fp}`</sub>"
     );
 
     if let Some(ref code) = f.codemod {
@@ -56,6 +85,8 @@ fn finding_title(f: &Finding) -> String {
         "graph" => "Unused code".into(),
         "guidelines" => "Guideline violation".into(),
         "slop" => "AI-generated PR signals".into(),
+        "iac" => "Infrastructure risk".into(),
+        "policy" => "Policy pack violation".into(),
         other => other.replace('-', " "),
     }
 }
@@ -76,12 +107,11 @@ fn finding_why(f: &Finding) -> String {
         "todo-leaks" => {
             "A `TODO` / `FIXME` marker was committed. Finish the work or remove the marker before merge.".into()
         }
-        "vulnerabilities" => f.message.clone(),
+        "vulnerabilities" => redact_secrets(&f.message),
         other => {
             if f.message.trim().is_empty() {
                 format!("Detected by `{other}`.")
             } else {
-                // Redact obvious secret-looking spans in messages
                 redact_secrets(&f.message)
             }
         }
@@ -98,6 +128,8 @@ fn finding_action(f: &Finding) -> String {
             "secrets" => "Remove the secret, rotate it, and load from the environment.".into(),
             "phantom-deps" => "Add the package to the project manifest.".into(),
             "todo-leaks" => "Complete the implementation or delete the marker.".into(),
+            "vulnerabilities" => "Upgrade to a patched version or remove the dependency.".into(),
+            "iac" => "Tighten the privilege / network exposure before merge.".into(),
             _ => "Address this finding before merge.".into(),
         })
 }
@@ -139,6 +171,16 @@ pub fn redact_secrets(s: &str) -> String {
     out.trim_end().to_string()
 }
 
+/// Optional walkthrough sections (blast radius, dep delta, agent badge, …).
+#[derive(Debug, Clone, Default)]
+pub struct WalkthroughExtras<'a> {
+    pub related_prs: &'a [String],
+    pub issue_assessment_md: &'a str,
+    pub agent_badge: Option<&'a str>,
+    pub blast_md: &'a str,
+    pub dep_delta_md: &'a str,
+}
+
 /// Build the main walkthrough / summary comment body.
 #[allow(clippy::too_many_arguments, dead_code)]
 pub fn walkthrough_body(
@@ -162,12 +204,11 @@ pub fn walkthrough_body(
         runtime,
         include_brand_gif,
         include_mermaid,
-        &[],
-        "",
+        WalkthroughExtras::default(),
     )
 }
 
-/// Extended walkthrough with related PRs + linked-issue assessment markdown.
+/// Extended walkthrough with related PRs + novelty sections.
 #[allow(clippy::too_many_arguments)]
 pub fn walkthrough_body_ext(
     findings: &Findings,
@@ -179,39 +220,48 @@ pub fn walkthrough_body_ext(
     runtime: &BotRuntimeConfig,
     include_brand_gif: bool,
     include_mermaid: bool,
-    related_prs: &[String],
-    issue_assessment_md: &str,
+    extras: WalkthroughExtras<'_>,
 ) -> String {
+    let related_prs = extras.related_prs;
+    let issue_assessment_md = extras.issue_assessment_md;
     let counts = findings.count_by_severity();
     let blocking = *counts.get("blocking").unwrap_or(&0);
     let warning = *counts.get("warning").unwrap_or(&0);
     let info = *counts.get("info").unwrap_or(&0);
     let total = findings.findings.len();
 
-    let verdict = if findings.is_empty() {
-        "**Verdict:** ship"
+    let (verdict_label, verdict_detail) = if findings.is_empty() {
+        ("ship", "No findings — ready to merge.")
     } else if has_blocking {
-        "**Verdict:** hold — blocking findings"
+        ("hold", "Blocking findings must be fixed or dismissed.")
     } else {
-        "**Verdict:** fix-before-ship"
+        ("fix-before-ship", "Non-blocking findings remain — review before merge.")
     };
 
-    let mut body = String::new();
+    let mut body = String::with_capacity(2048);
 
     if include_brand_gif && runtime.max_inline_comments > 0 {
-        let _ = writeln!(body, "<sub>Codasaurus review</sub>\n");
+        let _ = writeln!(body, "<sub>Codasaurus · self-hosted PR review</sub>\n");
     }
 
     let _ = writeln!(body, "### Codasaurus review\n");
-    let _ = writeln!(body, "{verdict}\n");
+    if let Some(badge) = extras.agent_badge {
+        let _ = writeln!(body, "{badge}\n");
+    }
     let _ = writeln!(
         body,
-        "| Severity | Count |\n| --- | ---: |\n| blocking | {blocking} |\n| warning | {warning} |\n| info | {info} |\n| **total** | **{total}** |\n"
+        "> **Verdict:** `{verdict_label}` — {verdict_detail}\n"
+    );
+    let _ = writeln!(
+        body,
+        "| | Blocking | Warning | Info | Total |\n\
+         | --- | ---: | ---: | ---: | ---: |\n\
+         | Findings | **{blocking}** | {warning} | {info} | {total} |\n"
     );
 
-    let _ = writeln!(body, "<details>");
+    let _ = writeln!(body, "<details open>");
     let _ = writeln!(body, "<summary><strong>Walkthrough</strong></summary>\n");
-    let _ = writeln!(body, "PR: _{}_\n", escape_md(pr_title));
+    let _ = writeln!(body, "**PR:** {}\n", escape_md(pr_title));
 
     if include_mermaid {
         if let Some(diagram) = mermaid_change_flow(files) {
@@ -221,6 +271,17 @@ pub fn walkthrough_body_ext(
 
     if !issue_assessment_md.is_empty() {
         body.push_str(issue_assessment_md);
+        if !issue_assessment_md.ends_with('\n') {
+            body.push('\n');
+        }
+    }
+
+    if !extras.blast_md.is_empty() {
+        body.push_str(extras.blast_md);
+    }
+
+    if !extras.dep_delta_md.is_empty() {
+        body.push_str(extras.dep_delta_md);
     }
 
     if !related_prs.is_empty() {
@@ -237,10 +298,14 @@ pub fn walkthrough_body_ext(
     for file in files.iter().take(40) {
         let name = file["filename"].as_str().unwrap_or("?");
         let status = file["status"].as_str().unwrap_or("modified");
-        let _ = writeln!(body, "| `{name}` | {status} |");
+        let _ = writeln!(body, "| `{name}` | `{status}` |");
     }
     if files.len() > 40 {
-        let _ = writeln!(body, "| … | {} more |", files.len() - 40);
+        let _ = writeln!(
+            body,
+            "| _…_ | _{} more_ |",
+            files.len() - 40
+        );
     }
     let _ = writeln!(body);
 
@@ -248,19 +313,22 @@ pub fn walkthrough_body_ext(
         let _ = writeln!(body, "#### Findings\n");
         for f in findings.findings.iter().take(30) {
             let fp = short_fp(f);
+            let loc = if f.line > 0 {
+                format!("`{}:{}`", f.file, f.line)
+            } else {
+                format!("`{}`", f.file)
+            };
             let _ = writeln!(
                 body,
-                "- {} {} — `{}:{}` — `{fp}`",
+                "- {} **{}** — {loc} · `{fp}`",
                 severity_badge(f.severity),
                 finding_title(f),
-                f.file,
-                f.line
             );
         }
         if findings.findings.len() > 30 {
             let _ = writeln!(
                 body,
-                "\n_{} more findings omitted from walkthrough._",
+                "\n_{} more findings omitted — see inline comments._",
                 findings.findings.len() - 30
             );
         }
@@ -296,25 +364,7 @@ pub fn walkthrough_body_ext(
     }
 
     let _ = writeln!(body, "</details>\n");
-
-    let _ = writeln!(
-        body,
-        "<details><summary>Commands</summary>\n\n\
-         - `@codasaurus review` — re-run review\n\
-         - `@codasaurus describe` — PR summary / walkthrough\n\
-         - `@codasaurus summarize` — short executive summary\n\
-         - `@codasaurus improve` — actionable suggestions\n\
-         - `@codasaurus security` — secrets / vuln-focused scan\n\
-         - `@codasaurus labels` — suggest and apply labels\n\
-         - `@codasaurus changelog` / `update_changelog` — Keep a Changelog draft\n\
-         - `@codasaurus add_docs` — docs stubs\n\
-         - `@codasaurus similar` — related PRs by path history\n\
-         - `@codasaurus fix` — apply available codemods (opt-in)\n\
-         - `@codasaurus ask <question>` — ask about this PR\n\
-         - `@codasaurus ignore <fingerprint>` — dismiss a finding\n\
-         - `@codasaurus help` — show commands\n\n\
-         </details>"
-    );
+    body.push_str(&commands_details());
 
     if body.len() > runtime.max_comment_bytes {
         truncate_utf8_owned(&mut body, runtime.max_comment_bytes);
@@ -323,31 +373,65 @@ pub fn walkthrough_body_ext(
 }
 
 pub fn clean_approve_body() -> String {
-    "### Codasaurus review\n\n**Verdict:** ship\n\nNo issues found.".into()
+    clean_approve_body_ext(None, "", "")
+}
+
+/// Clean APPROVE body with optional novelty sections (agent / blast / dep-delta).
+pub fn clean_approve_body_ext(
+    agent_badge: Option<&str>,
+    blast_md: &str,
+    dep_delta_md: &str,
+) -> String {
+    let mut body = String::from(
+        "### Codasaurus review\n\n\
+         > **Verdict:** `ship` — No findings.\n\n\
+         Tier-1 detectors found nothing to block. You're clear to merge.\n\n",
+    );
+    if let Some(badge) = agent_badge.filter(|s| !s.is_empty()) {
+        body.push_str(badge);
+        body.push('\n');
+    }
+    if !blast_md.is_empty() {
+        body.push_str(blast_md);
+        if !blast_md.ends_with('\n') {
+            body.push('\n');
+        }
+    }
+    if !dep_delta_md.is_empty() {
+        body.push_str(dep_delta_md);
+        if !dep_delta_md.ends_with('\n') {
+            body.push('\n');
+        }
+    }
+    body.push_str(&commands_details());
+    body
 }
 
 pub fn help_body() -> String {
     "### Codasaurus commands\n\n\
+     Mention `@codasaurus` on a PR comment:\n\n\
      | Command | What it does |\n\
      | --- | --- |\n\
-     | `@codasaurus review` | Run static (+ optional LLM) review |\n\
-     | `@codasaurus describe` | Generate PR walkthrough / summary |\n\
-     | `@codasaurus summarize` | Short PR summary |\n\
-     | `@codasaurus improve` | Post actionable improvement suggestions |\n\
-     | `@codasaurus security` | Secrets / vuln-focused scan |\n\
-     | `@codasaurus labels` | Suggest and apply PR labels |\n\
-     | `@codasaurus changelog` / `update_changelog` | Draft a Keep a Changelog section |\n\
-     | `@codasaurus add_docs` | Suggest README/docs stubs for this PR |\n\
-     | `@codasaurus similar` | Related PRs by path history |\n\
-     | `@codasaurus fix` | Apply available codemods (opt-in) |\n\
-     | `@codasaurus ask …` | Answer a question about this PR |\n\
-     | `@codasaurus ignore <fp>` | Dismiss a finding by fingerprint |\n\
-     | `@codasaurus help` | Show this help |\n"
+     | `review` | Static (+ optional LLM) review |\n\
+     | `describe` | Walkthrough / PR summary |\n\
+     | `summarize` | Short executive summary |\n\
+     | `improve` | Actionable improvement suggestions |\n\
+     | `security` | Secrets / vuln-focused scan |\n\
+     | `labels` | Suggest and apply PR labels |\n\
+     | `changelog` / `update_changelog` | Keep a Changelog draft |\n\
+     | `add_docs` | README / docs stubs |\n\
+     | `similar` | Related PRs by path history |\n\
+     | `impact` | Blast-radius estimate |\n\
+     | `fix` | Apply available codemods (opt-in) |\n\
+     | `ask …` | Answer a question about this PR |\n\
+     | `ignore <fp>` | Dismiss a finding by fingerprint |\n\
+     | `help` | Show this help |\n\n\
+     <sub>Self-hosted · BYOK · fail-closed offline mode</sub>\n"
         .into()
 }
 
 fn escape_md(s: &str) -> String {
-    s.replace('|', "\\|").replace('\n', " ")
+    s.replace('|', "\\|").replace('\n', " ").replace('*', "\\*")
 }
 
 /// Compact mermaid flowchart of top path prefixes (shown when LLM is on).
@@ -391,12 +475,12 @@ fn truncate_utf8_owned(s: &mut String, max_bytes: usize) {
     if s.len() <= max_bytes {
         return;
     }
-    let mut idx = max_bytes.saturating_sub(20);
+    let mut idx = max_bytes.saturating_sub(40);
     while !s.is_char_boundary(idx) {
         idx -= 1;
     }
     s.truncate(idx);
-    s.push_str("\n\n_…truncated_");
+    s.push_str("\n\n---\n_…truncated — re-run `@codasaurus review` for the full comment._");
 }
 
 #[cfg(test)]
@@ -423,5 +507,30 @@ mod tests {
             codemod: None,
         };
         assert_eq!(short_fp(&f).len(), 12);
+    }
+
+    #[test]
+    fn inline_includes_provenance_details() {
+        let f = Finding {
+            detector: "secrets".into(),
+            severity: "blocking",
+            file: "a.rs".into(),
+            line: 1,
+            column: 0,
+            message: "key".into(),
+            suggestion: None,
+            evidence: Some("AKIA".into()),
+            codemod: None,
+        };
+        let body = inline_finding_comment(&f);
+        assert!(body.contains("<details>"));
+        assert!(body.contains("Provenance"));
+        assert!(body.contains("@codasaurus ignore"));
+    }
+
+    #[test]
+    fn help_lists_impact() {
+        assert!(help_body().contains("impact"));
+        assert!(commands_details().contains("`@codasaurus impact`"));
     }
 }

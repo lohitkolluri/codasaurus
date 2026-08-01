@@ -5,13 +5,18 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 mod auth;
+pub(crate) mod agent_mode;
+pub(crate) mod blast;
 mod codeowners;
 mod commands;
+pub(crate) mod dep_delta;
 mod github_extra;
 pub(crate) mod github_files;
 mod issue_assessment;
 pub(crate) mod markdown;
+pub(crate) mod offline;
 mod policy;
+pub(crate) mod provenance;
 mod quality;
 pub(crate) use quality::{apply_signal_budget, SignalBudget};
 pub mod queue;

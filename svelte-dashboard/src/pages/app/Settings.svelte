@@ -53,6 +53,7 @@
   let customInstructions = $state("");
   let updatePrDescription = $state(false);
   let allowAutoFix = $state(false);
+  let offlineMode = $state(false);
   let policySaving = $state(false);
   let policyMsg = $state("");
   let learnedRules = $state([]);
@@ -121,6 +122,9 @@
       customInstructions = data.custom_instructions ?? "";
       updatePrDescription = data.update_pr_description === "true";
       allowAutoFix = data.allow_auto_fix === "true";
+      offlineMode = ["true", "1", "yes", "on"].includes(
+        String(data.offline_mode ?? "").toLowerCase()
+      );
       try {
         const lr = await api.get("/api/learning/rules");
         learnedRules = lr.rules || [];
@@ -184,6 +188,7 @@
         api.put("/api/settings/custom_instructions", { value: customInstructions }),
         api.put("/api/settings/update_pr_description", { value: updatePrDescription ? "true" : "false" }),
         api.put("/api/settings/allow_auto_fix", { value: allowAutoFix ? "true" : "false" }),
+        api.put("/api/settings/offline_mode", { value: offlineMode ? "true" : "false" }),
       ];
       const results = await Promise.allSettled(updates);
       const failed = results.filter(r => r.status === "rejected");
@@ -214,7 +219,15 @@
         <ErrorState message={error} />
       {:else if loading}
       {:else}
-        <div class="card">
+        <div class="page-toolbar compact">
+          <div>
+            <p class="eyebrow">Control plane</p>
+            <h1 class="page-title">Settings</h1>
+            <p class="page-description">LLM, detectors, policy pack, offline mode, and learned rules.</p>
+          </div>
+        </div>
+        <div class="settings-stack">
+        <div class="card settings-card">
           <h3 class="section-heading">LLM Configuration</h3>
           <div class="form-group">
             <label for="llm-provider">Provider</label>
@@ -267,7 +280,7 @@
           </div>
         </div>
 
-        <div class="card">
+        <div class="card settings-card">
           <h3 class="section-heading">Detectors</h3>
           <div class="detector-list">
             {#each Object.entries(detectorToggles) as [key, val]}
@@ -290,7 +303,7 @@
           </div>
         </div>
 
-        <div class="card">
+        <div class="card settings-card">
           <h3 class="section-heading">Default Severity</h3>
           <div class="form-group">
             <label for="default-severity">Minimum severity to surface</label>
@@ -306,7 +319,7 @@
           </div>
         </div>
 
-        <div class="card">
+        <div class="card settings-card">
           <h3 class="section-heading">Policy pack</h3>
           <div class="form-group">
             <label for="max-warnings">Max warnings (soft cap)</label>
@@ -375,6 +388,17 @@
               </div>
             </label>
           </div>
+          <div class="detector-row" style="border:none;padding:8px 0">
+            <span>Offline / air-gap mode (fail-closed: no LLM, registry cache-only)</span>
+            <label class="toggle">
+              <div class="toggle-track" class:on={offlineMode} role="checkbox" aria-checked={offlineMode}
+                tabindex="0"
+                onclick={() => (offlineMode = !offlineMode)}
+                onkeydown={(e) => { if (e.key === 'Enter') offlineMode = !offlineMode; }}>
+                <div class="toggle-knob"></div>
+              </div>
+            </label>
+          </div>
           <div class="form-group">
             <label for="exclude-patterns">Exclude path patterns (comma-separated)</label>
             <input id="exclude-patterns" type="text" bind:value={excludePatterns} placeholder="vendor/,*.lock,dist/" />
@@ -389,7 +413,7 @@
           </div>
         </div>
 
-        <div class="card">
+        <div class="card settings-card">
           <h3 class="section-heading">Learned rules</h3>
           {#if learnedRules.length === 0}
             <p class="empty-note">No learned ignore rules yet. Dismiss findings to teach Codasaurus.</p>
@@ -409,30 +433,81 @@
           {/if}
           {#if rulesMsg}<p class="save-msg" class:error={rulesMsg !== "Rule deleted"}>{rulesMsg}</p>{/if}
         </div>
+        </div>
       {/if}
     </div>
   </div>
 </div>
 
 <style>
-  .section-heading { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
-  .card { margin-bottom: 20px; }
-  .card:last-child { margin-bottom: 0; }
-  .save-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
-  .save-msg { font-size: 13px; color: var(--success); }
-  .save-msg.error { color: var(--error); }
-  .detector-list { max-height: 320px; overflow-y: scroll; direction: rtl; margin: 0 -24px; padding: 0 24px; scrollbar-width: thin; scrollbar-color: var(--text-muted) var(--bg-secondary); }
+  .detector-list {
+    max-height: 320px;
+    overflow-y: auto;
+    margin: 0 -24px;
+    padding: 0 24px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-muted) var(--bg-secondary);
+  }
   .detector-list::-webkit-scrollbar { width: 6px; }
   .detector-list::-webkit-scrollbar-track { background: var(--bg-secondary); border-radius: 3px; }
   .detector-list::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 3px; }
-  .detector-row { direction: ltr; display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border-light); font-size: 14px; }
+  .detector-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-light);
+    font-size: 14px;
+  }
   .detector-row:last-child { border-bottom: none; }
   .search-wrap { position: relative; }
-  .search-dropdown { position: absolute; top: 100%; left: 0; right: 0; z-index: 20; max-height: 240px; overflow-y: auto; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; margin-top: 4px; box-shadow: var(--shadow-md); }
-  .search-item { display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; border-radius: 0; background: none; font-size: 13px; font-family: var(--font-mono); color: var(--text-primary); cursor: pointer; }
+  .search-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    max-height: 240px;
+    overflow-y: auto;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-top: 4px;
+    box-shadow: var(--shadow-md);
+  }
+  .search-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 0;
+    background: none;
+    font-size: 13px;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    cursor: pointer;
+  }
   .search-item:hover, .search-item.active { background: var(--bg-secondary); }
   .empty-note { font-size: 13px; color: var(--text-muted); }
   .muted { font-size: 12px; color: var(--text-muted); }
-  .linkish { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 13px; }
-  textarea { width: 100%; font-family: inherit; font-size: 13px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary); color: var(--text-primary); }
+  .linkish {
+    background: none;
+    border: none;
+    color: var(--accent-soft);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 4px 8px;
+  }
+  .linkish:hover { text-decoration: underline; }
+  textarea {
+    width: 100%;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+  }
 </style>

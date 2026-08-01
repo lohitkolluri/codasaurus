@@ -25,6 +25,7 @@ pub(crate) enum BotCommand {
     AddDocs,
     Similar,
     Fix,
+    Impact,
     Ask(String),
     Ignore(Option<String>),
     Help,
@@ -47,6 +48,9 @@ pub(crate) fn parse_bot_command(body: &str) -> Option<BotCommand> {
     }
     if lower.contains("similar") || lower.contains("related_prs") || lower.contains("related-prs") {
         return Some(BotCommand::Similar);
+    }
+    if lower.contains("impact") || lower.contains("blast-radius") || lower.contains("blast_radius") {
+        return Some(BotCommand::Impact);
     }
     if lower.contains("@codasaurus fix")
         || lower.contains("@codasaurus-bot fix")
@@ -149,6 +153,7 @@ pub(crate) async fn handle_bot_command(
         BotCommand::AddDocs => spawn_add_docs(ctx, pr_number, timeout_secs).await,
         BotCommand::Similar => spawn_similar(ctx, pr_number, timeout_secs).await,
         BotCommand::Fix => spawn_fix(ctx, pr_number, timeout_secs).await,
+        BotCommand::Impact => spawn_impact(ctx, pr_number, timeout_secs).await,
     }
 }
 
@@ -197,16 +202,21 @@ async fn spawn_describe(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) 
             .unwrap_or_default();
         let text = if let Some(llm) = crate::llm::LlmConfig::from_db_or_env(pool).await {
             match crate::llm::describe_pr(title, body, &files_hint, &llm).await {
-                Ok(s) => format!("### Codasaurus describe\n\n{s}"),
+                Ok(s) => format!(
+                    "### Codasaurus describe\n\n{s}\n\n---\n{}",
+                    crate::bot::markdown::commands_details()
+                ),
                 Err(e) => format!(
-                    "### Codasaurus describe\n\n**{title}**\n\n{}\n\n_LLM unavailable: {e}_",
-                    body.chars().take(500).collect::<String>()
+                    "### Codasaurus describe\n\n**{title}**\n\n{}\n\n> LLM unavailable: `{e}`\n\n---\n{}",
+                    body.chars().take(500).collect::<String>(),
+                    crate::bot::markdown::commands_details()
                 ),
             }
         } else {
             format!(
-                "### Codasaurus describe\n\n**Title:** {title}\n\n{}\n\n_Configure an LLM key for richer summaries._",
-                body.chars().take(800).collect::<String>()
+                "### Codasaurus describe\n\n**{title}**\n\n{}\n\n> Configure an LLM key for richer summaries.\n\n---\n{}",
+                body.chars().take(800).collect::<String>(),
+                crate::bot::markdown::commands_details()
             )
         };
         post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await?;
@@ -341,6 +351,27 @@ async fn spawn_improve(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
         };
 
         let output = crate::llm::review_diff(&diff, &llm, Some(&review_ctx)).await?;
+        let known_paths: Vec<String> = files
+            .iter()
+            .filter_map(|f| f["filename"].as_str().map(str::to_string))
+            .collect();
+        let file_contents: Vec<(String, String)> = files
+            .iter()
+            .filter_map(|f| {
+                let name = f["filename"].as_str()?.to_string();
+                let patch = f["patch"].as_str().unwrap_or("").to_string();
+                if patch.is_empty() {
+                    None
+                } else {
+                    Some((name, patch))
+                }
+            })
+            .collect();
+        let issues = crate::bot::provenance::reverify_llm_issues(
+            &output.issues,
+            &known_paths,
+            &file_contents,
+        );
         let mut text = String::from("### Codasaurus improve\n\n");
         if let Some(summary) = output.summary.as_deref().filter(|s| !s.is_empty()) {
             let _ = std::fmt::Write::write_fmt(&mut text, format_args!("{summary}\n\n"));
@@ -350,11 +381,13 @@ async fn spawn_improve(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
                 format_args!("**Verdict:** {}\n\n", output.verdict),
             );
         }
-        if output.issues.is_empty() {
-            text.push_str("_No improvement suggestions from the model._\n");
+        if issues.is_empty() {
+            text.push_str("> No improvement suggestions after path re-verify.\n");
         } else {
-            text.push_str("| File | Line | Severity | Suggestion |\n| --- | ---: | --- | --- |\n");
-            for issue in output.issues.iter().take(20) {
+            text.push_str(
+                "| File | Line | Severity | Suggestion | Source |\n| --- | ---: | --- | --- | --- |\n",
+            );
+            for issue in issues.iter().take(20) {
                 let sev = &issue.severity;
                 let sug = issue
                     .suggestion
@@ -366,13 +399,15 @@ async fn spawn_improve(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
                     .collect::<String>();
                 let _ = std::fmt::Write::write_fmt(
                     &mut text,
-                    format_args!("| `{}` | {} | `{sev}` | {sug} |\n", issue.file, issue.line),
+                    format_args!(
+                        "| `{}` | {} | `{sev}` | {sug} | `llm` |\n",
+                        issue.file, issue.line
+                    ),
                 );
             }
         }
-        text.push_str(
-            "\n<details><summary>Commands</summary>\n\n`@codasaurus review` · `@codasaurus ask …`\n\n</details>",
-        );
+        text.push('\n');
+        text.push_str(&crate::bot::markdown::commands_details());
         post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await?;
         Ok(())
     })
@@ -410,7 +445,10 @@ async fn spawn_ask(ctx: WebhookContext, pr_number: i64, question: String, timeou
         } else {
             "Configure an LLM API key to use `@codasaurus ask`.".into()
         };
-        let text = format!("### Codasaurus ask\n\n> {question}\n\n{answer}");
+        let text = format!(
+            "### Codasaurus ask\n\n**Question**\n\n> {question}\n\n**Answer**\n\n{answer}\n\n---\n{}",
+            crate::bot::markdown::commands_details()
+        );
         post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
     })
     .await;
@@ -466,15 +504,18 @@ async fn spawn_summarize(ctx: WebhookContext, pr_number: i64, timeout_secs: u64)
             )
             .await
             {
-                Ok(s) => format!("### Codasaurus summarize\n\n{s}"),
+                Ok(s) => format!(
+                    "### Codasaurus summarize\n\n{s}\n\n---\n{}",
+                    crate::bot::markdown::commands_details()
+                ),
                 Err(e) => format!(
-                    "### Codasaurus summarize\n\n**{title}**\n\n{}\n\n_LLM unavailable: {e}_",
+                    "### Codasaurus summarize\n\n**{title}**\n\n{}\n\n> LLM unavailable: `{e}`",
                     body.chars().take(400).collect::<String>()
                 ),
             }
         } else {
             format!(
-                "### Codasaurus summarize\n\n**{title}**\n\n{}",
+                "### Codasaurus summarize\n\n**{title}**\n\n{}\n\n> Configure an LLM key for richer summaries.",
                 body.chars().take(600).collect::<String>()
             )
         };
@@ -525,12 +566,16 @@ async fn spawn_labels(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
         github_extra::apply_labels(&client, &headers, &ctx.repo_full_name, pr_number, &labels)
             .await?;
         let text = format!(
-            "### Codasaurus labels\n\nApplied: {}\n\n_Based on changed paths._",
-            labels
-                .iter()
-                .map(|l| format!("`{l}`"))
-                .collect::<Vec<_>>()
-                .join(", ")
+            "### Codasaurus labels\n\n**Applied**\n\n{}\n\n<sub>Suggested from changed paths.</sub>",
+            if labels.is_empty() {
+                "_No labels suggested._".into()
+            } else {
+                labels
+                    .iter()
+                    .map(|l| format!("- `{l}`"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
         );
         post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
     })
@@ -611,7 +656,7 @@ async fn spawn_changelog(ctx: WebhookContext, pr_number: i64, timeout_secs: u64)
         };
 
         let text = format!(
-            "### Codasaurus changelog\n\n{sections}\n\n<details><summary>Files</summary>\n\n{file_list}\n\n</details>"
+            "### Codasaurus changelog\n\n{sections}\n\n<details>\n<summary><strong>Files</strong></summary>\n\n{file_list}\n\n</details>\n\n<sub>Draft only — paste into CHANGELOG.md as needed.</sub>"
         );
         post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
     })
@@ -682,13 +727,17 @@ async fn spawn_add_docs(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) 
                  for public APIs or behavior changes. Output markdown stubs only — do not claim files were committed."
             );
             match crate::llm::describe_pr(title, body, &ctx_text, &llm).await {
-                Ok(s) => format!("### Codasaurus add_docs\n\n{s}\n\n_Suggestions only — not auto-committed._"),
-                Err(e) => format!("### Codasaurus add_docs\n\nCould not generate docs suggestions: {e}"),
+                Ok(s) => format!(
+                    "### Codasaurus add_docs\n\n{s}\n\n> Suggestions only — not auto-committed.\n"
+                ),
+                Err(e) => format!(
+                    "### Codasaurus add_docs\n\nCould not generate docs suggestions: `{e}`\n"
+                ),
             }
         } else {
             format!(
                 "### Codasaurus add_docs\n\n**{title}**\n\nChanged paths:\n```\n{files_hint}\n```\n\n\
-                 Configure an LLM key for drafted README/docs stubs."
+                 > Configure an LLM key for drafted README/docs stubs.\n"
             )
         };
         post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
@@ -748,7 +797,21 @@ async fn spawn_security(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) 
         }
 
         let mut findings = crate::detectors::security::detect_secrets(&parsed);
-        findings.extend(crate::detectors::vulnerabilities::detect(&parsed));
+        // Honor offline / air-gap before OSV / registry egress.
+        let offline = if let Some(pool) = crate::bot::CONFIG_POOL.get() {
+            let db_off = crate::db::config::get_config(pool, "offline_mode")
+                .await
+                .ok()
+                .flatten();
+            let on = crate::bot::offline::offline_mode_from_env_and_db(db_off.as_deref());
+            crate::registry::set_offline_mode(on);
+            on
+        } else {
+            crate::bot::offline::offline_mode_from_env_and_db(None)
+        };
+        if !offline {
+            findings.extend(crate::detectors::vulnerabilities::detect(&parsed));
+        }
         findings.retain(|f| {
             matches!(
                 f.detector.as_str(),
@@ -758,9 +821,11 @@ async fn spawn_security(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) 
 
         let mut text = String::from("### Codasaurus security\n\n");
         if findings.is_empty() {
-            text.push_str("No secrets or known vulnerability signals in the scanned diff.\n");
+            text.push_str(
+                "> **Clean** — no secrets or known vulnerability signals in the scanned diff.\n",
+            );
         } else {
-            text.push_str("| Severity | Detector | File | Message |\n| --- | --- | --- | --- |\n");
+            text.push_str("| Severity | Detector | Location | Message |\n| --- | --- | --- | --- |\n");
             for f in findings.iter().take(25) {
                 let msg = f.message.replace('|', "\\|").chars().take(120).collect::<String>();
                 let _ = std::fmt::Write::write_fmt(
@@ -772,7 +837,8 @@ async fn spawn_security(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) 
                 );
             }
         }
-        text.push_str("\n_Run `@codasaurus review` for the full detector suite._");
+        text.push_str("\n---\n");
+        text.push_str(&crate::bot::markdown::commands_details());
         post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
     })
     .await;
@@ -849,15 +915,15 @@ async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64, fingerprint: 
                     .dismiss_fingerprint(fp, "manual", &ctx.repo_full_name, "dismissed via comment")
                     .await?;
                 format!(
-                    "### Dismissed\n\nFinding `{fp}` will be filtered on future reviews."
+                    "### Codasaurus dismiss\n\nFinding `{fp}` will be filtered on future reviews.\n\n<sub>`@codasaurus help`</sub>"
                 )
             } else {
                 format!(
-                    "### Could not dismiss\n\nDatabase unavailable — could not persist `{fp}`."
+                    "### Codasaurus dismiss\n\nDatabase unavailable — could not persist `{fp}`."
                 )
             }
         } else {
-            "### Ignore\n\nReply with `@codasaurus ignore <fingerprint>` (see the fingerprint on each finding comment)."
+            "### Codasaurus dismiss\n\nReply with `@codasaurus ignore <fingerprint>` (see each finding comment).\n"
                 .to_string()
         };
 
@@ -881,6 +947,93 @@ async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64, fingerprint: 
         Ok(Ok(())) => tracing::info!(pr = pr_number, "ignore command handled"),
         Ok(Err(e)) => tracing::error!(pr = pr_number, error = %e, "ignore command failed"),
         Err(_) => tracing::error!(pr = pr_number, "ignore command timed out"),
+    }
+}
+
+async fn spawn_impact(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
+    let Ok(_permit) = REVIEW_PERMITS.acquire().await else {
+        tracing::error!("review semaphore closed");
+        return;
+    };
+    match timeout(Duration::from_secs(timeout_secs), async move {
+        let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(45))
+            .build()?;
+        let auth = format!("Bearer {token}");
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::AUTHORIZATION,
+            reqwest::header::HeaderValue::from_str(&auth)?,
+        );
+        headers.insert(
+            reqwest::header::ACCEPT,
+            reqwest::header::HeaderValue::from_static("application/vnd.github+json"),
+        );
+        headers.insert(
+            reqwest::header::USER_AGENT,
+            reqwest::header::HeaderValue::from_static(USER_AGENT),
+        );
+        let url = format!(
+            "https://api.github.com/repos/{}/pulls/{pr_number}/files?per_page=100",
+            ctx.repo_full_name
+        );
+        let files: Vec<serde_json::Value> = client
+            .get(&url)
+            .headers(headers)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await
+            .unwrap_or_default();
+        let changed_paths: Vec<String> = files
+            .iter()
+            .filter_map(|f| f["filename"].as_str().map(str::to_string))
+            .collect();
+        let mut parsed = Vec::new();
+        for f in &files {
+            let name = f["filename"].as_str().unwrap_or("");
+            let patch = f["patch"].as_str().unwrap_or("");
+            if name.is_empty() || patch.is_empty() {
+                continue;
+            }
+            // Reconstruct approximate file content from added lines for import graph.
+            let mut content = String::new();
+            for line in patch.lines() {
+                if let Some(rest) = line.strip_prefix('+').filter(|l| !l.starts_with("++")) {
+                    content.push_str(rest);
+                    content.push('\n');
+                } else if !line.starts_with('-') && !line.starts_with('\\') && !line.starts_with('@')
+                {
+                    content.push_str(line);
+                    content.push('\n');
+                }
+            }
+            if let Ok(p) = crate::parser::parse_file(name, &content) {
+                parsed.push(p);
+            }
+        }
+        let report = crate::bot::blast::estimate_blast_radius(&parsed, &changed_paths);
+        let mut text = String::from("### Codasaurus impact\n\n");
+        let card = crate::bot::blast::blast_markdown(&report);
+        if card.is_empty() {
+            text.push_str(
+                "> **Low impact** — no high-fan-in or high-sensitivity path signals from PR imports.\n",
+            );
+        } else {
+            text.push_str(&card);
+        }
+        text.push_str("\n---\n");
+        text.push_str(&crate::bot::markdown::commands_details());
+        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await?;
+        Ok::<_, anyhow::Error>(())
+    })
+    .await
+    {
+        Ok(Ok(())) => tracing::info!(pr = pr_number, "impact completed"),
+        Ok(Err(e)) => tracing::error!(pr = pr_number, error = %e, "impact failed"),
+        Err(_) => tracing::error!(pr = pr_number, "impact timed out"),
     }
 }
 
@@ -919,12 +1072,15 @@ async fn spawn_similar(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
         .await
         .unwrap_or_default();
         let text = if related.is_empty() {
-            "### Codasaurus similar\n\nNo related PRs found for these paths.".into()
+            "### Codasaurus similar\n\n> No related PRs found for these paths.\n".into()
         } else {
-            let mut body = String::from("### Codasaurus similar\n\nPRs that recently touched the same paths:\n\n");
+            let mut body = String::from(
+                "### Codasaurus similar\n\nPRs that recently touched the same paths:\n\n",
+            );
             for r in &related {
                 body.push_str(&format!("- {r}\n"));
             }
+            body.push_str("\n<sub>Ranked by shared path history (budgeted).</sub>\n");
             body
         };
         post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
@@ -990,7 +1146,7 @@ async fn spawn_fix(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
                 &get_installation_token(&ctx.cfg, ctx.inst_id).await?,
                 &ctx.repo_full_name,
                 pr_number,
-                "### Codasaurus fix\n\nAuto-fix is disabled. Enable `allow_auto_fix` in Settings or repo `config_json`.",
+                "### Codasaurus fix\n\n> Auto-fix is disabled.\n\nEnable `allow_auto_fix` in Settings or repo `config_json`.",
             )
             .await?;
             return Ok(());
@@ -1063,7 +1219,7 @@ async fn spawn_fix(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
                 &token,
                 &ctx.repo_full_name,
                 pr_number,
-                "### Codasaurus fix\n\nNo applyable codemods found on this PR (enable stale-api / findings with replacements).",
+                "### Codasaurus fix\n\n> No applyable codemods on this PR.\n\nEnable detectors that emit replacements (e.g. stale-api), then re-run review.",
             )
             .await?;
             return Ok(());
@@ -1128,12 +1284,12 @@ async fn spawn_fix(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
         }
 
         let text = if applied.is_empty() {
-            "### Codasaurus fix\n\nCould not apply codemods (file fetch/update failed).".into()
+            "### Codasaurus fix\n\n> Could not apply codemods (file fetch/update failed).\n".into()
         } else {
             format!(
-                "### Codasaurus fix\n\nApplied {} change(s) on `{head_ref}`:\n\n{}",
+                "### Codasaurus fix\n\nApplied **{}** change(s) on `{head_ref}`:\n\n{}\n\n<sub>Review the commit before merging.</sub>",
                 applied.len(),
-                applied.iter().map(|s| format!("- {s}")).collect::<Vec<_>>().join("\n")
+                applied.iter().map(|s| format!("- `{s}`")).collect::<Vec<_>>().join("\n")
             )
         };
         post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
@@ -1190,6 +1346,10 @@ mod tests {
         assert!(matches!(
             parse_bot_command("@codasaurus similar"),
             Some(BotCommand::Similar)
+        ));
+        assert!(matches!(
+            parse_bot_command("@codasaurus impact"),
+            Some(BotCommand::Impact)
         ));
         assert!(matches!(
             parse_bot_command("@codasaurus fix"),

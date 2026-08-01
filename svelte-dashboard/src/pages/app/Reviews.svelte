@@ -114,7 +114,11 @@
       {#if error}
         <ErrorState message={error} />
       {:else if loading}
-        <!-- spinner shown -->
+        <div class="stats-skeleton" aria-hidden="true">
+          {#each Array(3) as _}
+            <div class="skel-card skeleton" style="min-height:72px"></div>
+          {/each}
+        </div>
       {:else if reviews.length === 0}
         <EmptyState
           message="No reviews found"
@@ -122,28 +126,30 @@
           onAction={() => push("/app/dashboard")}
         />
       {:else}
-        {#each reviews as review}
-          <div
-            class="review-card"
-            style="margin-bottom:8px;cursor:pointer"
-            onclick={() => goToReview(review.id)}
-            role="button"
-            tabindex="0"
-            onkeydown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                goToReview(review.id);
-              }
-            }}
-          >
-            <h3>{review.pr_title ?? `PR #${review.pr_number}`}</h3>
-            <div class="review-meta">
-              <span>{review.repo_name ?? `Repo #${review.repo_id}`}</span>
-              <span class="status-badge {review.status}">{review.status}</span>
-              <span>{review.created_at ? new Date(review.created_at).toLocaleString() : ""}</span>
+        <div class="activity-list">
+          {#each reviews as review, i}
+            <div
+              class="review-card"
+              style="--stagger: {Math.min(i, 8)}"
+              onclick={() => goToReview(review.id)}
+              role="button"
+              tabindex="0"
+              onkeydown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  goToReview(review.id);
+                }
+              }}
+            >
+              <h3>{review.pr_title ?? `PR #${review.pr_number}`}</h3>
+              <div class="review-meta">
+                <span>{review.repo_name ?? `Repo #${review.repo_id}`}</span>
+                <span class="status-badge {review.status}">{review.status}</span>
+                <span>{review.created_at ? new Date(review.created_at).toLocaleString() : ""}</span>
+              </div>
             </div>
-          </div>
-        {/each}
+          {/each}
+        </div>
 
         <Pagination {page} {totalPages} onChange={(p) => { page = p; loadReviews(); }} />
       {/if}

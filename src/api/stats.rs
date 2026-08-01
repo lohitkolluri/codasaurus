@@ -63,5 +63,47 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
     if let Some(obj) = core.as_object_mut() {
         obj.insert("recent_activity".into(), json!(activity));
     }
+
+    // Trust panel: FP proxy + accept rate from dismissals vs Tier-1 findings.
+    crate::metrics::refresh_from_db(&state.pool).await;
+    let dismissals = crate::db::db_scalar!(
+        &state.pool,
+        i64,
+        "SELECT COUNT(*) FROM dismissed_findings"
+    )
+    .unwrap_or(0);
+    let tier1 = crate::db::db_scalar!(
+        &state.pool,
+        i64,
+        "SELECT COUNT(*) FROM findings WHERE detector IN ('secrets','vulnerabilities','iac','hallucinated-imports','phantom-deps')"
+    )
+    .unwrap_or(0);
+    let total_findings = crate::db::db_scalar!(&state.pool, i64, "SELECT COUNT(*) FROM findings")
+        .unwrap_or(0);
+    let fp_proxy = if tier1 == 0 {
+        0.0
+    } else {
+        dismissals as f64 / tier1 as f64
+    };
+    // Accept proxy: clamp dismissals so rate stays in [0, 100] even when tables diverge.
+    let accept_rate = if total_findings == 0 {
+        None
+    } else {
+        let dismissed_capped = dismissals.min(total_findings);
+        Some(((total_findings - dismissed_capped) as f64 / total_findings as f64) * 100.0)
+    };
+    if let Some(obj) = core.as_object_mut() {
+        obj.insert(
+            "trust".into(),
+            json!({
+                "dismissals": dismissals,
+                "tier1_findings": tier1,
+                "fp_proxy_ratio": fp_proxy,
+                "accept_rate": accept_rate,
+                "note": "Proxy metrics: dismissals table vs current findings rows — not a lifetime cohort.",
+            }),
+        );
+    }
+
     Ok(Json(core))
 }

@@ -7,6 +7,7 @@
 use crate::retry::{is_reqwest_error_retryable, retry_async, RetryConfig};
 use anyhow::Result;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::LazyLock;
 use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant};
@@ -25,6 +26,22 @@ static CACHE_TTL: LazyLock<Mutex<u64>> = LazyLock::new(|| Mutex::new(3600));
 
 static CACHE: LazyLock<RwLock<HashMap<String, (bool, Instant)>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// When true, registry/OSV never open sockets — cache hits only (air-gap).
+static OFFLINE_MODE: AtomicBool = AtomicBool::new(false);
+
+pub fn set_offline_mode(enabled: bool) {
+    OFFLINE_MODE.store(enabled, Ordering::Relaxed);
+}
+
+pub fn offline_mode() -> bool {
+    if OFFLINE_MODE.load(Ordering::Relaxed) {
+        return true;
+    }
+    std::env::var("CODASAURUS_OFFLINE")
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
+}
 
 type OsvCacheEntry = (Vec<OsvVulnerability>, Instant);
 type OsvCacheMap = HashMap<String, OsvCacheEntry>;
@@ -95,7 +112,15 @@ pub async fn check_package_async(registry: &str, package: &str) -> Result<Option
             if time.elapsed() < Duration::from_secs(ttl_secs) {
                 return Ok(Some(*result));
             }
+            if offline_mode() {
+                // Stale cache still usable offline.
+                return Ok(Some(*result));
+            }
         }
+    }
+
+    if offline_mode() {
+        return Ok(None);
     }
 
     let result = match registry {
@@ -137,7 +162,7 @@ pub async fn check_vulnerabilities_async(
 
 /// Concurrently warm package-existence + OSV caches for a large PR (org-scale).
 pub async fn prefetch_packages(pairs: &[(String, String)]) {
-    if pairs.is_empty() {
+    if pairs.is_empty() || offline_mode() {
         return;
     }
     let sem = std::sync::Arc::new(Semaphore::new(PREFETCH_CONCURRENCY));
@@ -199,7 +224,14 @@ async fn check_osv_async(ecosystem: &str, package: &str) -> Result<Vec<OsvVulner
             if time.elapsed() < Duration::from_secs(ttl_secs) {
                 return Ok(vulns.clone());
             }
+            if offline_mode() {
+                return Ok(vulns.clone());
+            }
         }
+    }
+
+    if offline_mode() {
+        return Ok(vec![]);
     }
 
     let client = async_client()?;
@@ -335,6 +367,16 @@ mod tests {
             crate::detectors::extract_package_name("lodash/fp").as_deref(),
             Some("lodash")
         );
+    }
+
+    #[tokio::test]
+    async fn offline_returns_none_without_cache() {
+        set_offline_mode(true);
+        let r = check_package_async("npm", "codasaurus-offline-miss-xyz")
+            .await
+            .unwrap();
+        set_offline_mode(false);
+        assert!(r.is_none());
     }
 }
 

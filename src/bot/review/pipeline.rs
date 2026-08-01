@@ -106,6 +106,31 @@ pub async fn review_pr_with_options(
     if !repo_flags.auto_review_diff {
         options.auto_review_diff = false;
     }
+
+    // Offline / air-gap: fail closed — never call LLM; skip registry prefetch.
+    let offline_mode = {
+        let db_off = if let Some(pool) = pool {
+            if let Ok(Some(provider)) = crate::db::config::get_config(pool, "llm_provider").await {
+                if provider.eq_ignore_ascii_case("disabled") {
+                    repo_llm_enabled = false;
+                }
+            }
+            crate::db::config::get_config(pool, "offline_mode")
+                .await
+                .ok()
+                .flatten()
+        } else {
+            None
+        };
+        crate::bot::offline::offline_mode_from_env_and_db(db_off.as_deref())
+    };
+    if offline_mode {
+        repo_llm_enabled = false;
+        options.auto_review_diff = false;
+        tracing::info!(repo = repo_name, "offline_mode enabled — LLM disabled, registry cache-only");
+    }
+    crate::registry::set_offline_mode(offline_mode);
+
     let policy_pack = crate::bot::policy::PolicyPack::load(
         pool,
         repo_config_json.as_deref(),
@@ -233,6 +258,41 @@ pub async fn review_pr_with_options(
         Err(_) => vec![],
     };
 
+    // Capture head-side manifest text before base-branch bootstrap overwrites.
+    let mut head_manifests: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for p in &parsed_files_collected {
+        if crate::bot::dep_delta::is_manifest_path(&p.path) && !p.raw_content.is_empty() {
+            head_manifests.insert(p.path.clone(), p.raw_content.clone());
+        }
+    }
+    let head_for_manifest = if head_sha.is_empty() { head_ref } else { head_sha };
+    for path in changed_paths
+        .iter()
+        .filter(|p| crate::bot::dep_delta::is_manifest_path(p))
+    {
+        let need_fetch = head_manifests
+            .get(path)
+            .map(|c| c.len() < 80)
+            .unwrap_or(true);
+        if !need_fetch {
+            continue;
+        }
+        if let Ok(Some(content)) = crate::bot::github_files::fetch_repo_file(
+            client,
+            &headers,
+            repo_name,
+            path,
+            head_for_manifest,
+        )
+        .await
+        {
+            if !content.is_empty() {
+                head_manifests.insert(path.clone(), content);
+            }
+        }
+    }
+
     // Repo awareness: manifests, CONTRIBUTING/AGENTS, CODEOWNERS, linked issues.
     let (remote_ctx, bootstrapped) = crate::bot::repo_context::gather_remote_context(
         client,
@@ -248,10 +308,67 @@ pub async fn review_pr_with_options(
     .await
     .unwrap_or_default();
 
+    let mut dep_deltas: Vec<crate::bot::dep_delta::DepDelta> = Vec::new();
+    for base in &bootstrapped {
+        if let Some(new_content) = head_manifests.get(&base.path) {
+            if let Some(d) =
+                crate::bot::dep_delta::diff_manifest(&base.path, &base.raw_content, new_content)
+            {
+                dep_deltas.push(d);
+            }
+        }
+    }
+    // Changed manifests skipped by bootstrap (already in the PR) still need a real base fetch.
+    for (path, new_content) in &head_manifests {
+        if bootstrapped.iter().any(|b| &b.path == path) {
+            continue;
+        }
+        if !changed_paths.iter().any(|p| p == path) {
+            continue;
+        }
+        let old_content = crate::bot::github_files::fetch_repo_file(
+            client,
+            &headers,
+            repo_name,
+            path,
+            base_sha,
+        )
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+        if let Some(d) = crate::bot::dep_delta::diff_manifest(path, &old_content, new_content) {
+            dep_deltas.push(d);
+        }
+    }
+    for file in &files {
+        let path = file["filename"].as_str().unwrap_or("");
+        if !crate::bot::dep_delta::is_manifest_path(path) {
+            continue;
+        }
+        if dep_deltas.iter().any(|d| d.path == path) {
+            continue;
+        }
+        let patch = file["patch"].as_str().unwrap_or("");
+        if let Some(d) = crate::bot::dep_delta::delta_from_patch(path, patch) {
+            dep_deltas.push(d);
+        }
+    }
+
     // Prefer full base-branch manifests over incomplete patch slices.
     for m in bootstrapped {
         parsed_files_collected.retain(|p| p.path != m.path);
         parsed_files_collected.push(m);
+    }
+    // Re-inject full head manifests so detectors see complete files, not hunk-only slices.
+    for (path, content) in &head_manifests {
+        if content.is_empty() {
+            continue;
+        }
+        if let Ok(parsed) = crate::parser::parse_file(path, content) {
+            parsed_files_collected.retain(|p| &p.path != path);
+            parsed_files_collected.push(parsed);
+        }
     }
     if remote_ctx.manifests_added > 0 {
         tracing::info!(
@@ -262,7 +379,7 @@ pub async fn review_pr_with_options(
 
     // Warm registry/OSV caches concurrently before sync detectors run.
     let prefetch_pairs = collect_registry_pairs(&parsed_files_collected);
-    if !prefetch_pairs.is_empty() {
+    if !prefetch_pairs.is_empty() && !offline_mode {
         crate::registry::prefetch_packages(&prefetch_pairs).await;
     }
 
@@ -364,11 +481,42 @@ pub async fn review_pr_with_options(
     );
     findings.findings.extend(slop_findings);
 
-    // Org-scale: severity budgets + noise ranking (high-signal only).
-    crate::bot::apply_signal_budget(
-        &mut findings.findings,
-        &crate::bot::SignalBudget::default(),
+    let agent_signal = crate::bot::agent_mode::detect_agent_pr(
+        &pr_title,
+        &pr_body,
+        &commit_messages,
+        pr_author,
     );
+    let mut budget = crate::bot::SignalBudget::default();
+    if agent_signal.is_agent {
+        budget = crate::bot::agent_mode::agent_signal_budget(budget);
+        tracing::info!(
+            reasons = ?agent_signal.reasons,
+            "agent-authored PR — Tier-1 prioritized budget"
+        );
+    }
+
+    // Org-scale: severity budgets + noise ranking (high-signal only).
+    crate::bot::apply_signal_budget(&mut findings.findings, &budget);
+
+    let blast_report = crate::bot::blast::estimate_blast_radius(
+        &parsed_files_collected,
+        &changed_paths,
+    );
+    let blast_md = crate::bot::blast::blast_markdown(&blast_report);
+    let vuln_pkgs: Vec<String> = findings
+        .findings
+        .iter()
+        .filter(|f| f.detector == "vulnerabilities")
+        .filter_map(|f| {
+            f.suggestion
+                .as_ref()
+                .and_then(|s| s.split('`').nth(1).map(str::to_string))
+                .or_else(|| f.message.split('`').nth(1).map(str::to_string))
+        })
+        .collect();
+    let dep_delta_md = crate::bot::dep_delta::dep_delta_markdown(&dep_deltas, &vuln_pkgs);
+    let agent_badge_owned = crate::bot::agent_mode::agent_badge(&agent_signal);
 
     // Policy pack: forbidden paths + count caps.
     findings.findings.extend(crate::bot::policy::forbidden_path_findings(
@@ -482,7 +630,11 @@ pub async fn review_pr_with_options(
 
     // Only approve when there are genuinely no findings.
     if findings.is_empty() {
-        let body = crate::bot::markdown::clean_approve_body();
+        let body = crate::bot::markdown::clean_approve_body_ext(
+            agent_badge_owned.as_deref(),
+            &blast_md,
+            &dep_delta_md,
+        );
         let review = serde_json::json!({"body": body, "event": "APPROVE"});
         let approve_url =
             format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews");
@@ -537,6 +689,7 @@ pub async fn review_pr_with_options(
                 head_sha,
                 &findings.findings,
                 false,
+                &dep_delta_md,
             )
             .await
             {
@@ -559,6 +712,14 @@ pub async fn review_pr_with_options(
         return Ok(());
     }
 
+    let walkthrough_extras = crate::bot::markdown::WalkthroughExtras {
+        related_prs: &related_prs,
+        issue_assessment_md: &issue_assessment_md,
+        agent_badge: agent_badge_owned.as_deref(),
+        blast_md: &blast_md,
+        dep_delta_md: &dep_delta_md,
+    };
+
     let body = crate::bot::markdown::walkthrough_body_ext(
         &findings,
         has_blocking,
@@ -569,8 +730,7 @@ pub async fn review_pr_with_options(
         &runtime,
         false,
         repo_llm_enabled,
-        &related_prs,
-        &issue_assessment_md,
+        walkthrough_extras,
     );
 
     // Try to create a review with inline comments; fall back to single comment
@@ -648,6 +808,7 @@ pub async fn review_pr_with_options(
             head_sha,
             &findings.findings,
             has_blocking,
+            &dep_delta_md,
         )
         .await
         {
@@ -706,6 +867,7 @@ pub async fn review_pr_with_options(
                     &review_ctx,
                     &state,
                     runtime.auto_improve_max_diff_chars,
+                    crate::bot::agent_mode::agent_llm_issue_cap(agent_signal.is_agent),
                 )
                 .await
                 {
@@ -727,11 +889,18 @@ pub async fn review_pr_with_options(
             &runtime,
             true,
             repo_llm_enabled,
-            &related_prs,
-            &issue_assessment_md,
+            crate::bot::markdown::WalkthroughExtras {
+                related_prs: &related_prs,
+                issue_assessment_md: &issue_assessment_md,
+                agent_badge: agent_badge_owned.as_deref(),
+                blast_md: &blast_md,
+                dep_delta_md: &dep_delta_md,
+            },
         );
-        let describe_body = format!(
-            "### Codasaurus describe\n\n{describe}\n\n---\n_Auto-describe on PR open · `@codasaurus help`_"
+        let describe_body = describe.replacen(
+            "### Codasaurus review",
+            "### Codasaurus describe",
+            1,
         );
         if let Err(e) = post_or_update_comment(
             client,
