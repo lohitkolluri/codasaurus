@@ -1,11 +1,12 @@
 use axum::extract::{Path, Query, State};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::db;
 use crate::db::DbPool;
+use crate::learning::store::LearningStore;
 
 use super::errors::ApiError;
 use super::AppState;
@@ -30,11 +31,20 @@ pub struct ListReviewsParams {
 // Router
 // ---------------------------------------------------------------------------
 
+#[derive(Deserialize)]
+pub struct DismissBody {
+    pub fingerprint: String,
+    pub detector: Option<String>,
+    pub file: Option<String>,
+    pub message: Option<String>,
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_reviews))
         .route("/{id}", get(get_review))
         .route("/{id}/findings", get(get_review_findings))
+        .route("/dismiss", post(dismiss_finding))
 }
 
 // ---------------------------------------------------------------------------
@@ -129,8 +139,24 @@ async fn get_review(
 
     let findings = db::reviews::get_findings_for_review(&state.pool, id).await?;
 
+    let repo_full_name: Option<String> =
+        sqlx::query_scalar("SELECT full_name FROM repos WHERE id = ?")
+            .bind(review.repo_id)
+            .fetch_optional(&state.pool.0)
+            .await
+            .ok()
+            .flatten();
+
+    let mut review_val = serde_json::to_value(&review).unwrap_or_default();
+    if let Some(obj) = review_val.as_object_mut() {
+        obj.insert(
+            "repo_full_name".into(),
+            json!(repo_full_name.clone().unwrap_or_default()),
+        );
+    }
+
     Ok(Json(json!({
-        "review": review,
+        "review": review_val,
         "findings": findings,
     })))
 }
@@ -160,4 +186,28 @@ async fn get_review_findings(
         "findings_by_file": grouped,
         "total_findings": grouped.values().map(|v| v.len()).sum::<usize>(),
     })))
+}
+
+/// POST /api/reviews/dismiss — dismiss a finding into the learning store
+async fn dismiss_finding(
+    State(state): State<AppState>,
+    Json(body): Json<DismissBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let fp = body.fingerprint.trim();
+    if fp.len() < 8 {
+        return Err(ApiError::bad_request("fingerprint too short"));
+    }
+    // Strip review_id: prefix if present from DB storage
+    let fp = fp.rsplit(':').next().unwrap_or(fp);
+    let store = LearningStore::from_pool(&state.pool);
+    store
+        .dismiss_fingerprint(
+            fp,
+            body.detector.as_deref().unwrap_or("manual"),
+            body.file.as_deref().unwrap_or(""),
+            body.message.as_deref().unwrap_or("dismissed via dashboard"),
+        )
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    Ok(Json(json!({ "status": "ok", "fingerprint": fp })))
 }

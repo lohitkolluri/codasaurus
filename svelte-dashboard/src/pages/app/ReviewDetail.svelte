@@ -62,6 +62,26 @@
   function getFindingsForFile(filePath) {
     return allFindings.filter((f) => f.file_path === filePath || f.file === filePath);
   }
+
+  async function dismissFinding(finding) {
+    const raw = finding.fingerprint ?? "";
+    const fp = raw.includes(":") ? raw.split(":").pop() : raw;
+    if (!fp || fp.length < 8) {
+      error = "Finding has no fingerprint to dismiss";
+      return;
+    }
+    try {
+      await api.post("/api/reviews/dismiss", {
+        fingerprint: fp,
+        detector: finding.detector,
+        file: finding.file_path ?? finding.file,
+        message: finding.message,
+      });
+      allFindings = allFindings.filter((f) => f.id !== finding.id);
+    } catch (err) {
+      error = err.message || "Dismiss failed";
+    }
+  }
 </script>
 
 <div class="app-layout">
@@ -78,11 +98,19 @@
       {:else if review}
         <div style="padding:24px 32px;border-bottom:1px solid var(--border)">
           <h2 style="font-size:20px;font-weight:700;margin-bottom:8px">{review.pr_title ?? `PR #${review.pr_number}`}</h2>
-          <div style="display:flex;gap:12px;font-size:13px;color:var(--text-muted);align-items:center">
+          <div style="display:flex;gap:12px;font-size:13px;color:var(--text-muted);align-items:center;flex-wrap:wrap">
             <span>{review.repo_full_name ?? ""}</span>
             <span class="status-badge {review.status}">{review.status}</span>
             {#if review.pr_head_sha}
               <span style="font-family:var(--font-code);font-size:12px">{review.pr_head_sha.slice(0, 7)}</span>
+            {/if}
+            {#if review.repo_full_name && review.pr_number}
+              <a
+                href={`https://github.com/${review.repo_full_name}/pull/${review.pr_number}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style="color:var(--text-primary);text-decoration:underline"
+              >View on GitHub</a>
             {/if}
           </div>
         </div>
@@ -127,6 +155,15 @@
                       <span>:{finding.line_start}</span>
                     {/if}
                     <SeverityBadge severity={finding.severity ?? "info"} />
+                    {#if finding.fingerprint}
+                      <span style="font-family:var(--font-code);font-size:11px;color:var(--text-muted)">
+                        {finding.fingerprint.includes(":") ? finding.fingerprint.split(":").pop().slice(0,12) : finding.fingerprint.slice(0,12)}
+                      </span>
+                    {/if}
+                    <button
+                      style="margin-left:auto;font-size:12px"
+                      onclick={() => dismissFinding(finding)}
+                    >Dismiss</button>
                   </div>
                   <div class="finding-message">{finding.message}</div>
                   {#if finding.code_snippet}

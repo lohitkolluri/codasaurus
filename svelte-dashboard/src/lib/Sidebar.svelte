@@ -1,13 +1,14 @@
 <script>
   import { link, location } from "svelte-spa-router";
   import { currentUser } from "../stores/auth.js";
-  import { LayoutDashboard, FolderGit2, GitPullRequest, Settings, ClipboardList } from "lucide-svelte";
+  import { LayoutDashboard, FolderGit2, GitPullRequest, Settings, ClipboardList, KeyRound } from "lucide-svelte";
 
   const navItems = [
     { path: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { path: "/app/repos", label: "Repositories", icon: FolderGit2 },
     { path: "/app/reviews", label: "Reviews", icon: GitPullRequest },
     { path: "/app/settings", label: "Settings", icon: Settings },
+    { path: "/app/settings/github", label: "GitHub App", icon: KeyRound },
     { path: "/app/audit", label: "Audit log", icon: ClipboardList },
   ];
 </script>
