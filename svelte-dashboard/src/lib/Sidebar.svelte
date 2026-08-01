@@ -1,7 +1,7 @@
 <script>
   import { link, location } from "svelte-spa-router";
   import { currentUser } from "../stores/auth.js";
-  import { LayoutDashboard, FolderGit2, GitPullRequest, Settings, ClipboardList, KeyRound } from "lucide-svelte";
+  import { LayoutDashboard, FolderGit2, GitPullRequest, Settings, ClipboardList } from "lucide-svelte";
   import BrandMark from "./BrandMark.svelte";
 
   const navItems = [
@@ -9,11 +9,10 @@
     { path: "/app/repos", label: "Repositories", icon: FolderGit2 },
     { path: "/app/reviews", label: "Reviews", icon: GitPullRequest },
     { path: "/app/settings", label: "Settings", icon: Settings },
-    { path: "/app/settings/github", label: "GitHub App", icon: KeyRound },
     { path: "/app/audit", label: "Audit log", icon: ClipboardList },
   ];
 
-  /** Longest matching nav prefix wins (avoids Settings+GitHub both active). */
+  /** Longest matching nav prefix wins (e.g. /app/repos/123 → Repositories). */
   function isActive(path) {
     const loc = $location || "";
     const matches = navItems.filter(

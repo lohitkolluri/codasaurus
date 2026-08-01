@@ -23,7 +23,6 @@
   import Reviews from "./pages/app/Reviews.svelte";
   import ReviewDetail from "./pages/app/ReviewDetail.svelte";
   import Settings from "./pages/app/Settings.svelte";
-  import GitHubSettings from "./pages/app/GitHubSettings.svelte";
   import AuditLog from "./pages/app/AuditLog.svelte";
 
   let loading = $state(true);
@@ -76,7 +75,7 @@
     "/app/reviews": Reviews,
     "/app/reviews/:id": ReviewDetail,
     "/app/settings": Settings,
-    "/app/settings/github": GitHubSettings,
+    "/app/settings/github": Settings,
     "/app/audit": AuditLog,
     "*": NotFound,
   };

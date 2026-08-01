@@ -1,5 +1,5 @@
 # Always-free Codasaurus on Render (web only).
-# DATABASE_URL must be a lifetime-free Postgres (Neon Free recommended).
+# DATABASE_URL must be a lifetime-free Postgres (Aiven Free recommended; Neon Free also works).
 # Do NOT use Render free Postgres — it expires. See docs/run-for-free.md
 
 services:
