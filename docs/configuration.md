@@ -26,19 +26,19 @@ codasaurus version
 
 ### Core
 
-| Variable                             | Required            | Description                                                                                                     |
-| ------------------------------------ | ------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                       | recommended         | Postgres URL (default `postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus`)                             |
-| `CODASAURUS_DB_MAX_CONNECTIONS`      | no                  | Pool size (default `16`, or `3` on free/Render/Neon hosts)                                                      |
-| `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS` | no                  | Wait for a free connection (default `30`, or `60` on free hosts)                                                |
-| `CODASAURUS_FREE_TIER`               | no                  | `1` forces free-tier pool + concurrency defaults                                                                |
-| `CODASAURUS_DATA_DIR`                | no                  | Data directory (Docker: `/data`)                                                                                |
-| `PORT` / `--port`                    | no                  | Listen port (default `3000`)                                                                                    |
-| `PUBLIC_URL`                         | recommended in prod | Canonical HTTPS origin for GitHub manifest callbacks                                                            |
-| `CODASAURUS_HSTS`                    | no                  | `1` forces `Strict-Transport-Security` even if `PUBLIC_URL` is unset (auto-on when `PUBLIC_URL` is `https://…`). Dashboard: **Settings → Runtime → Force HSTS** |
-| `CODASAURUS_QUEUE_WORKERS`           | no                  | Durable review queue workers (1–8; default min of review permits / 4). Dashboard: **Settings → Runtime** (restart) |
-| `CODASAURUS_METRICS_TOKEN`           | no                  | If set, enables `/metrics` (Bearer token required). Dashboard: **Settings → Runtime** |
-| `CODASAURUS_AUDIT_RETENTION_DAYS`    | no                  | Days to keep audit log entries before automatic deletion (default `90`, clamped 7–730). Dashboard: **Settings → Runtime** |
+| Variable                             | Required            | Description                                                                                                                                                     |
+| ------------------------------------ | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                       | recommended         | Postgres URL (default `postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus`)                                                                             |
+| `CODASAURUS_DB_MAX_CONNECTIONS`      | no                  | Pool size (default `16`, or `3` on free/Render/Neon hosts)                                                                                                      |
+| `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS` | no                  | Wait for a free connection (default `30`, or `60` on free hosts)                                                                                                |
+| `CODASAURUS_FREE_TIER`               | no                  | `1` forces free-tier pool + concurrency defaults                                                                                                                |
+| `CODASAURUS_DATA_DIR`                | no                  | Data directory (Docker: `/data`)                                                                                                                                |
+| `PORT` / `--port`                    | no                  | Listen port (default `3000`)                                                                                                                                    |
+| `PUBLIC_URL`                         | recommended in prod | Canonical HTTPS origin for GitHub manifest callbacks                                                                                                            |
+| `CODASAURUS_HSTS`                    | no                  | `1` forces `Strict-Transport-Security` even if `PUBLIC_URL` is unset (auto-on when `PUBLIC_URL` is `https://…`). Dashboard: **Settings → System → Advanced** |
+| `CODASAURUS_QUEUE_WORKERS`           | no                  | Durable review queue workers (1–8; default min of review permits / 4). Dashboard: **Settings → System → Advanced** (restart)                                              |
+| `CODASAURUS_METRICS_TOKEN`           | no                  | If set, enables `/metrics` (Bearer token required). Dashboard: **Settings → System → Advanced**                                                                           |
+| `CODASAURUS_AUDIT_RETENTION_DAYS`    | no                  | Days to keep audit log entries before automatic deletion (default `90`, clamped 7–730). Dashboard: **Settings → System**                                       |
 
 ### GitHub App
 
@@ -65,13 +65,13 @@ codasaurus version
 | `CODASAURUS_AUTO_IMPROVE_MAX_FILES` | Skip auto improve above this file count (default `40`)                         |
 | `CODASAURUS_AUTO_IMPROVE_MAX_DIFF`  | Cap aggregated patch chars for auto improve (default `24000`)                  |
 
+Dashboard **Settings** groups common controls into six tabs (**LLM**, **Review**, **Connections**, **System**, **Account**, **Learning**). Rare tunables sit under **Advanced** disclosures. Env/API keys remain available even when hidden in the UI.
+
 Dashboard **Settings → LLM** writes `llm_provider`, `llm_model`, `llm_model_cheap`, `llm_base_url`, `llm_daily_budget_usd`, `openrouter_api_key`.
 
-Dashboard **Settings → Runtime** mirrors `PUBLIC_URL`, audit retention, queue workers, concurrency, review/LLM caps, HSTS, metrics token, cookie flags, and `CODASAURUS_ALLOW_LOCAL_LLM`.
+Dashboard **Settings → System** (and Advanced) mirrors `PUBLIC_URL`, audit retention, offline mode, queue workers, concurrency, review/LLM caps, HSTS, metrics token, and cookie / local-LLM flags.
 
-Dashboard **Settings → Auth / SSO** mirrors `OIDC_*` (issuer, client, redirect, scopes, open-join / unverified email / public client).
-
-Dashboard **Settings → Integrations** mirrors `JIRA_*` and `LINEAR_API_KEY`.
+Dashboard **Settings → Connections** covers GitHub App, OIDC (`OIDC_*`), and Jira/Linear.
 
 ### LLM cost controls
 

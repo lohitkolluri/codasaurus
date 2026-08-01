@@ -8,24 +8,22 @@
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
   import ErrorState from "../../lib/ErrorState.svelte";
 
+  // Fewer primary categories; rare knobs live under Advanced (progressive disclosure).
   const TABS = [
     { id: "llm", label: "LLM" },
-    { id: "detectors", label: "Detectors" },
-    { id: "policy", label: "Policy" },
-    { id: "runtime", label: "Runtime" },
-    { id: "auth", label: "Auth / SSO" },
-    { id: "integrations", label: "Integrations" },
-    { id: "github", label: "GitHub" },
+    { id: "review", label: "Review" },
+    { id: "connections", label: "Connections" },
+    { id: "system", label: "System" },
     { id: "account", label: "Account" },
     { id: "learning", label: "Learning" },
   ];
 
   let canEditSettings = $derived($isOwner);
 
-  let settings = $state({});
   let loading = $state(true);
   let error = $state("");
   let activeTab = $state("llm");
+  let settingsFilter = $state("");
 
   let llmProvider = $state("openrouter");
   let llmKey = $state("");
@@ -37,36 +35,7 @@
   let llmMsg = $state("");
 
   let detectorToggles = $state({});
-  let detectorSaving = $state(false);
-  let detectorMsg = $state("");
-
   let defaultSeverity = $state("warning");
-  let severitySaving = $state(false);
-  let severityMsg = $state("");
-
-  let models = $state([]);
-  let modelSearch = $state("");
-  let modelDropdown = $state(false);
-  let cheapModelSearch = $state("");
-  let cheapModelDropdown = $state(false);
-  let modelFiltered = $derived.by(() => filterModels(modelSearch));
-  let cheapModelFiltered = $derived.by(() => filterModels(cheapModelSearch));
-
-  const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
-
-  function filterModels(q) {
-    if (!q) return models.slice(0, 20);
-    const needle = q.toLowerCase();
-    return models
-      .filter((m) => m.id.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle))
-      .slice(0, 15);
-  }
-
-  const DETECTOR_KEYS = [
-    "hallucinated_imports", "phantom_deps", "vulnerabilities", "secrets",
-    "over_engineering", "boilerplate", "todo_leaks", "stale_api", "risky_patterns", "graph", "guidelines", "iac",
-  ];
-
   let maxWarnings = $state("20");
   let maxBlocking = $state("0");
   let reviewStrictness = $state("balanced");
@@ -78,9 +47,24 @@
   let customInstructions = $state("");
   let updatePrDescription = $state(false);
   let allowAutoFix = $state(false);
-  let offlineMode = $state(false);
-  let policySaving = $state(false);
-  let policyMsg = $state("");
+  let reviewSaving = $state(false);
+  let reviewMsg = $state("");
+
+  let models = $state([]);
+  let modelSearch = $state("");
+  let modelDropdown = $state(false);
+  let cheapModelSearch = $state("");
+  let cheapModelDropdown = $state(false);
+  let modelFiltered = $derived.by(() => filterModels(modelSearch));
+  let cheapModelFiltered = $derived.by(() => filterModels(cheapModelSearch));
+
+  const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+
+  const DETECTOR_KEYS = [
+    "hallucinated_imports", "phantom_deps", "vulnerabilities", "secrets",
+    "over_engineering", "boilerplate", "todo_leaks", "stale_api", "risky_patterns", "graph", "guidelines", "iac",
+  ];
+
   let learnedRules = $state([]);
   let rulesMsg = $state("");
 
@@ -94,9 +78,11 @@
   let pwMsg = $state("");
   let pwSaving = $state(false);
 
-  // Runtime / ops
+  // System essentials
   let publicUrl = $state("");
   let auditRetentionDays = $state("90");
+  let offlineMode = $state(false);
+  // Advanced (hidden by default)
   let queueWorkers = $state("");
   let maxConcurrentReviews = $state("");
   let hsts = $state(false);
@@ -110,9 +96,8 @@
   let autoImproveMaxDiff = $state("24000");
   let allowLocalLlm = $state(false);
   let insecureCookies = $state(false);
-  let secureCookies = $state(false);
-  let runtimeSaving = $state(false);
-  let runtimeMsg = $state("");
+  let systemSaving = $state(false);
+  let systemMsg = $state("");
 
   // OIDC
   let oidcIssuer = $state("");
@@ -140,6 +125,37 @@
     custom: { model: "", baseUrl: "" },
     disabled: { model: "", baseUrl: "" },
   };
+
+  const TAB_KEYWORDS = {
+    llm: "llm model openrouter ollama budget api key provider",
+    review: "review detectors policy strictness severity labels check run autofix warnings blocking paths",
+    connections: "github oidc sso jira linear ticket install app auth identity integrations",
+    system: "system public url retention offline workers concurrency hsts metrics cookies advanced runtime",
+    account: "account password profile",
+    learning: "learning rules dismiss ignore",
+  };
+
+  let visibleTabs = $derived.by(() => {
+    const q = settingsFilter.trim().toLowerCase();
+    if (!q) return TABS;
+    return TABS.filter(
+      (t) =>
+        t.label.toLowerCase().includes(q) ||
+        (TAB_KEYWORDS[t.id] || "").includes(q)
+    );
+  });
+
+  function filterModels(q) {
+    if (!q) return models.slice(0, 20);
+    const needle = q.toLowerCase();
+    return models
+      .filter((m) => m.id.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle))
+      .slice(0, 15);
+  }
+
+  function truthy(v) {
+    return ["true", "1", "yes", "on"].includes(String(v ?? "").toLowerCase());
+  }
 
   async function loadModels() {
     try {
@@ -197,9 +213,10 @@
   }
 
   function applyDeepLink() {
-    if ($location === "/app/settings/github") {
-      activeTab = "github";
-    }
+    const loc = $location || "";
+    if (loc.includes("/settings/github")) activeTab = "connections";
+    else if (loc.includes("/settings/runtime") || loc.includes("/settings/system")) activeTab = "system";
+    else if (loc.includes("/settings/oidc") || loc.includes("/settings/auth")) activeTab = "connections";
   }
 
   async function changePassword() {
@@ -227,7 +244,6 @@
           api.get("/api/settings"),
           api.get("/api/settings/github").catch(() => null),
         ]);
-        settings = data;
         github = gh;
         llmProvider = data.llm_provider ?? "openrouter";
         llmKey = data.openrouter_api_key ?? data.llm_api_key ?? "";
@@ -259,14 +275,12 @@
         customInstructions = data.custom_instructions ?? "";
         updatePrDescription = data.update_pr_description === "true";
         allowAutoFix = data.allow_auto_fix === "true";
-        offlineMode = ["true", "1", "yes", "on"].includes(
-          String(data.offline_mode ?? "").toLowerCase()
-        );
+        offlineMode = truthy(data.offline_mode);
         publicUrl = data.public_url ?? "";
         auditRetentionDays = data.audit_retention_days ?? "90";
         queueWorkers = data.queue_workers ?? "";
         maxConcurrentReviews = data.max_concurrent_reviews ?? "";
-        hsts = ["true", "1", "yes", "on"].includes(String(data.hsts ?? "").toLowerCase());
+        hsts = truthy(data.hsts);
         metricsToken = data.metrics_token ?? "";
         reviewTimeoutSecs = data.review_timeout_secs ?? "300";
         maxInlineComments = data.max_inline_comments ?? "8";
@@ -275,29 +289,16 @@
         maxLlmDiffChars = data.max_llm_diff_chars ?? "8000";
         autoImproveMaxFiles = data.auto_improve_max_files ?? "40";
         autoImproveMaxDiff = data.auto_improve_max_diff ?? "24000";
-        allowLocalLlm = ["true", "1", "yes", "on"].includes(
-          String(data.allow_local_llm ?? "").toLowerCase()
-        );
-        insecureCookies = ["true", "1", "yes", "on"].includes(
-          String(data.insecure_cookies ?? "").toLowerCase()
-        );
-        secureCookies = ["true", "1", "yes", "on"].includes(
-          String(data.secure_cookies ?? "").toLowerCase()
-        );
+        allowLocalLlm = truthy(data.allow_local_llm);
+        insecureCookies = truthy(data.insecure_cookies);
         oidcIssuer = data.oidc_issuer ?? "";
         oidcClientId = data.oidc_client_id ?? "";
         oidcClientSecret = data.oidc_client_secret ?? "";
         oidcRedirectUri = data.oidc_redirect_uri ?? "";
         oidcScopes = data.oidc_scopes ?? "openid email profile";
-        oidcAllowOpenJoin = ["true", "1", "yes", "on"].includes(
-          String(data.oidc_allow_open_join ?? "").toLowerCase()
-        );
-        oidcAllowUnverifiedEmail = ["true", "1", "yes", "on"].includes(
-          String(data.oidc_allow_unverified_email ?? "").toLowerCase()
-        );
-        oidcAllowPublicClient = ["true", "1", "yes", "on"].includes(
-          String(data.oidc_allow_public_client ?? "").toLowerCase()
-        );
+        oidcAllowOpenJoin = truthy(data.oidc_allow_open_join);
+        oidcAllowUnverifiedEmail = truthy(data.oidc_allow_unverified_email);
+        oidcAllowPublicClient = truthy(data.oidc_allow_public_client);
         jiraBaseUrl = data.jira_base_url ?? "";
         jiraEmail = data.jira_email ?? "";
         jiraApiToken = data.jira_api_token ?? "";
@@ -314,6 +315,20 @@
       }
     })();
   });
+
+  function boolVal(on) {
+    return on ? "true" : "false";
+  }
+
+  async function putMany(pairs) {
+    const updates = pairs.map(([key, value]) => api.put(`/api/settings/${key}`, { value }));
+    const results = await Promise.allSettled(updates);
+    const failed = results.filter((r) => r.status === "rejected");
+    const restart = results.some(
+      (r) => r.status === "fulfilled" && r.value?.restart_required
+    );
+    return { failed: failed.length, restart };
+  }
 
   async function saveLLM() {
     llmSaving = true; llmMsg = "";
@@ -338,111 +353,45 @@
     finally { llmSaving = false; }
   }
 
-  async function saveDetectors() {
-    detectorSaving = true; detectorMsg = "";
+  async function saveReview() {
+    reviewSaving = true;
+    reviewMsg = "";
     try {
-      const updates = Object.entries(detectorToggles).map(([key, enabled]) =>
-        api.put(`/api/settings/${key}_enabled`, { value: enabled ? "true" : "false" })
-      );
-      const results = await Promise.allSettled(updates);
-      const failed = results.filter((r) => r.status === "rejected");
-      detectorMsg = failed.length === 0 ? "Saved" : `Save failed (${failed.length} errors)`;
-    } catch (err) { detectorMsg = err.message || "Save failed"; }
-    finally { detectorSaving = false; }
-  }
-
-  async function saveSeverity() {
-    severitySaving = true; severityMsg = "";
-    try {
-      await api.put("/api/settings/default_severity", { value: defaultSeverity });
-      severityMsg = "Saved";
-    } catch (err) { severityMsg = err.message || "Save failed"; }
-    finally { severitySaving = false; }
-  }
-
-  async function savePolicy() {
-    policySaving = true; policyMsg = "";
-    try {
-      const updates = [
-        api.put("/api/settings/review_strictness", { value: reviewStrictness }),
-        api.put("/api/settings/max_warnings", { value: maxWarnings }),
-        api.put("/api/settings/max_blocking", { value: maxBlocking }),
-        api.put("/api/settings/forbidden_paths", { value: forbiddenPaths }),
-        api.put("/api/settings/auto_labels_enabled", { value: autoLabels ? "true" : "false" }),
-        api.put("/api/settings/request_reviewers", { value: requestReviewers ? "true" : "false" }),
-        api.put("/api/settings/create_check_run", { value: createCheckRun ? "true" : "false" }),
-        api.put("/api/settings/exclude_patterns", { value: excludePatterns }),
-        api.put("/api/settings/custom_instructions", { value: customInstructions }),
-        api.put("/api/settings/update_pr_description", { value: updatePrDescription ? "true" : "false" }),
-        api.put("/api/settings/allow_auto_fix", { value: allowAutoFix ? "true" : "false" }),
-        api.put("/api/settings/offline_mode", { value: offlineMode ? "true" : "false" }),
+      const pairs = [
+        ...Object.entries(detectorToggles).map(([key, enabled]) => [
+          `${key}_enabled`,
+          enabled ? "true" : "false",
+        ]),
+        ["default_severity", defaultSeverity],
+        ["review_strictness", reviewStrictness],
+        ["max_warnings", maxWarnings],
+        ["max_blocking", maxBlocking],
+        ["forbidden_paths", forbiddenPaths],
+        ["auto_labels_enabled", boolVal(autoLabels)],
+        ["request_reviewers", boolVal(requestReviewers)],
+        ["create_check_run", boolVal(createCheckRun)],
+        ["exclude_patterns", excludePatterns],
+        ["custom_instructions", customInstructions],
+        ["update_pr_description", boolVal(updatePrDescription)],
+        ["allow_auto_fix", boolVal(allowAutoFix)],
       ];
-      const results = await Promise.allSettled(updates);
-      const failed = results.filter((r) => r.status === "rejected");
-      policyMsg = failed.length === 0 ? "Saved" : `Save failed (${failed.length} errors)`;
-    } catch (err) { policyMsg = err.message || "Save failed"; }
-    finally { policySaving = false; }
-  }
-
-  async function deleteRule(id) {
-    rulesMsg = "";
-    try {
-      await api.delete(`/api/learning/rules/${id}`);
-      learnedRules = learnedRules.filter((r) => r.id !== id);
-      rulesMsg = "Rule deleted";
+      const { failed } = await putMany(pairs);
+      reviewMsg = failed === 0 ? "Saved" : `Save failed (${failed} errors)`;
     } catch (err) {
-      rulesMsg = err.message || "Delete failed";
-    }
-  }
-
-  async function openInstallUrl() {
-    githubMsg = "";
-    try {
-      const data = await api.get("/api/github/install-url");
-      if (data.url) window.open(data.url, "_blank");
-    } catch (err) {
-      githubMsg = err.message || "Failed to open install URL";
-    }
-  }
-
-  async function clearLocalGithub() {
-    clearingGithub = true;
-    githubMsg = "";
-    try {
-      const res = await api.delete("/api/settings/github");
-      github = { configured: false };
-      confirmClearGithub = false;
-      githubMsg =
-        res?.message ||
-        "Local GitHub App config cleared. Repos are marked inactive. Remove the App on GitHub separately if needed.";
-    } catch (err) {
-      githubMsg = err.message || "Clear failed";
+      reviewMsg = err.message || "Save failed";
     } finally {
-      clearingGithub = false;
+      reviewSaving = false;
     }
   }
 
-  function boolVal(on) {
-    return on ? "true" : "false";
-  }
-
-  async function putMany(pairs) {
-    const updates = pairs.map(([key, value]) => api.put(`/api/settings/${key}`, { value }));
-    const results = await Promise.allSettled(updates);
-    const failed = results.filter((r) => r.status === "rejected");
-    const restart = results.some(
-      (r) => r.status === "fulfilled" && r.value?.restart_required
-    );
-    return { failed: failed.length, restart };
-  }
-
-  async function saveRuntime() {
-    runtimeSaving = true;
-    runtimeMsg = "";
+  async function saveSystem() {
+    systemSaving = true;
+    systemMsg = "";
     try {
-      const { failed, restart } = await putMany([
+      const pairs = [
         ["public_url", publicUrl],
         ["audit_retention_days", auditRetentionDays],
+        ["offline_mode", boolVal(offlineMode)],
         ["queue_workers", queueWorkers],
         ["max_concurrent_reviews", maxConcurrentReviews],
         ["hsts", boolVal(hsts)],
@@ -455,18 +404,22 @@
         ["auto_improve_max_diff", autoImproveMaxDiff],
         ["allow_local_llm", boolVal(allowLocalLlm)],
         ["insecure_cookies", boolVal(insecureCookies)],
-        ["secure_cookies", boolVal(secureCookies)],
-      ]);
+      ];
+      // Secure cookies are checked before insecure on the server; clear when opting into HTTP.
+      if (insecureCookies) {
+        pairs.push(["secure_cookies", "false"]);
+      }
+      const { failed, restart } = await putMany(pairs);
       if (metricsToken && !metricsToken.includes("•") && !metricsToken.includes("*")) {
         await api.put("/api/settings/metrics_token", { value: metricsToken });
       }
-      if (failed > 0) runtimeMsg = `Save failed (${failed} errors)`;
-      else if (restart) runtimeMsg = "Saved — restart the process to apply worker/concurrency changes";
-      else runtimeMsg = "Saved";
+      if (failed > 0) systemMsg = `Save failed (${failed} errors)`;
+      else if (restart) systemMsg = "Saved — restart to apply worker/concurrency changes";
+      else systemMsg = "Saved";
     } catch (err) {
-      runtimeMsg = err.message || "Save failed";
+      systemMsg = err.message || "Save failed";
     } finally {
-      runtimeSaving = false;
+      systemSaving = false;
     }
   }
 
@@ -517,6 +470,49 @@
       integrationsSaving = false;
     }
   }
+
+  async function deleteRule(id) {
+    rulesMsg = "";
+    try {
+      await api.delete(`/api/learning/rules/${id}`);
+      learnedRules = learnedRules.filter((r) => r.id !== id);
+      rulesMsg = "Rule deleted";
+    } catch (err) {
+      rulesMsg = err.message || "Delete failed";
+    }
+  }
+
+  async function openInstallUrl() {
+    githubMsg = "";
+    try {
+      const data = await api.get("/api/github/install-url");
+      if (data.url) window.open(data.url, "_blank");
+    } catch (err) {
+      githubMsg = err.message || "Failed to open install URL";
+    }
+  }
+
+  async function clearLocalGithub() {
+    clearingGithub = true;
+    githubMsg = "";
+    try {
+      const res = await api.delete("/api/settings/github");
+      github = { configured: false };
+      confirmClearGithub = false;
+      githubMsg =
+        res?.message ||
+        "Local GitHub App config cleared. Repos are marked inactive. Remove the App on GitHub separately if needed.";
+    } catch (err) {
+      githubMsg = err.message || "Clear failed";
+    } finally {
+      clearingGithub = false;
+    }
+  }
+
+  function toggleFlag(setter, current) {
+    if (!canEditSettings) return;
+    setter(!current);
+  }
 </script>
 
 <AppShell title="Settings">
@@ -528,19 +524,29 @@
     <div class="page-toolbar compact settings-hero">
       <div>
         <h1 class="page-title">Settings</h1>
-        <p class="page-description">LLM, detectors, policy, runtime, SSO, integrations, GitHub App, and account.</p>
+        <p class="page-description">Common options first. Advanced knobs stay tucked away.</p>
       </div>
+      <label class="settings-filter" for="settings-filter">
+        <span class="sr-only">Filter settings</span>
+        <input
+          id="settings-filter"
+          type="search"
+          placeholder="Filter…"
+          bind:value={settingsFilter}
+          autocomplete="off"
+        />
+      </label>
     </div>
 
     {#if !canEditSettings}
       <div class="settings-readonly-banner" role="status">
-        Only owners can change LLM, detector, policy, and GitHub settings. Your role: {roleLabel($currentUser?.role, $currentUser?.is_bootstrap)}.
+        Only owners can change org settings. Your role: {roleLabel($currentUser?.role, $currentUser?.is_bootstrap)}.
       </div>
     {/if}
 
     <div class="settings-tabs-wrap">
       <nav class="settings-tabs" aria-label="Settings tabs" role="tablist">
-        {#each TABS as s}
+        {#each visibleTabs as s}
           <button
             type="button"
             role="tab"
@@ -556,6 +562,16 @@
       </nav>
     </div>
 
+    {#if visibleTabs.length === 0}
+      <p class="empty-note">No sections match “{settingsFilter}”.</p>
+    {:else if !visibleTabs.some((t) => t.id === activeTab)}
+      <p class="empty-note">
+        Switch to a matching tab
+        {#each visibleTabs as t, i}
+          {#if i > 0}, {/if}<button type="button" class="linkish" onclick={() => selectTab(t.id)}>{t.label}</button>
+        {/each}.
+      </p>
+    {:else}
     <div
       class="settings-panel"
       role="tabpanel"
@@ -563,370 +579,290 @@
       aria-labelledby="tab-{activeTab}"
     >
       {#if activeTab === "llm"}
-          <section class="card settings-card">
-            <header class="settings-section-head">
-              <h3 class="section-heading">LLM</h3>
-              <p class="section-desc">Optional. Tier-1 detectors run without a model.</p>
-            </header>
+        <section class="card settings-card">
+          <header class="settings-section-head">
+            <h3 class="section-heading">LLM</h3>
+            <p class="section-desc">Optional. Tier-1 detectors run without a model.</p>
+          </header>
+          <div class="form-group">
+            <label for="llm-provider">Provider</label>
+            <select id="llm-provider" bind:value={llmProvider} onchange={(e) => handleProviderChange(e.target.value)} disabled={!canEditSettings}>
+              <option value="openrouter">OpenRouter</option>
+              <option value="ollama">Ollama</option>
+              <option value="custom">Custom</option>
+              <option value="disabled">Disabled</option>
+            </select>
+          </div>
+          {#if llmProvider !== "disabled"}
             <div class="form-group">
-              <label for="llm-provider">Provider</label>
-              <select id="llm-provider" bind:value={llmProvider} onchange={(e) => handleProviderChange(e.target.value)}>
-                <option value="openrouter">OpenRouter</option>
-                <option value="ollama">Ollama</option>
-                <option value="custom">Custom</option>
-                <option value="disabled">Disabled</option>
-              </select>
+              <label for="llm-key">API Key</label>
+              <input id="llm-key" type="password" bind:value={llmKey} placeholder="sk-..." disabled={!canEditSettings} />
             </div>
-            {#if llmProvider !== "disabled"}
-              <div class="form-group">
-                <label for="llm-key">API Key</label>
-                <input id="llm-key" type="password" bind:value={llmKey} placeholder="sk-..." />
-              </div>
-              <div class="settings-llm-grid">
-                <div class="form-group model-search">
-                  <label for="llm-model">Model (review_diff)</label>
-                  {#if llmProvider === "openrouter"}
-                    <div class="search-wrap">
-                      <input id="llm-model" type="text" bind:value={modelSearch}
-                        oninput={() => (modelDropdown = true)}
-                        onfocus={() => (modelDropdown = true)}
-                        onkeydown={handleModelKeydown}
-                        onblur={handleModelBlur}
-                        placeholder="Search models…" autocomplete="off" />
-                      {#if modelDropdown && modelFiltered.length > 0}
-                        <div class="search-dropdown">
-                          {#each modelFiltered as m}
-                            <button class="search-item" class:active={m.id === llmModel}
-                              onmousedown={(e) => e.preventDefault()}
-                              onclick={() => selectModel(m)}>
-                              <span class="search-id">{m.id}</span>
-                            </button>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-                  {:else}
-                    <input id="llm-model" type="text" bind:value={llmModel} />
-                  {/if}
-                </div>
-                <div class="form-group model-search">
-                  <label for="llm-model-cheap">Cheap model (summarize / describe / ask)</label>
-                  {#if llmProvider === "openrouter"}
-                    <div class="search-wrap">
-                      <input id="llm-model-cheap" type="text" bind:value={cheapModelSearch}
-                        oninput={() => (cheapModelDropdown = true)}
-                        onfocus={() => (cheapModelDropdown = true)}
-                        onkeydown={handleCheapModelKeydown}
-                        onblur={handleCheapModelBlur}
-                        placeholder="Search models…" autocomplete="off" />
-                      {#if cheapModelDropdown && cheapModelFiltered.length > 0}
-                        <div class="search-dropdown">
-                          {#each cheapModelFiltered as m}
-                            <button class="search-item" class:active={m.id === llmModelCheap}
-                              onmousedown={(e) => e.preventDefault()}
-                              onclick={() => selectCheapModel(m)}>
-                              <span class="search-id">{m.id}</span>
-                            </button>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-                  {:else}
-                    <input id="llm-model-cheap" type="text" bind:value={llmModelCheap}
-                      placeholder="optional cheaper model id" />
-                  {/if}
-                </div>
-              </div>
-              <div class="form-group">
-                <label for="llm-url">Base URL</label>
+            <div class="settings-llm-grid">
+              <div class="form-group model-search">
+                <label for="llm-model">Model (review_diff)</label>
                 {#if llmProvider === "openrouter"}
-                  <input id="llm-url" type="text" value={OPENROUTER_BASE} readonly class="input-readonly" />
-                  <p class="field-hint">Fixed for OpenRouter. Saved automatically.</p>
+                  <div class="search-wrap">
+                    <input id="llm-model" type="text" bind:value={modelSearch}
+                      oninput={() => (modelDropdown = true)}
+                      onfocus={() => (modelDropdown = true)}
+                      onkeydown={handleModelKeydown}
+                      onblur={handleModelBlur}
+                      placeholder="Search models…" autocomplete="off" disabled={!canEditSettings} />
+                    {#if modelDropdown && modelFiltered.length > 0}
+                      <div class="search-dropdown">
+                        {#each modelFiltered as m}
+                          <button class="search-item" class:active={m.id === llmModel}
+                            onmousedown={(e) => e.preventDefault()}
+                            onclick={() => selectModel(m)}>
+                            <span class="search-id">{m.id}</span>
+                          </button>
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
                 {:else}
-                  <input id="llm-url" type="text" bind:value={llmBaseUrl} placeholder="https://…" />
+                  <input id="llm-model" type="text" bind:value={llmModel} disabled={!canEditSettings} />
                 {/if}
               </div>
-              <div class="form-group">
-                <label for="llm-budget">Daily LLM budget USD (0 = unlimited)</label>
-                <input id="llm-budget" type="text" bind:value={llmDailyBudget} placeholder="e.g. 5" />
+              <div class="form-group model-search">
+                <label for="llm-model-cheap">Cheap model</label>
+                {#if llmProvider === "openrouter"}
+                  <div class="search-wrap">
+                    <input id="llm-model-cheap" type="text" bind:value={cheapModelSearch}
+                      oninput={() => (cheapModelDropdown = true)}
+                      onfocus={() => (cheapModelDropdown = true)}
+                      onkeydown={handleCheapModelKeydown}
+                      onblur={handleCheapModelBlur}
+                      placeholder="Search models…" autocomplete="off" disabled={!canEditSettings} />
+                    {#if cheapModelDropdown && cheapModelFiltered.length > 0}
+                      <div class="search-dropdown">
+                        {#each cheapModelFiltered as m}
+                          <button class="search-item" class:active={m.id === llmModelCheap}
+                            onmousedown={(e) => e.preventDefault()}
+                            onclick={() => selectCheapModel(m)}>
+                            <span class="search-id">{m.id}</span>
+                          </button>
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
+                {:else}
+                  <input id="llm-model-cheap" type="text" bind:value={llmModelCheap}
+                    placeholder="optional" disabled={!canEditSettings} />
+                {/if}
               </div>
-            {/if}
-            <div class="save-row">
-              <button onclick={saveLLM} disabled={llmSaving || !canEditSettings}>{llmSaving ? "Saving…" : "Save"}</button>
-              {#if llmMsg}<span class="save-msg" class:error={llmMsg !== "Saved"}>{llmMsg}</span>{/if}
             </div>
-          </section>
-          {:else if activeTab === "detectors"}
-          <section class="card settings-card">
-            <header class="settings-section-head">
-              <h3 class="section-heading">Detectors</h3>
-              <p class="section-desc">Tier-1 checks that run on every PR.</p>
-            </header>
-            <div class="detector-list">
-              {#each Object.entries(detectorToggles) as [key, val]}
-                <div class="detector-row">
-                  <span>{formatLabel(key)}</span>
-                  <label class="toggle">
-                    <div class="toggle-track" class:on={val ?? false} role="checkbox" aria-checked={val ?? false}
-                      tabindex="0"
-                      onclick={() => (detectorToggles[key] = !(detectorToggles[key] ?? false))}
-                      onkeydown={(e) => { if (e.key === 'Enter') detectorToggles[key] = !(detectorToggles[key] ?? false); }}>
-                      <div class="toggle-knob"></div>
-                    </div>
-                  </label>
-                </div>
-              {/each}
+            <div class="form-group">
+              <label for="llm-url">Base URL</label>
+              {#if llmProvider === "openrouter"}
+                <input id="llm-url" type="text" value={OPENROUTER_BASE} readonly class="input-readonly" />
+              {:else}
+                <input id="llm-url" type="text" bind:value={llmBaseUrl} placeholder="https://…" disabled={!canEditSettings} />
+              {/if}
             </div>
-            <div class="form-group" style="margin-top:16px">
-              <label for="default-severity">Minimum severity to surface</label>
-              <select id="default-severity" bind:value={defaultSeverity}>
+            <div class="form-group">
+              <label for="llm-budget">Daily budget USD (0 = unlimited)</label>
+              <input id="llm-budget" type="text" bind:value={llmDailyBudget} placeholder="e.g. 5" disabled={!canEditSettings} />
+            </div>
+          {/if}
+          <div class="save-row">
+            <button onclick={saveLLM} disabled={llmSaving || !canEditSettings}>{llmSaving ? "Saving…" : "Save"}</button>
+            {#if llmMsg}<span class="save-msg" class:error={llmMsg !== "Saved"}>{llmMsg}</span>{/if}
+          </div>
+        </section>
+
+      {:else if activeTab === "review"}
+        <section class="card settings-card">
+          <header class="settings-section-head">
+            <h3 class="section-heading">Review</h3>
+            <p class="section-desc">Detectors and how findings show up on PRs.</p>
+          </header>
+
+          <h4 class="settings-subhead">Detectors</h4>
+          <div class="detector-list compact">
+            {#each Object.entries(detectorToggles) as [key, val]}
+              <div class="detector-row">
+                <span>{formatLabel(key)}</span>
+                <label class="toggle">
+                  <div class="toggle-track" class:on={val ?? false} role="checkbox" aria-checked={val ?? false}
+                    tabindex="0"
+                    onclick={() => canEditSettings && (detectorToggles[key] = !(detectorToggles[key] ?? false))}
+                    onkeydown={(e) => { if (canEditSettings && e.key === 'Enter') detectorToggles[key] = !(detectorToggles[key] ?? false); }}>
+                    <div class="toggle-knob"></div>
+                  </div>
+                </label>
+              </div>
+            {/each}
+          </div>
+
+          <h4 class="settings-subhead">Policy</h4>
+          <div class="form-row-2">
+            <div class="form-group">
+              <label for="review-strictness">Strictness</label>
+              <select id="review-strictness" bind:value={reviewStrictness} disabled={!canEditSettings}>
+                <option value="lenient">Lenient</option>
+                <option value="balanced">Balanced</option>
+                <option value="strict">Strict</option>
+                <option value="nitpick">Nitpick</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="default-severity">Min severity</label>
+              <select id="default-severity" bind:value={defaultSeverity} disabled={!canEditSettings}>
                 <option value="blocking">Blocking</option>
                 <option value="warning">Warning</option>
                 <option value="info">Info</option>
               </select>
             </div>
-            <div class="save-row">
-              <button onclick={async () => { await saveDetectors(); await saveSeverity(); }} disabled={detectorSaving || severitySaving || !canEditSettings}>
-                {detectorSaving || severitySaving ? "Saving…" : "Save"}
-              </button>
-              {#if detectorMsg || severityMsg}
-                <span class="save-msg" class:error={(detectorMsg && detectorMsg !== "Saved") || (severityMsg && severityMsg !== "Saved")}>
-                  {detectorMsg === "Saved" && (!severityMsg || severityMsg === "Saved") ? "Saved" : (detectorMsg || severityMsg)}
-                </span>
-              {/if}
-            </div>
-          </section>
-          {:else if activeTab === "policy"}
-          <section class="card settings-card">
-            <header class="settings-section-head">
-              <h3 class="section-heading">Policy</h3>
-              <p class="section-desc">Strictness, caps, paths, labels, and offline mode.</p>
-            </header>
+          </div>
+          <div class="form-row-2">
             <div class="form-group">
-              <label for="review-strictness">Review strictness</label>
-              <select id="review-strictness" bind:value={reviewStrictness}>
-                <option value="lenient">Lenient — fewer nits, warnings+</option>
-                <option value="balanced">Balanced — default</option>
-                <option value="strict">Strict — more thorough</option>
-                <option value="nitpick">Nitpick — include style/info</option>
-              </select>
-              <p class="section-desc" style="margin-top:6px">Also set via <code>[behavior] review_strictness</code> in <code>.codasaurus.toml</code>.</p>
+              <label for="max-warnings">Max warnings</label>
+              <input id="max-warnings" type="number" min="0" bind:value={maxWarnings} disabled={!canEditSettings} />
             </div>
             <div class="form-group">
-              <label for="max-warnings">Max warnings (soft cap)</label>
-              <input id="max-warnings" type="number" min="0" bind:value={maxWarnings} />
+              <label for="max-blocking">Max blocking</label>
+              <input id="max-blocking" type="number" min="0" bind:value={maxBlocking} disabled={!canEditSettings} />
             </div>
-            <div class="form-group">
-              <label for="max-blocking">Max blocking findings</label>
-              <input id="max-blocking" type="number" min="0" bind:value={maxBlocking} />
-            </div>
-            <div class="form-group">
-              <label for="forbidden-paths">Forbidden path prefixes</label>
-              <input id="forbidden-paths" type="text" bind:value={forbiddenPaths} placeholder="vendor/,secrets/" />
-            </div>
-            <div class="detector-row" style="border:none;padding:8px 0">
+          </div>
+          <div class="form-group">
+            <label for="custom-instructions">Custom instructions</label>
+            <textarea id="custom-instructions" rows="3" bind:value={customInstructions} placeholder="Prefer small PRs…" disabled={!canEditSettings}></textarea>
+          </div>
+
+          <div class="toggle-stack">
+            <div class="detector-row">
               <span>Auto-apply PR labels</span>
               <label class="toggle">
                 <div class="toggle-track" class:on={autoLabels} role="checkbox" aria-checked={autoLabels}
                   tabindex="0"
-                  onclick={() => (autoLabels = !autoLabels)}
-                  onkeydown={(e) => { if (e.key === 'Enter') autoLabels = !autoLabels; }}>
+                  onclick={() => toggleFlag((v) => (autoLabels = v), autoLabels)}
+                  onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (autoLabels = v), autoLabels); }}>
                   <div class="toggle-knob"></div>
                 </div>
               </label>
             </div>
-            <div class="detector-row" style="border:none;padding:8px 0">
-              <span>Request CODEOWNERS reviewers</span>
+            <div class="detector-row">
+              <span>Request CODEOWNERS</span>
               <label class="toggle">
                 <div class="toggle-track" class:on={requestReviewers} role="checkbox" aria-checked={requestReviewers}
                   tabindex="0"
-                  onclick={() => (requestReviewers = !requestReviewers)}
-                  onkeydown={(e) => { if (e.key === 'Enter') requestReviewers = !requestReviewers; }}>
+                  onclick={() => toggleFlag((v) => (requestReviewers = v), requestReviewers)}
+                  onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (requestReviewers = v), requestReviewers); }}>
                   <div class="toggle-knob"></div>
                 </div>
               </label>
             </div>
-            <div class="detector-row" style="border:none;padding:8px 0">
+            <div class="detector-row">
               <span>Create Check Runs</span>
               <label class="toggle">
                 <div class="toggle-track" class:on={createCheckRun} role="checkbox" aria-checked={createCheckRun}
                   tabindex="0"
-                  onclick={() => (createCheckRun = !createCheckRun)}
-                  onkeydown={(e) => { if (e.key === 'Enter') createCheckRun = !createCheckRun; }}>
+                  onclick={() => toggleFlag((v) => (createCheckRun = v), createCheckRun)}
+                  onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (createCheckRun = v), createCheckRun); }}>
                   <div class="toggle-knob"></div>
                 </div>
               </label>
             </div>
-            <div class="detector-row" style="border:none;padding:8px 0">
-              <span>Update PR description on describe</span>
-              <label class="toggle">
-                <div class="toggle-track" class:on={updatePrDescription} role="checkbox" aria-checked={updatePrDescription}
-                  tabindex="0"
-                  onclick={() => (updatePrDescription = !updatePrDescription)}
-                  onkeydown={(e) => { if (e.key === 'Enter') updatePrDescription = !updatePrDescription; }}>
-                  <div class="toggle-knob"></div>
-                </div>
-              </label>
-            </div>
-            <div class="detector-row" style="border:none;padding:8px 0">
-              <span>Allow @codasaurus fix (writes to PR branch)</span>
-              <label class="toggle">
-                <div class="toggle-track" class:on={allowAutoFix} role="checkbox" aria-checked={allowAutoFix}
-                  tabindex="0"
-                  onclick={() => (allowAutoFix = !allowAutoFix)}
-                  onkeydown={(e) => { if (e.key === 'Enter') allowAutoFix = !allowAutoFix; }}>
-                  <div class="toggle-knob"></div>
-                </div>
-              </label>
-            </div>
-            <div class="detector-row" style="border:none;padding:8px 0">
-              <span>Offline / air-gap mode</span>
-              <label class="toggle">
-                <div class="toggle-track" class:on={offlineMode} role="checkbox" aria-checked={offlineMode}
-                  tabindex="0"
-                  onclick={() => (offlineMode = !offlineMode)}
-                  onkeydown={(e) => { if (e.key === 'Enter') offlineMode = !offlineMode; }}>
-                  <div class="toggle-knob"></div>
-                </div>
-              </label>
+          </div>
+
+          <details class="settings-advanced">
+            <summary>More review options</summary>
+            <div class="form-group">
+              <label for="forbidden-paths">Forbidden path prefixes</label>
+              <input id="forbidden-paths" type="text" bind:value={forbiddenPaths} placeholder="vendor/,secrets/" disabled={!canEditSettings} />
             </div>
             <div class="form-group">
               <label for="exclude-patterns">Exclude path patterns</label>
-              <input id="exclude-patterns" type="text" bind:value={excludePatterns} placeholder="vendor/,*.lock,dist/" />
+              <input id="exclude-patterns" type="text" bind:value={excludePatterns} placeholder="vendor/,*.lock,dist/" disabled={!canEditSettings} />
             </div>
-            <div class="form-group">
-              <label for="custom-instructions">Org custom instructions (LLM)</label>
-              <textarea id="custom-instructions" rows="4" bind:value={customInstructions} placeholder="Prefer small PRs; never suggest rewriting auth…"></textarea>
+            <div class="toggle-stack">
+              <div class="detector-row">
+                <span>Update PR description on describe</span>
+                <label class="toggle">
+                  <div class="toggle-track" class:on={updatePrDescription} role="checkbox" aria-checked={updatePrDescription}
+                    tabindex="0"
+                    onclick={() => toggleFlag((v) => (updatePrDescription = v), updatePrDescription)}
+                    onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (updatePrDescription = v), updatePrDescription); }}>
+                    <div class="toggle-knob"></div>
+                  </div>
+                </label>
+              </div>
+              <div class="detector-row">
+                <span>Allow @codasaurus fix</span>
+                <label class="toggle">
+                  <div class="toggle-track" class:on={allowAutoFix} role="checkbox" aria-checked={allowAutoFix}
+                    tabindex="0"
+                    onclick={() => toggleFlag((v) => (allowAutoFix = v), allowAutoFix)}
+                    onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (allowAutoFix = v), allowAutoFix); }}>
+                    <div class="toggle-knob"></div>
+                  </div>
+                </label>
+              </div>
             </div>
-            <div class="save-row">
-              <button onclick={savePolicy} disabled={policySaving || !canEditSettings}>{policySaving ? "Saving…" : "Save"}</button>
-              {#if policyMsg}<span class="save-msg" class:error={policyMsg !== "Saved"}>{policyMsg}</span>{/if}
-            </div>
-          </section>
-          {:else if activeTab === "runtime"}
-          <section class="card settings-card">
+          </details>
+
+          <div class="save-row">
+            <button onclick={saveReview} disabled={reviewSaving || !canEditSettings}>{reviewSaving ? "Saving…" : "Save"}</button>
+            {#if reviewMsg}<span class="save-msg" class:error={reviewMsg !== "Saved"}>{reviewMsg}</span>{/if}
+          </div>
+        </section>
+
+      {:else if activeTab === "connections"}
+        <div class="settings-stack">
+          <section class="card settings-card" id="github-connection">
             <header class="settings-section-head">
-              <h3 class="section-heading">Runtime &amp; security</h3>
-              <p class="section-desc">
-                Same knobs as env vars. Host env wins on restart if set; saving here applies immediately for most settings.
-                Queue workers and max concurrent reviews need a process restart.
-              </p>
+              <h3 class="section-heading">GitHub App</h3>
+              <p class="section-desc">Install URL and local credentials.</p>
             </header>
-            <div class="form-group">
-              <label for="public-url">Public URL</label>
-              <input id="public-url" type="url" bind:value={publicUrl} placeholder="https://reviews.example.com" disabled={!canEditSettings} />
-              <p class="field-hint">Canonical origin for OIDC redirects, invites, and HSTS when https.</p>
-            </div>
-            <div class="form-row-2">
-              <div class="form-group">
-                <label for="audit-retention">Audit retention (days)</label>
-                <input id="audit-retention" type="number" min="7" max="730" bind:value={auditRetentionDays} disabled={!canEditSettings} />
-              </div>
-              <div class="form-group">
-                <label for="review-timeout">Review timeout (secs)</label>
-                <input id="review-timeout" type="number" min="30" max="3600" bind:value={reviewTimeoutSecs} disabled={!canEditSettings} />
-              </div>
-            </div>
-            <div class="form-row-2">
-              <div class="form-group">
-                <label for="queue-workers">Queue workers (1–8)</label>
-                <input id="queue-workers" type="number" min="1" max="8" bind:value={queueWorkers} placeholder="auto" disabled={!canEditSettings} />
-                <p class="field-hint">Requires restart</p>
-              </div>
-              <div class="form-group">
-                <label for="max-concurrent">Max concurrent reviews</label>
-                <input id="max-concurrent" type="number" min="1" max="64" bind:value={maxConcurrentReviews} placeholder="4" disabled={!canEditSettings} />
-                <p class="field-hint">Requires restart</p>
-              </div>
-            </div>
-            <div class="form-row-2">
-              <div class="form-group">
-                <label for="max-inline">Max inline comments</label>
-                <input id="max-inline" type="number" bind:value={maxInlineComments} disabled={!canEditSettings} />
-              </div>
-              <div class="form-group">
-                <label for="max-reviewer-files">Max reviewer files</label>
-                <input id="max-reviewer-files" type="number" bind:value={maxReviewerFiles} disabled={!canEditSettings} />
-              </div>
-            </div>
-            <div class="form-row-2">
-              <div class="form-group">
-                <label for="max-comment-bytes">Max comment bytes</label>
-                <input id="max-comment-bytes" type="number" bind:value={maxCommentBytes} disabled={!canEditSettings} />
-              </div>
-              <div class="form-group">
-                <label for="max-llm-diff">Max LLM diff chars</label>
-                <input id="max-llm-diff" type="number" bind:value={maxLlmDiffChars} disabled={!canEditSettings} />
-              </div>
-            </div>
-            <div class="form-row-2">
-              <div class="form-group">
-                <label for="auto-improve-files">Auto-improve max files</label>
-                <input id="auto-improve-files" type="number" bind:value={autoImproveMaxFiles} disabled={!canEditSettings} />
-              </div>
-              <div class="form-group">
-                <label for="auto-improve-diff">Auto-improve max diff chars</label>
-                <input id="auto-improve-diff" type="number" bind:value={autoImproveMaxDiff} disabled={!canEditSettings} />
-              </div>
-            </div>
-            <div class="form-group">
-              <label for="metrics-token">Metrics bearer token</label>
-              <input id="metrics-token" type="password" bind:value={metricsToken} placeholder="Leave blank to disable /metrics" disabled={!canEditSettings} autocomplete="off" />
-            </div>
-            <div class="detector-row" style="border:none;padding:8px 0">
-              <span>Force HSTS</span>
-              <label class="toggle">
-                <div class="toggle-track" class:on={hsts} role="checkbox" aria-checked={hsts}
-                  tabindex="0"
-                  onclick={() => canEditSettings && (hsts = !hsts)}
-                  onkeydown={(e) => { if (canEditSettings && e.key === 'Enter') hsts = !hsts; }}>
-                  <div class="toggle-knob"></div>
+            {#if github?.configured}
+              <div class="settings-meta-grid">
+                <div>
+                  <span class="meta-label">App name</span>
+                  <p class="meta-value">{github.app_name ?? "-"}</p>
                 </div>
-              </label>
-            </div>
-            <div class="detector-row" style="border:none;padding:8px 0">
-              <span>Allow local LLM endpoints</span>
-              <label class="toggle">
-                <div class="toggle-track" class:on={allowLocalLlm} role="checkbox" aria-checked={allowLocalLlm}
-                  tabindex="0"
-                  onclick={() => canEditSettings && (allowLocalLlm = !allowLocalLlm)}
-                  onkeydown={(e) => { if (canEditSettings && e.key === 'Enter') allowLocalLlm = !allowLocalLlm; }}>
-                  <div class="toggle-knob"></div>
+                <div>
+                  <span class="meta-label">App ID</span>
+                  <p class="meta-value">{github.app_id ?? "-"}</p>
                 </div>
-              </label>
-            </div>
-            <div class="detector-row" style="border:none;padding:8px 0">
-              <span>Force Secure cookies</span>
-              <label class="toggle">
-                <div class="toggle-track" class:on={secureCookies} role="checkbox" aria-checked={secureCookies}
-                  tabindex="0"
-                  onclick={() => canEditSettings && (secureCookies = !secureCookies)}
-                  onkeydown={(e) => { if (canEditSettings && e.key === 'Enter') secureCookies = !secureCookies; }}>
-                  <div class="toggle-knob"></div>
-                </div>
-              </label>
-            </div>
-            <div class="detector-row" style="border:none;padding:8px 0">
-              <span>Insecure cookies (HTTP only)</span>
-              <label class="toggle">
-                <div class="toggle-track" class:on={insecureCookies} role="checkbox" aria-checked={insecureCookies}
-                  tabindex="0"
-                  onclick={() => canEditSettings && (insecureCookies = !insecureCookies)}
-                  onkeydown={(e) => { if (canEditSettings && e.key === 'Enter') insecureCookies = !insecureCookies; }}>
-                  <div class="toggle-knob"></div>
-                </div>
-              </label>
-            </div>
-            <div class="save-row">
-              <button onclick={saveRuntime} disabled={runtimeSaving || !canEditSettings}>{runtimeSaving ? "Saving…" : "Save"}</button>
-              {#if runtimeMsg}<span class="save-msg" class:error={!runtimeMsg.startsWith("Saved")}>{runtimeMsg}</span>{/if}
-            </div>
+              </div>
+              <div class="save-row" style="margin-top:8px">
+                <button onclick={openInstallUrl}>Open install URL</button>
+                <a href="https://github.com/settings/apps" target="_blank" rel="noopener noreferrer" class="btn-link">Manage on GitHub ↗</a>
+              </div>
+              {#if githubMsg}
+                <p class="save-msg" class:error={/fail|error/i.test(githubMsg)}>{githubMsg}</p>
+              {/if}
+              <div class="danger-zone" style="margin-top:16px">
+                <h3>Danger zone</h3>
+                <p>Clears local App credentials and marks repos inactive. Does not uninstall on GitHub.</p>
+                {#if !confirmClearGithub}
+                  <button class="danger" onclick={() => (confirmClearGithub = true)} disabled={!canEditSettings}>Clear local GitHub config</button>
+                {:else}
+                  <div style="display:flex;gap:8px;margin-top:8px">
+                    <button class="danger" onclick={clearLocalGithub} disabled={clearingGithub}>
+                      {clearingGithub ? "Clearing…" : "Confirm clear"}
+                    </button>
+                    <button onclick={() => (confirmClearGithub = false)}>Cancel</button>
+                  </div>
+                {/if}
+              </div>
+            {:else}
+              <p class="empty-note">No GitHub App configured yet.</p>
+              {#if githubMsg}
+                <p class="save-msg" class:error={/fail|error/i.test(githubMsg)}>{githubMsg}</p>
+              {/if}
+              <div class="save-row">
+                <button class="primary" onclick={openInstallUrl}>Install GitHub App</button>
+              </div>
+            {/if}
           </section>
-          {:else if activeTab === "auth"}
+
           <section class="card settings-card">
             <header class="settings-section-head">
-              <h3 class="section-heading">OIDC / SSO</h3>
-              <p class="section-desc">Configure an identity provider. Equivalent to OIDC_* environment variables.</p>
+              <h3 class="section-heading">SSO (OIDC)</h3>
+              <p class="section-desc">Optional identity provider for dashboard login.</p>
             </header>
             <div class="form-group">
               <label for="oidc-issuer">Issuer URL</label>
@@ -942,61 +878,66 @@
                 <input id="oidc-client-secret" type="password" bind:value={oidcClientSecret} disabled={!canEditSettings} autocomplete="off" />
               </div>
             </div>
-            <div class="form-group">
-              <label for="oidc-redirect">Redirect URI (optional)</label>
-              <input id="oidc-redirect" type="url" bind:value={oidcRedirectUri} placeholder="Defaults to PUBLIC_URL/api/auth/oidc/callback" disabled={!canEditSettings} />
-            </div>
-            <div class="form-group">
-              <label for="oidc-scopes">Scopes</label>
-              <input id="oidc-scopes" type="text" bind:value={oidcScopes} disabled={!canEditSettings} />
-            </div>
-            <div class="detector-row" style="border:none;padding:8px 0">
-              <span>Allow open join (no invite)</span>
-              <label class="toggle">
-                <div class="toggle-track" class:on={oidcAllowOpenJoin} role="checkbox" aria-checked={oidcAllowOpenJoin}
-                  tabindex="0"
-                  onclick={() => canEditSettings && (oidcAllowOpenJoin = !oidcAllowOpenJoin)}
-                  onkeydown={(e) => { if (canEditSettings && e.key === 'Enter') oidcAllowOpenJoin = !oidcAllowOpenJoin; }}>
-                  <div class="toggle-knob"></div>
+            <details class="settings-advanced">
+              <summary>SSO advanced</summary>
+              <div class="form-group">
+                <label for="oidc-redirect">Redirect URI</label>
+                <input id="oidc-redirect" type="url" bind:value={oidcRedirectUri} placeholder="Defaults from Public URL" disabled={!canEditSettings} />
+              </div>
+              <div class="form-group">
+                <label for="oidc-scopes">Scopes</label>
+                <input id="oidc-scopes" type="text" bind:value={oidcScopes} disabled={!canEditSettings} />
+              </div>
+              <div class="toggle-stack">
+                <div class="detector-row">
+                  <span>Allow open join (no invite)</span>
+                  <label class="toggle">
+                    <div class="toggle-track" class:on={oidcAllowOpenJoin} role="checkbox" aria-checked={oidcAllowOpenJoin}
+                      tabindex="0"
+                      onclick={() => toggleFlag((v) => (oidcAllowOpenJoin = v), oidcAllowOpenJoin)}
+                      onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (oidcAllowOpenJoin = v), oidcAllowOpenJoin); }}>
+                      <div class="toggle-knob"></div>
+                    </div>
+                  </label>
                 </div>
-              </label>
-            </div>
-            <div class="detector-row" style="border:none;padding:8px 0">
-              <span>Allow unverified email claims</span>
-              <label class="toggle">
-                <div class="toggle-track" class:on={oidcAllowUnverifiedEmail} role="checkbox" aria-checked={oidcAllowUnverifiedEmail}
-                  tabindex="0"
-                  onclick={() => canEditSettings && (oidcAllowUnverifiedEmail = !oidcAllowUnverifiedEmail)}
-                  onkeydown={(e) => { if (canEditSettings && e.key === 'Enter') oidcAllowUnverifiedEmail = !oidcAllowUnverifiedEmail; }}>
-                  <div class="toggle-knob"></div>
+                <div class="detector-row">
+                  <span>Allow unverified email</span>
+                  <label class="toggle">
+                    <div class="toggle-track" class:on={oidcAllowUnverifiedEmail} role="checkbox" aria-checked={oidcAllowUnverifiedEmail}
+                      tabindex="0"
+                      onclick={() => toggleFlag((v) => (oidcAllowUnverifiedEmail = v), oidcAllowUnverifiedEmail)}
+                      onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (oidcAllowUnverifiedEmail = v), oidcAllowUnverifiedEmail); }}>
+                      <div class="toggle-knob"></div>
+                    </div>
+                  </label>
                 </div>
-              </label>
-            </div>
-            <div class="detector-row" style="border:none;padding:8px 0">
-              <span>Allow public client (empty secret)</span>
-              <label class="toggle">
-                <div class="toggle-track" class:on={oidcAllowPublicClient} role="checkbox" aria-checked={oidcAllowPublicClient}
-                  tabindex="0"
-                  onclick={() => canEditSettings && (oidcAllowPublicClient = !oidcAllowPublicClient)}
-                  onkeydown={(e) => { if (canEditSettings && e.key === 'Enter') oidcAllowPublicClient = !oidcAllowPublicClient; }}>
-                  <div class="toggle-knob"></div>
+                <div class="detector-row">
+                  <span>Allow public client</span>
+                  <label class="toggle">
+                    <div class="toggle-track" class:on={oidcAllowPublicClient} role="checkbox" aria-checked={oidcAllowPublicClient}
+                      tabindex="0"
+                      onclick={() => toggleFlag((v) => (oidcAllowPublicClient = v), oidcAllowPublicClient)}
+                      onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (oidcAllowPublicClient = v), oidcAllowPublicClient); }}>
+                      <div class="toggle-knob"></div>
+                    </div>
+                  </label>
                 </div>
-              </label>
-            </div>
+              </div>
+            </details>
             <div class="save-row">
-              <button onclick={saveAuth} disabled={authSaving || !canEditSettings}>{authSaving ? "Saving…" : "Save"}</button>
+              <button onclick={saveAuth} disabled={authSaving || !canEditSettings}>{authSaving ? "Saving…" : "Save SSO"}</button>
               {#if authMsg}<span class="save-msg" class:error={authMsg !== "Saved"}>{authMsg}</span>{/if}
             </div>
           </section>
-          {:else if activeTab === "integrations"}
+
           <section class="card settings-card">
             <header class="settings-section-head">
-              <h3 class="section-heading">Ticket integrations</h3>
-              <p class="section-desc">Enrich PR context from Jira keys and Linear issue IDs in the description.</p>
+              <h3 class="section-heading">Tickets</h3>
+              <p class="section-desc">Optional Jira / Linear context from PR descriptions.</p>
             </header>
             <div class="form-group">
               <label for="jira-base">Jira base URL</label>
-              <input id="jira-base" type="url" bind:value={jiraBaseUrl} placeholder="https://your-org.atlassian.net" disabled={!canEditSettings} />
+              <input id="jira-base" type="url" bind:value={jiraBaseUrl} placeholder="https://org.atlassian.net" disabled={!canEditSettings} />
             </div>
             <div class="form-row-2">
               <div class="form-group">
@@ -1013,134 +954,256 @@
               <input id="linear-key" type="password" bind:value={linearApiKey} disabled={!canEditSettings} autocomplete="off" />
             </div>
             <div class="save-row">
-              <button onclick={saveIntegrations} disabled={integrationsSaving || !canEditSettings}>{integrationsSaving ? "Saving…" : "Save"}</button>
+              <button onclick={saveIntegrations} disabled={integrationsSaving || !canEditSettings}>{integrationsSaving ? "Saving…" : "Save tickets"}</button>
               {#if integrationsMsg}<span class="save-msg" class:error={integrationsMsg !== "Saved"}>{integrationsMsg}</span>{/if}
             </div>
           </section>
-          {:else if activeTab === "github"}
-          <section class="card settings-card">
-            <header class="settings-section-head">
-              <h3 class="section-heading">GitHub App</h3>
-              <p class="section-desc">Install URL and local credentials. Rotate keys on GitHub, then clear and re-setup here.</p>
-            </header>
-            {#if github?.configured}
-              <div class="settings-meta-grid">
-                <div>
-                  <span class="meta-label">App name</span>
-                  <p class="meta-value">{github.app_name ?? "-"}</p>
-                </div>
-                <div>
-                  <span class="meta-label">App ID</span>
-                  <p class="meta-value">{github.app_id ?? "-"}</p>
-                </div>
-              </div>
-              <div class="save-row" style="margin-top:8px">
-                <button onclick={openInstallUrl}>Open install URL</button>
-                <a
-                  href="https://github.com/settings/apps"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="btn-link"
-                >Manage on GitHub ↗</a>
-              </div>
-              <p class="field-hint">
-                To rotate the private key or webhook secret, generate new credentials in GitHub, clear local config below, then re-run setup (or set env vars and redeploy).
-              </p>
-              {#if githubMsg}
-                <p class="save-msg" class:error={/fail|error/i.test(githubMsg)}>{githubMsg}</p>
-              {/if}
-              <div class="danger-zone" style="margin-top:20px">
-                <h3>Danger zone</h3>
-                <p>
-                  Clears App ID, private key, and webhook secret from Codasaurus and marks synced repos inactive.
-                  This does <strong>not</strong> uninstall the App from GitHub.
-                </p>
-                {#if !confirmClearGithub}
-                  <button class="danger" onclick={() => (confirmClearGithub = true)} disabled={!canEditSettings}>Clear local GitHub config</button>
-                {:else}
-                  <p style="font-size:13px;margin-bottom:8px">Clear local credentials? The GitHub App stays installed until you remove it on GitHub.</p>
-                  <div style="display:flex;gap:8px">
-                    <button class="danger" onclick={clearLocalGithub} disabled={clearingGithub}>
-                      {clearingGithub ? "Clearing…" : "Confirm clear"}
-                    </button>
-                    <button onclick={() => (confirmClearGithub = false)}>Cancel</button>
-                  </div>
-                {/if}
-              </div>
-            {:else}
-              <p class="empty-note">No GitHub App configured in Codasaurus yet.</p>
-              {#if githubMsg}
-                <p class="save-msg" class:error={/fail|error/i.test(githubMsg)}>{githubMsg}</p>
-              {/if}
-              <div class="save-row">
-                <button class="primary" onclick={openInstallUrl}>Install GitHub App</button>
-              </div>
-            {/if}
-          </section>
-          {:else if activeTab === "account"}
-          <section class="card settings-card">
-            <header class="settings-section-head">
-              <h3 class="section-heading">Account</h3>
-              <p class="section-desc">
-                Signed in as {roleLabel($currentUser?.role, $currentUser?.is_bootstrap)} · {$currentUser?.email}.
-                Manage members on the <a href="#/app/team">Team</a> page.
-              </p>
-            </header>
-            {#if $currentUser?.auth_provider !== "oidc"}
-              <div class="form-group">
-                <label for="pw-current">Current password</label>
-                <input id="pw-current" type="password" bind:value={pwCurrent} autocomplete="current-password" />
-              </div>
-              <div class="form-group">
-                <label for="pw-new">New password</label>
-                <input id="pw-new" type="password" bind:value={pwNew} placeholder="At least 10 characters" autocomplete="new-password" />
-              </div>
-              <div class="save-row">
-                <button onclick={changePassword} disabled={pwSaving || !pwCurrent || pwNew.length < 10}>
-                  {pwSaving ? "Updating…" : "Update password"}
-                </button>
-                {#if pwMsg}<span class="save-msg" class:error={pwMsg !== "Password updated"}>{pwMsg}</span>{/if}
-              </div>
-            {:else}
-              <p class="empty-note">SSO account — password is managed by your identity provider.</p>
-            {/if}
-          </section>
-          {:else if activeTab === "learning"}
-          <section class="card settings-card">
-            <header class="settings-section-head">
-              <h3 class="section-heading">Learning</h3>
-              <p class="section-desc">Ignore rules taught by dismissing findings.</p>
-            </header>
-            {#if learnedRules.length === 0}
-              <p class="empty-note">No learned ignore rules yet. Dismiss findings to teach Codasaurus.</p>
-            {:else}
-              <div class="detector-list">
-                {#each learnedRules as rule}
-                  <div class="detector-row">
-                    <span>
-                      <strong>{rule.detector}</strong>
-                      {#if rule.file_pattern} · <code>{rule.file_pattern}</code>{/if}
-                      <br /><span class="muted">{rule.reason || rule.action}</span>
-                    </span>
-                    <button class="linkish" onclick={() => deleteRule(rule.id)} disabled={!$isMaintainer}>Delete</button>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-            {#if rulesMsg}<p class="save-msg" class:error={rulesMsg !== "Rule deleted"}>{rulesMsg}</p>{/if}
-          </section>
-          {/if}
         </div>
+
+      {:else if activeTab === "system"}
+        <section class="card settings-card">
+          <header class="settings-section-head">
+            <h3 class="section-heading">System</h3>
+            <p class="section-desc">Deployment basics. Tuning and security overrides are under Advanced.</p>
+          </header>
+          <div class="form-group">
+            <label for="public-url">Public URL</label>
+            <input id="public-url" type="url" bind:value={publicUrl} placeholder="https://reviews.example.com" disabled={!canEditSettings} />
+            <p class="field-hint">Used for invites, OIDC redirects, and HTTPS HSTS.</p>
+          </div>
+          <div class="form-group">
+            <label for="audit-retention">Audit retention (days)</label>
+            <input id="audit-retention" type="number" min="7" max="730" bind:value={auditRetentionDays} disabled={!canEditSettings} />
+          </div>
+          <div class="detector-row" style="border:none;padding:8px 0">
+            <span>Offline / air-gap mode</span>
+            <label class="toggle">
+              <div class="toggle-track" class:on={offlineMode} role="checkbox" aria-checked={offlineMode}
+                tabindex="0"
+                onclick={() => toggleFlag((v) => (offlineMode = v), offlineMode)}
+                onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (offlineMode = v), offlineMode); }}>
+                <div class="toggle-knob"></div>
+              </div>
+            </label>
+          </div>
+
+          <details class="settings-advanced">
+            <summary>Advanced (workers, caps, security)</summary>
+            <p class="field-hint" style="margin-bottom:12px">Defaults are fine for most installs. Workers / concurrency need a process restart.</p>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="queue-workers">Queue workers</label>
+                <input id="queue-workers" type="number" min="1" max="8" bind:value={queueWorkers} placeholder="auto" disabled={!canEditSettings} />
+              </div>
+              <div class="form-group">
+                <label for="max-concurrent">Max concurrent reviews</label>
+                <input id="max-concurrent" type="number" min="1" max="64" bind:value={maxConcurrentReviews} placeholder="4" disabled={!canEditSettings} />
+              </div>
+            </div>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="review-timeout">Review timeout (secs)</label>
+                <input id="review-timeout" type="number" bind:value={reviewTimeoutSecs} disabled={!canEditSettings} />
+              </div>
+              <div class="form-group">
+                <label for="max-inline">Max inline comments</label>
+                <input id="max-inline" type="number" bind:value={maxInlineComments} disabled={!canEditSettings} />
+              </div>
+            </div>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="max-reviewer-files">Max reviewer files</label>
+                <input id="max-reviewer-files" type="number" bind:value={maxReviewerFiles} disabled={!canEditSettings} />
+              </div>
+              <div class="form-group">
+                <label for="max-comment-bytes">Max comment bytes</label>
+                <input id="max-comment-bytes" type="number" bind:value={maxCommentBytes} disabled={!canEditSettings} />
+              </div>
+            </div>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="max-llm-diff">Max LLM diff chars</label>
+                <input id="max-llm-diff" type="number" bind:value={maxLlmDiffChars} disabled={!canEditSettings} />
+              </div>
+              <div class="form-group">
+                <label for="auto-improve-files">Auto-improve max files</label>
+                <input id="auto-improve-files" type="number" bind:value={autoImproveMaxFiles} disabled={!canEditSettings} />
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="auto-improve-diff">Auto-improve max diff chars</label>
+              <input id="auto-improve-diff" type="number" bind:value={autoImproveMaxDiff} disabled={!canEditSettings} />
+            </div>
+            <div class="form-group">
+              <label for="metrics-token">Metrics bearer token</label>
+              <input id="metrics-token" type="password" bind:value={metricsToken} placeholder="Blank disables /metrics" disabled={!canEditSettings} autocomplete="off" />
+            </div>
+            <div class="toggle-stack">
+              <div class="detector-row">
+                <span>Force HSTS</span>
+                <label class="toggle">
+                  <div class="toggle-track" class:on={hsts} role="checkbox" aria-checked={hsts}
+                    tabindex="0"
+                    onclick={() => toggleFlag((v) => (hsts = v), hsts)}
+                    onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (hsts = v), hsts); }}>
+                    <div class="toggle-knob"></div>
+                  </div>
+                </label>
+              </div>
+              <div class="detector-row">
+                <span>Allow local LLM endpoints</span>
+                <label class="toggle">
+                  <div class="toggle-track" class:on={allowLocalLlm} role="checkbox" aria-checked={allowLocalLlm}
+                    tabindex="0"
+                    onclick={() => toggleFlag((v) => (allowLocalLlm = v), allowLocalLlm)}
+                    onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (allowLocalLlm = v), allowLocalLlm); }}>
+                    <div class="toggle-knob"></div>
+                  </div>
+                </label>
+              </div>
+              <div class="detector-row">
+                <span>Allow insecure cookies (HTTP)</span>
+                <label class="toggle">
+                  <div class="toggle-track" class:on={insecureCookies} role="checkbox" aria-checked={insecureCookies}
+                    tabindex="0"
+                    onclick={() => toggleFlag((v) => (insecureCookies = v), insecureCookies)}
+                    onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (insecureCookies = v), insecureCookies); }}>
+                    <div class="toggle-knob"></div>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </details>
+
+          <div class="save-row">
+            <button onclick={saveSystem} disabled={systemSaving || !canEditSettings}>{systemSaving ? "Saving…" : "Save"}</button>
+            {#if systemMsg}<span class="save-msg" class:error={!systemMsg.startsWith("Saved")}>{systemMsg}</span>{/if}
+          </div>
+        </section>
+
+      {:else if activeTab === "account"}
+        <section class="card settings-card">
+          <header class="settings-section-head">
+            <h3 class="section-heading">Account</h3>
+            <p class="section-desc">
+              {roleLabel($currentUser?.role, $currentUser?.is_bootstrap)} · {$currentUser?.email}.
+              Members live on <a href="#/app/team">Team</a>.
+            </p>
+          </header>
+          {#if $currentUser?.auth_provider !== "oidc"}
+            <div class="form-group">
+              <label for="pw-current">Current password</label>
+              <input id="pw-current" type="password" bind:value={pwCurrent} autocomplete="current-password" />
+            </div>
+            <div class="form-group">
+              <label for="pw-new">New password</label>
+              <input id="pw-new" type="password" bind:value={pwNew} placeholder="At least 10 characters" autocomplete="new-password" />
+            </div>
+            <div class="save-row">
+              <button onclick={changePassword} disabled={pwSaving || !pwCurrent || pwNew.length < 10}>
+                {pwSaving ? "Updating…" : "Update password"}
+              </button>
+              {#if pwMsg}<span class="save-msg" class:error={pwMsg !== "Password updated"}>{pwMsg}</span>{/if}
+            </div>
+          {:else}
+            <p class="empty-note">SSO account — password is managed by your identity provider.</p>
+          {/if}
+        </section>
+
+      {:else if activeTab === "learning"}
+        <section class="card settings-card">
+          <header class="settings-section-head">
+            <h3 class="section-heading">Learning</h3>
+            <p class="section-desc">Ignore rules taught by dismissing findings.</p>
+          </header>
+          {#if learnedRules.length === 0}
+            <p class="empty-note">No learned ignore rules yet.</p>
+          {:else}
+            <div class="detector-list">
+              {#each learnedRules as rule}
+                <div class="detector-row">
+                  <span>
+                    <strong>{rule.detector}</strong>
+                    {#if rule.file_pattern} · <code>{rule.file_pattern}</code>{/if}
+                    <br /><span class="muted">{rule.reason || rule.action}</span>
+                  </span>
+                  <button class="linkish" onclick={() => deleteRule(rule.id)} disabled={!$isMaintainer}>Delete</button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+          {#if rulesMsg}<p class="save-msg" class:error={rulesMsg !== "Rule deleted"}>{rulesMsg}</p>{/if}
+        </section>
       {/if}
+    </div>
+    {/if}
+  {/if}
 </AppShell>
 
 <style>
-  .settings-hero { margin-bottom: 12px; }
+  .settings-hero {
+    margin-bottom: 12px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .settings-filter input {
+    width: min(220px, 100%);
+    font-size: 13px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+  }
   .settings-section-head { margin-bottom: 16px; }
+  .settings-subhead {
+    margin: 20px 0 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
   .section-desc {
     margin: 4px 0 0;
     font-size: 13px;
     color: var(--text-muted);
+  }
+  .settings-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .settings-advanced {
+    margin-top: 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--bg-secondary) 40%, transparent);
+  }
+  .settings-advanced summary {
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    user-select: none;
+  }
+  .settings-advanced[open] summary {
+    margin-bottom: 12px;
+    color: var(--text-primary);
   }
   .settings-meta-grid {
     display: grid;
@@ -1160,25 +1223,24 @@
     font-family: var(--font-mono);
   }
   .detector-list {
-    max-height: 320px;
+    max-height: 280px;
     overflow-y: auto;
-    margin: 0 -24px;
-    padding: 0 24px;
+    margin: 0 -8px;
+    padding: 0 8px;
     scrollbar-width: thin;
-    scrollbar-color: var(--text-muted) var(--bg-secondary);
   }
-  .detector-list::-webkit-scrollbar { width: 6px; }
-  .detector-list::-webkit-scrollbar-track { background: var(--bg-secondary); border-radius: 3px; }
-  .detector-list::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 3px; }
+  .detector-list.compact { max-height: 220px; }
   .detector-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
     padding: 8px 0;
     border-bottom: 1px solid var(--border-light);
     font-size: 14px;
   }
   .detector-row:last-child { border-bottom: none; }
+  .toggle-stack .detector-row { border-bottom: 1px solid var(--border-light); }
   .search-wrap { position: relative; }
   .search-dropdown {
     position: absolute;
@@ -1215,7 +1277,7 @@
     gap: 12px 16px;
   }
   @media (max-width: 720px) {
-    .form-row-2 { grid-template-columns: 1fr; }
+    .form-row-2, .settings-meta-grid { grid-template-columns: 1fr; }
   }
   .muted { font-size: 12px; color: var(--text-muted); }
   .linkish {
@@ -1236,8 +1298,5 @@
     border-radius: 6px;
     background: var(--bg-primary);
     color: var(--text-primary);
-  }
-  @media (max-width: 720px) {
-    .settings-meta-grid { grid-template-columns: 1fr; }
   }
 </style>
