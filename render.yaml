@@ -1,0 +1,29 @@
+# Free-friendly Codasaurus on Render.
+# Pair with Neon (or another always-free Postgres) via DATABASE_URL.
+# See docs/run-for-free.md
+
+services:
+  - type: web
+    name: codasaurus
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: CODASAURUS_FREE_TIER
+        value: "1"
+      - key: CODASAURUS_DB_MAX_CONNECTIONS
+        value: "3"
+      - key: CODASAURUS_MAX_CONCURRENT_REVIEWS
+        value: "1"
+      - key: DATABASE_URL
+        sync: false
+      - key: PUBLIC_URL
+        sync: false
+      - key: GITHUB_APP_ID
+        sync: false
+      - key: GITHUB_APP_PRIVATE_KEY_B64
+        sync: false
+      - key: GITHUB_WEBHOOK_SECRET
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false

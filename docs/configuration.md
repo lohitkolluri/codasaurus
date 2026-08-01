@@ -17,8 +17,10 @@ codasaurus version
 | Variable                        | Required            | Description                                                                         |
 | ------------------------------- | ------------------- | ----------------------------------------------------------------------------------- |
 | `DATABASE_URL`                  | recommended         | Postgres URL (default `postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus`) |
-| `CODASAURUS_DB_MAX_CONNECTIONS` | no                  | Pool size (default `16`, clamped 2–64)                                              |
-| `CODASAURUS_DATA_DIR`           | no                  | Data directory (Docker: `/data`)                                                    |
+| `CODASAURUS_DB_MAX_CONNECTIONS`     | no          | Pool size (default `16`, or `3` on free/Render/Neon hosts) |
+| `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS`| no          | Wait for a free connection (default `30`, or `60` on free hosts) |
+| `CODASAURUS_FREE_TIER`              | no          | `1` — force free-tier pool + concurrency defaults |
+| `CODASAURUS_DATA_DIR`               | no          | Data directory (Docker: `/data`) |
 | `PORT` / `--port`               | no                  | Listen port (default `3000`)                                                        |
 | `PUBLIC_URL`                    | recommended in prod | Canonical HTTPS origin for GitHub manifest callbacks                                |
 

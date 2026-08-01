@@ -43,7 +43,7 @@ ENV PORT=3000 \
     HOME=/data
 EXPOSE 3000
 # PORT is always set above — do not rely on unset env in HEALTHCHECK
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=8s --start-period=60s --retries=5 \
   CMD codasaurus health --port 3000 || exit 1
 ENTRYPOINT ["codasaurus"]
 CMD ["serve", "--host", "0.0.0.0"]

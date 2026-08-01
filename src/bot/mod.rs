@@ -390,10 +390,18 @@ pub(crate) async fn handle_webhook(
 /// Global concurrency limit for reviews (org-scale safety).
 pub(crate) static REVIEW_PERMITS: std::sync::LazyLock<tokio::sync::Semaphore> =
     std::sync::LazyLock::new(|| {
+        let default = if std::env::var_os("CODASAURUS_FREE_TIER").is_some()
+            || std::env::var_os("RENDER").is_some()
+            || std::env::var_os("RENDER_SERVICE_ID").is_some()
+        {
+            1usize
+        } else {
+            4usize
+        };
         let n = std::env::var("CODASAURUS_MAX_CONCURRENT_REVIEWS")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(4usize);
+            .unwrap_or(default);
         tokio::sync::Semaphore::new(n.max(1))
     });
 

@@ -98,12 +98,43 @@ pub fn ensure_sslmode(url: &str) -> String {
     }
 }
 
-fn default_max_connections() -> u32 {
-    // Render / small PaaS free DBs have tight connection caps.
-    if std::env::var_os("RENDER").is_some() || std::env::var_os("RENDER_SERVICE_ID").is_some() {
-        return 5;
+fn free_tier_hints(database_url: &str) -> bool {
+    if std::env::var_os("CODASAURUS_FREE_TIER").is_some_and(|v| v != "0" && v != "false") {
+        return true;
     }
-    16
+    if std::env::var_os("RENDER").is_some() || std::env::var_os("RENDER_SERVICE_ID").is_some() {
+        return true;
+    }
+    let lower = database_url.to_ascii_lowercase();
+    [
+        "neon.tech",
+        "neon.cloud",
+        "supabase.co",
+        "supabase.com",
+        "aivencloud.com",
+        "aiven.io",
+        ".render.com",
+        "amazonaws.com", // often tiny free/aurora trials
+    ]
+    .iter()
+    .any(|h| lower.contains(h))
+}
+
+fn default_max_connections(database_url: &str) -> u32 {
+    if free_tier_hints(database_url) {
+        3
+    } else {
+        16
+    }
+}
+
+fn default_acquire_timeout_secs(database_url: &str) -> u64 {
+    // Neon / free DBs may cold-start; give them time to wake.
+    if free_tier_hints(database_url) {
+        60
+    } else {
+        30
+    }
 }
 
 /// Create a Postgres pool from `DATABASE_URL` and run migrations.
@@ -131,16 +162,21 @@ pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
     let max_connections = std::env::var("CODASAURUS_DB_MAX_CONNECTIONS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or_else(default_max_connections)
+        .unwrap_or_else(|| default_max_connections(&normalized))
         .clamp(2, 64);
 
     let acquire_secs = std::env::var("CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(30u64)
+        .unwrap_or_else(|| default_acquire_timeout_secs(&normalized))
         .clamp(5, 120);
 
-    tracing::info!(max_connections, acquire_secs, "connecting to PostgreSQL");
+    tracing::info!(
+        max_connections,
+        acquire_secs,
+        free_tier = free_tier_hints(&normalized),
+        "connecting to PostgreSQL"
+    );
 
     let pool = PgPoolOptions::new()
         .max_connections(max_connections)
@@ -154,7 +190,7 @@ pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
         .map_err(|e| {
             tracing::error!(
                 error = %e,
-                "PostgreSQL connect failed — check DATABASE_URL, SSL (sslmode=require), and that the DB is reachable from this host (Render: use the Internal DB URL in the same region)"
+                "PostgreSQL connect failed — check DATABASE_URL, SSL (sslmode=require), and that the DB is reachable (Render+Neon is the recommended free stack; see docs/run-for-free.md)"
             );
             e
         })?;
@@ -189,5 +225,15 @@ mod tests {
         let u = ensure_sslmode("postgres://u:p@db.example.com/app?sslmode=verify-full");
         assert!(u.contains("sslmode=verify-full"));
         assert!(!u.contains("sslmode=require"));
+    }
+
+    #[test]
+    fn free_tier_detects_neon() {
+        assert!(free_tier_hints("postgres://u:p@ep-x.neon.tech/neondb"));
+    }
+
+    #[test]
+    fn free_tier_skips_local() {
+        assert!(!free_tier_hints("postgres://u:p@127.0.0.1:5432/app"));
     }
 }

@@ -226,14 +226,20 @@ async fn resolve_bot_config(
 }
 
 async fn health_handler() -> impl IntoResponse {
+    // Liveness-first: free PaaS (Render) + serverless Postgres (Neon) can cold-start.
+    // Returning 503 on a slow DB ping causes restart loops. Report DB in the body instead.
     let db_ok = if let Some(pool) = crate::bot::CONFIG_POOL.get() {
-        pool.ping().await.is_ok()
+        matches!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), pool.ping()).await,
+            Ok(Ok(()))
+        )
     } else {
         false
     };
     let data_dir = crate::storage::data_dir();
     let data_dir_ok = std::fs::create_dir_all(&data_dir).is_ok();
-    let status = if db_ok && data_dir_ok {
+    // Process is up if we can write data_dir; DB may still be waking.
+    let status = if data_dir_ok {
         StatusCode::OK
     } else {
         StatusCode::SERVICE_UNAVAILABLE
@@ -269,7 +275,7 @@ async fn health_handler() -> impl IntoResponse {
     (
         status,
         axum::Json(serde_json::json!({
-            "status": if status == StatusCode::OK { "ok" } else { "degraded" },
+            "status": if db_ok && data_dir_ok { "ok" } else if data_dir_ok { "degraded" } else { "unhealthy" },
             "db": db_ok,
             "data_dir": data_dir_ok,
             "version": env!("CARGO_PKG_VERSION"),
