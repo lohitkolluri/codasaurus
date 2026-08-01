@@ -114,6 +114,7 @@ fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> 
     let mut app = Router::new()
         .merge(api)
         .route("/health", get(health_handler))
+        .route("/metrics", get(metrics_handler))
         .route("/webhook", webhook_handler.clone())
         .route("/webhook/", webhook_handler);
 
@@ -201,7 +202,47 @@ async fn resolve_bot_config(
 }
 
 async fn health_handler() -> impl IntoResponse {
-    (StatusCode::OK, "ok")
+    let db_ok = if let Some(pool) = crate::bot::CONFIG_POOL.get() {
+        sqlx::query_scalar::<_, i64>("SELECT 1")
+            .fetch_one(&pool.0)
+            .await
+            .is_ok()
+    } else {
+        false
+    };
+    let data_dir = crate::storage::data_dir();
+    let data_dir_ok = std::fs::create_dir_all(&data_dir).is_ok();
+    let status = if db_ok && data_dir_ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (
+        status,
+        axum::Json(serde_json::json!({
+            "status": if status == StatusCode::OK { "ok" } else { "degraded" },
+            "db": db_ok,
+            "data_dir": data_dir_ok,
+            "version": env!("CARGO_PKG_VERSION"),
+        })),
+    )
+}
+
+async fn metrics_handler() -> impl IntoResponse {
+    let body = format!(
+        "# HELP codasaurus_up Codasaurus process is up\n\
+         # TYPE codasaurus_up gauge\n\
+         codasaurus_up 1\n\
+         # HELP codasaurus_build_info Build version\n\
+         # TYPE codasaurus_build_info gauge\n\
+         codasaurus_build_info{{version=\"{}\"}} 1\n",
+        env!("CARGO_PKG_VERSION")
+    );
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        body,
+    )
 }
 
 async fn shutdown_signal() {

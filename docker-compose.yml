@@ -16,10 +16,19 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - CODASAURUS_MODEL=${CODASAURUS_MODEL:-}
       - CODASAURUS_BASE_URL=${CODASAURUS_BASE_URL:-}
+      - CODASAURUS_MAX_CONCURRENT_REVIEWS=${CODASAURUS_MAX_CONCURRENT_REVIEWS:-4}
     volumes:
       - codasaurus-data:/data
+    # Writable temp for SQLite WAL / uploads when rootfs is read-only
+    tmpfs:
+      - /tmp:size=64M,mode=1777
     init: true
     restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     healthcheck:
       test: ["CMD", "codasaurus", "health", "--port", "3000"]
       interval: 30s
@@ -34,8 +43,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 256M
+          cpus: "2.0"
+          memory: 1024M
 
 volumes:
   codasaurus-data:

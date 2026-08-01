@@ -38,7 +38,7 @@ pub async fn log_event(
     target_type: Option<&str>,
     target_id: Option<i64>,
 ) {
-    let _ = sqlx::query(
+    match sqlx::query(
         "INSERT INTO audit_log (event_type, actor, target_type, target_id) VALUES (?, ?, ?, ?)",
     )
     .bind(event_type)
@@ -46,5 +46,9 @@ pub async fn log_event(
     .bind(target_type)
     .bind(target_id)
     .execute(&pool.0)
-    .await;
+    .await
+    {
+        Ok(_) => {}
+        Err(e) => tracing::warn!(error = %e, event_type, "failed to write audit log"),
+    }
 }

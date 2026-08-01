@@ -34,3 +34,5 @@ svelte-dashboard/dist/
 # Generated tool directories
 .codegraph/
 .playwright-mcp/
+
+.cursor/
