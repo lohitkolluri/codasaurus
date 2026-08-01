@@ -34,9 +34,9 @@ Product overview stays in the root [README](../README.md).
 
 ### Project
 
-| Doc | Topic |
-| --- | --- |
-| [CHANGELOG.md](../CHANGELOG.md) | Release notes |
-| [CONTRIBUTING.md](../CONTRIBUTING.md) | Dev setup and PR checks |
-| [SECURITY.md](../SECURITY.md) | Vulnerability reporting |
-| [.env.example](../.env.example) | Compose / local env knobs |
+| Doc                                   | Topic                     |
+| ------------------------------------- | ------------------------- |
+| [CHANGELOG.md](../CHANGELOG.md)       | Release notes             |
+| [CONTRIBUTING.md](../CONTRIBUTING.md) | Dev setup and PR checks   |
+| [SECURITY.md](../SECURITY.md)         | Vulnerability reporting   |
+| [.env.example](../.env.example)       | Compose / local env knobs |
