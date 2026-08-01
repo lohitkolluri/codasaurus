@@ -48,7 +48,7 @@ docker compose up
 
 Open the dashboard → finish the [onboarding wizard](docs/setup-onboarding.md) (~5 min) → install the GitHub App.
 
-**Want $0 forever (no trials)?** Follow [Run on always-free infra](docs/run-for-free.md) — Render free web + Neon Free Postgres + LLM optional/off.
+**Want $0 forever (no trials)?** Follow [Run on always-free infra](docs/run-for-free.md) — Render free web + Aiven Free Postgres (or Neon) + LLM optional/off.
 
 ```bash
 # From source (Postgres must be reachable)
@@ -65,15 +65,15 @@ codasaurus serve | health | version
 
 ## Docs
 
-| Guide                                                              | Topic                              |
-| ------------------------------------------------------------------ | ---------------------------------- |
-| [Setup — onboarding](docs/setup-onboarding.md)                     | First-run wizard                   |
-| [Setup — GitHub App](docs/setup-github-app.md)                     | Permissions, manifest, manual keys |
+| Guide                                                              | Topic                                   |
+| ------------------------------------------------------------------ | --------------------------------------- |
+| [Setup — onboarding](docs/setup-onboarding.md)                     | First-run wizard                        |
+| [Setup — GitHub App](docs/setup-github-app.md)                     | Permissions, manifest, manual keys      |
 | [Run completely free](docs/run-for-free.md)                        | Always-free host + Postgres (no trials) |
-| [Database](docs/database.md)                                       | PostgreSQL, pool, schema           |
-| [Configuration](docs/configuration.md)                             | Env vars, TOML, offline, OIDC      |
-| [Commands](docs/commands.md)                                       | `@codasaurus` on PRs               |
-| [Operations — backup & restore](docs/operations-backup-restore.md) | Postgres backup, HA, health        |
+| [Database](docs/database.md)                                       | PostgreSQL, pool, schema                |
+| [Configuration](docs/configuration.md)                             | Env vars, TOML, offline, OIDC           |
+| [Commands](docs/commands.md)                                       | `@codasaurus` on PRs                    |
+| [Operations — backup & restore](docs/operations-backup-restore.md) | Postgres backup, HA, health             |
 
 ---
 

@@ -283,9 +283,10 @@ pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
             });
             let hint = format!(
                 "PostgreSQL connect failed for {target}. \
-                 On Render: set DATABASE_URL to a Neon Free *direct/session* URI \
-                 (not Render free Postgres — it expires; not Supabase :6543 transaction pooler). \
-                 Open the Neon console once to wake the compute, then redeploy. \
+                 On Render: set DATABASE_URL to an always-free Postgres URI \
+                 (Aiven Free Service URI or Neon direct/session — not Render free Postgres; \
+                 not Supabase :6543 transaction pooler). \
+                 Aiven hosts look like *.aivencloud.com with sslmode=require. \
                  See docs/run-for-free.md. Error: {e}"
             );
             tracing::error!("{hint}");
