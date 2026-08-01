@@ -46,11 +46,11 @@ cd codasaurus
 docker compose up
 ```
 
-Open the dashboard → finish setup → install the GitHub App.
+Open the dashboard → finish the [onboarding wizard](docs/setup-onboarding.md) (~5 min) → install the GitHub App.
 
 ```bash
 # Postgres HA
-docker compose -f docker-compose.postgres.yml up
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up
 
 # From source
 cargo build --release
@@ -62,8 +62,17 @@ export DATABASE_URL="sqlite://./codasaurus.db?mode=rwc"
 codasaurus serve | health | version
 ```
 
-GitHub App permissions & webhook wiring: **[docs/github-app-setup.md](docs/github-app-setup.md)**.
-Backup / restore: **[docs/ops-backup-restore.md](docs/ops-backup-restore.md)**.
+---
+
+## Docs
+
+| Guide | Topic |
+| --- | --- |
+| [Setup — onboarding](docs/setup-onboarding.md) | First-run wizard |
+| [Setup — GitHub App](docs/setup-github-app.md) | Permissions, manifest, manual keys |
+| [Configuration](docs/configuration.md) | Env vars, TOML, offline, OIDC |
+| [Commands](docs/commands.md) | `@codasaurus` on PRs |
+| [Operations — backup & restore](docs/operations-backup-restore.md) | SQLite / Postgres, HA, health |
 
 ---
 
@@ -76,7 +85,7 @@ Backup / restore: **[docs/ops-backup-restore.md](docs/ops-backup-restore.md)**.
 @codasaurus help
 ```
 
-Also: `summarize` · `labels` · `changelog` · `add_docs`
+Also: `summarize` · `labels` · `changelog` · `add_docs` — full table in [docs/commands.md](docs/commands.md).
 
 ---
 
@@ -101,7 +110,7 @@ export CODASAURUS_BASE_URL="http://localhost:11434/v1"
 export CODASAURUS_MODEL="qwen2.5-coder:7b"
 ```
 
-Toggle per repo in the dashboard. `offline_mode` / `CODASAURUS_OFFLINE=1` never opens an LLM socket.
+Toggle per repo in the dashboard. `offline_mode` / `CODASAURUS_OFFLINE=1` never opens an LLM socket. Details: [configuration.md](docs/configuration.md).
 
 ---
 
