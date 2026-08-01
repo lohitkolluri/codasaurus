@@ -664,13 +664,6 @@ tr:hover td {
     color: var(--text-muted);
 }
 
-.login-invite-hint {
-    margin-top: 16px;
-    font-size: 13px;
-    color: var(--text-muted);
-    text-align: center;
-}
-
 .header-btn {
     background: none;
     border: none;
@@ -1148,70 +1141,197 @@ tr:hover td {
 .wizard-card {
     animation: rise-in 0.35s var(--ease-out) both;
 }
-.login-card {
-    animation: rise-in 0.4s var(--ease-out) both;
+
+/* ── 25. Auth / Login ───────────────────────────────────────────── */
+
+.auth-shell {
+    display: grid;
+    grid-template-columns: 1fr;
+    min-height: 100vh;
+    background: var(--bg-primary);
 }
 
-/* ── 25. Login ──────────────────────────────────────────────────── */
+.auth-stage {
+    display: none;
+    position: relative;
+    overflow: hidden;
+    padding: var(--space-12) var(--space-10);
+    background:
+        linear-gradient(
+            160deg,
+            color-mix(in srgb, var(--accent-soft) 12%, var(--bg-secondary)) 0%,
+            var(--bg-secondary) 42%,
+            var(--bg-primary) 100%
+        );
+    color: var(--text-primary);
+}
 
-.login-page {
+.auth-stage-grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+        linear-gradient(color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px),
+        linear-gradient(90deg, color-mix(in srgb, var(--border) 70%, transparent) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 80% 70% at 30% 40%, black 20%, transparent 75%);
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+.auth-stage-glow {
+    position: absolute;
+    width: 420px;
+    height: 420px;
+    border-radius: 50%;
+    left: -80px;
+    bottom: -120px;
+    background: radial-gradient(
+        circle,
+        color-mix(in srgb, var(--accent-soft) 28%, transparent),
+        transparent 68%
+    );
+    filter: blur(8px);
+    animation: auth-glow 8s var(--ease-in-out) infinite alternate;
+    pointer-events: none;
+}
+
+.auth-stage-inner {
+    position: relative;
+    z-index: 1;
+    max-width: 420px;
+    margin-top: auto;
+    margin-bottom: auto;
+}
+
+.auth-stage-inner :global(svg) {
+    color: var(--accent-soft);
+    margin-bottom: var(--space-6);
+    animation: auth-rise 0.55s var(--ease-spring) both;
+}
+
+.auth-stage-kicker {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-semibold);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-soft);
+    margin: 0 0 var(--space-3);
+    animation: auth-rise 0.55s var(--ease-spring) 0.06s both;
+}
+
+.auth-stage-title {
+    font-family: var(--font-display);
+    font-size: clamp(28px, 3.2vw, 40px);
+    font-weight: var(--weight-bold);
+    letter-spacing: -0.045em;
+    line-height: 1.15;
+    margin: 0 0 var(--space-4);
+    animation: auth-rise 0.55s var(--ease-spring) 0.12s both;
+}
+
+.auth-stage-copy {
+    font-size: var(--text-base);
+    line-height: 1.55;
+    color: var(--text-secondary);
+    margin: 0 0 var(--space-6);
+    animation: auth-rise 0.55s var(--ease-spring) 0.18s both;
+}
+
+.auth-stage-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: var(--space-3);
+    animation: auth-rise 0.55s var(--ease-spring) 0.24s both;
+}
+
+.auth-stage-list li {
+    position: relative;
+    padding-left: 18px;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+.auth-stage-list li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.55em;
+    width: 7px;
+    height: 7px;
+    border-radius: 2px;
+    background: var(--accent-soft);
+}
+
+.auth-panel {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 100vh;
-    background:
-        radial-gradient(
-            900px 420px at 15% 10%,
-            color-mix(in srgb, var(--accent-soft) 14%, transparent),
-            transparent 55%
-        ),
-        radial-gradient(
-            700px 380px at 90% 85%,
-            color-mix(in srgb, var(--info) 8%, transparent),
-            transparent 50%
-        ),
-        var(--bg-secondary);
+    padding: var(--space-8) var(--space-5);
+    background: var(--bg-primary);
 }
 
-.login-card {
-    width: min(400px, calc(100% - 32px));
-    border: 1px solid var(--border);
-    padding: var(--space-10);
-    border-radius: var(--radius-lg);
-    background: var(--surface);
-    box-shadow: var(--shadow-lg);
+.auth-panel-inner {
+    width: min(380px, 100%);
+    animation: auth-rise 0.5s var(--ease-spring) 0.1s both;
 }
 
-.login-brand {
+.auth-mobile-brand {
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    margin-bottom: var(--space-2);
-}
-
-.login-brand svg {
-    color: var(--accent-soft);
-    flex-shrink: 0;
-}
-
-.login-card h1 {
-    font-size: var(--text-3xl);
+    margin-bottom: var(--space-8);
+    font-size: var(--text-lg);
     font-weight: var(--weight-bold);
-    margin-bottom: 0;
-    letter-spacing: -0.04em;
+    letter-spacing: -0.03em;
 }
 
-.login-card .subtitle {
+.auth-mobile-brand :global(svg) {
+    color: var(--accent-soft);
+}
+
+.auth-heading {
+    font-size: var(--text-2xl);
+    font-weight: var(--weight-bold);
+    letter-spacing: -0.04em;
+    margin: 0 0 var(--space-2);
+}
+
+.auth-lead {
     font-size: var(--text-sm);
     color: var(--text-muted);
-    margin-bottom: var(--space-8);
+    margin: 0 0 var(--space-6);
+}
+
+.auth-form .form-group {
+    margin-bottom: var(--space-4);
+}
+
+.auth-form input {
+    width: 100%;
+}
+
+.auth-submit {
+    width: 100%;
+    margin-top: var(--space-2);
+}
+
+.auth-sso {
+    width: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+}
+
+.auth-sso:hover {
+    border-color: var(--text-muted);
 }
 
 .login-divider {
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    margin: var(--space-4) 0;
+    margin: var(--space-5) 0;
     color: var(--text-muted);
     font-size: var(--text-xs);
     text-transform: uppercase;
@@ -1229,16 +1349,72 @@ tr:hover td {
 .login-error {
     font-size: var(--text-sm);
     color: var(--error);
-    margin-bottom: var(--space-3);
-    padding: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-4);
+    padding: var(--space-3) var(--space-4);
     background: color-mix(in srgb, var(--error) 8%, transparent);
     border-radius: var(--radius-sm);
     border: 1px solid color-mix(in srgb, var(--error) 20%, transparent);
 }
 
-.login-card button {
-    width: 100%;
-    margin-top: var(--space-2);
+.login-invite-hint {
+    margin-top: var(--space-6);
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    text-align: left;
+}
+
+@keyframes auth-rise {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes auth-glow {
+    from {
+        transform: translate(0, 0) scale(1);
+        opacity: 0.7;
+    }
+    to {
+        transform: translate(24px, -18px) scale(1.08);
+        opacity: 1;
+    }
+}
+
+@media (min-width: 900px) {
+    .auth-shell {
+        grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    }
+
+    .auth-stage {
+        display: flex;
+        align-items: stretch;
+    }
+
+    .auth-mobile-brand {
+        display: none;
+    }
+
+    .auth-panel {
+        padding: var(--space-12);
+        border-left: 1px solid var(--border);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .auth-stage-glow,
+    .auth-stage-inner :global(svg),
+    .auth-stage-kicker,
+    .auth-stage-title,
+    .auth-stage-copy,
+    .auth-stage-list,
+    .auth-panel-inner {
+        animation: none !important;
+    }
 }
 
 /* ── 26. Wizard ────────────────────────────────────────────────── */
@@ -1854,10 +2030,6 @@ tr:hover td {
         flex-wrap: wrap;
     }
 
-    .login-card {
-        padding: var(--space-6);
-    }
-
     /* Scrollable tables on mobile */
     table {
         display: block;
@@ -2054,7 +2226,7 @@ tr:hover td {
     .app-content,
     .activity-list > .review-card,
     .wizard-card,
-    .login-card,
+    .auth-panel-inner,
     .empty-state {
         animation: none !important;
     }
