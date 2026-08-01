@@ -359,17 +359,17 @@
                       {:else}
                         <div class="team-row-actions">
                           {#if $currentUser?.is_bootstrap && m.role === "owner"}
-                            <button class="linkish" onclick={() => transferBootstrap(m.id)}
+                            <button type="button" class="quiet sm" onclick={() => transferBootstrap(m.id)}
                               >Make superuser</button
                             >
                           {/if}
                           {#if confirmRemoveId === m.id}
-                            <button class="danger" onclick={() => removeMember(m.id)}
+                            <button type="button" class="danger sm" onclick={() => removeMember(m.id)}
                               >Confirm</button
                             >
-                            <button onclick={() => (confirmRemoveId = null)}>Cancel</button>
+                            <button type="button" class="sm" onclick={() => (confirmRemoveId = null)}>Cancel</button>
                           {:else}
-                            <button class="linkish" onclick={() => (confirmRemoveId = m.id)}
+                            <button type="button" class="quiet sm" onclick={() => (confirmRemoveId = m.id)}
                               >Remove</button
                             >
                           {/if}
@@ -428,7 +428,7 @@
                   <td class="muted">{inv.expires_at?.slice?.(0, 10) || "—"}</td>
                   <td class="muted">{inv.created_by || "—"}</td>
                   <td class="team-col-actions">
-                    <button class="linkish" onclick={() => revokeInvite(inv.id)}>Revoke</button>
+                    <button type="button" class="quiet sm" onclick={() => revokeInvite(inv.id)}>Revoke</button>
                   </td>
                 </tr>
               {/each}

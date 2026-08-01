@@ -4,6 +4,8 @@
   import { api } from "../../stores/api.js";
   import AppShell from "../../lib/AppShell.svelte";
   import StatsCard from "../../lib/StatsCard.svelte";
+  import TrendChart from "../../lib/TrendChart.svelte";
+  import OutcomeChart from "../../lib/OutcomeChart.svelte";
   import Pagination from "../../lib/Pagination.svelte";
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
   import EmptyState from "../../lib/EmptyState.svelte";
@@ -75,17 +77,15 @@
     return `$${Number(usd).toFixed(3)}`;
   }
 
-  function barHeight(value, max) {
-    if (!max) return 2;
-    return Math.max(2, Math.round((Number(value || 0) / max) * 112));
-  }
-
   let series = $derived(stats?.analytics?.reviews_by_day ?? []);
   let detectors = $derived(stats?.analytics?.findings_by_detector ?? []);
   let outcomes = $derived(stats?.analytics?.outcomes_7d ?? { passed: 0, failed: 0, other: 0 });
 
   let reviewSpark = $derived(series.map((r) => r.reviews || 0));
   let findingSpark = $derived(series.map((r) => r.findings || 0));
+  let chartLabels = $derived(series.map((r) => dayLabel(r.day)));
+  let chartReviews = $derived(series.map((r) => r.reviews || 0));
+  let chartFindings = $derived(series.map((r) => r.findings || 0));
 
   let seriesMax = $derived(
     Math.max(0, ...series.map((r) => Math.max(r.reviews || 0, r.findings || 0))),
@@ -204,7 +204,7 @@
           <li class="stats-insight" class:tone-success={tip.tone === "success"} class:tone-warning={tip.tone === "warning"} class:tone-danger={tip.tone === "danger"} class:tone-info={tip.tone === "info"}>
             {tip.text}
             {#if tip.href && tip.linkLabel}
-              <a class="btn-link" href={tip.href} use:link>{tip.linkLabel}</a>
+              <a class="btn sm" href={tip.href} use:link>{tip.linkLabel}</a>
             {/if}
           </li>
         {/each}
@@ -290,95 +290,33 @@
           <div class="analytics-panel chart-card">
             <div class="chart-card-head">
               <h3 class="section-heading">Reviews &amp; findings / day</h3>
-              <div class="chart-legend">
-                <span class="legend-item reviews">Reviews</span>
-                <span class="legend-item findings">Findings</span>
-              </div>
             </div>
-            {#if chartHasActivity}
-              <div
-                class="analytics-bars"
-                role="img"
-                aria-label="Reviews and findings over 14 days"
-              >
-                {#each series as row}
-                  <div
-                    class="analytics-bar-col"
-                    title={`${dayLabel(row.day)}: ${row.reviews || 0} reviews, ${row.findings || 0} findings`}
-                  >
-                    <div class="analytics-bar-pair">
-                      <div
-                        class="analytics-bar"
-                        style={`height: ${barHeight(row.reviews, seriesMax)}px`}
-                      ></div>
-                      <div
-                        class="analytics-bar findings"
-                        style={`height: ${barHeight(row.findings, seriesMax)}px`}
-                      ></div>
-                    </div>
-                    <span class="analytics-bar-label">{dayLabel(row.day)}</span>
-                  </div>
-                {/each}
-              </div>
-            {:else}
-              <div class="chart-empty">
-                <p class="empty-note">No review activity in the last 14 days.</p>
-                <a class="btn" href="#/app/repos" use:link>Enable a repository</a>
-              </div>
-            {/if}
+            <TrendChart
+              labels={chartLabels}
+              reviews={chartReviews}
+              findings={chartFindings}
+              empty={!chartHasActivity}
+            >
+              {#snippet action()}
+                <a class="btn sm" href="#/app/repos" use:link>Enable a repository</a>
+              {/snippet}
+            </TrendChart>
           </div>
 
           <div class="analytics-panel chart-card">
             <div class="chart-card-head">
               <h3 class="section-heading">Outcomes (7d)</h3>
             </div>
-            {#if outcomeTotal === 0}
-              <div class="chart-empty">
-                <p class="empty-note">No pass/fail outcomes this week yet.</p>
-                <a class="btn" href="#/app/reviews" use:link>Open reviews</a>
-              </div>
-            {:else}
-              <div class="outcome-stack" role="img" aria-label="Pass fail mix">
-                <div
-                  class="outcome-seg passed"
-                  style={`flex: ${outcomes.passed || 0}`}
-                  title={`Passed ${outcomes.passed || 0}`}
-                ></div>
-                <div
-                  class="outcome-seg failed"
-                  style={`flex: ${outcomes.failed || 0}`}
-                  title={`Failed ${outcomes.failed || 0}`}
-                ></div>
-                {#if outcomes.other}
-                  <div
-                    class="outcome-seg other"
-                    style={`flex: ${outcomes.other}`}
-                    title={`Other ${outcomes.other}`}
-                  ></div>
-                {/if}
-              </div>
-              <ul class="outcome-legend">
-                <li>
-                  <span class="swatch passed"></span>
-                  Passed
-                  <strong>{outcomes.passed || 0}</strong>
-                  <span class="muted">{Math.round(((outcomes.passed || 0) / outcomeTotal) * 100)}%</span>
-                </li>
-                <li>
-                  <span class="swatch failed"></span>
-                  Failed
-                  <strong>{outcomes.failed || 0}</strong>
-                  <span class="muted">{Math.round(((outcomes.failed || 0) / outcomeTotal) * 100)}%</span>
-                </li>
-                {#if outcomes.other}
-                  <li>
-                    <span class="swatch other"></span>
-                    Other
-                    <strong>{outcomes.other}</strong>
-                  </li>
-                {/if}
-              </ul>
-            {/if}
+            <OutcomeChart
+              passed={outcomes.passed || 0}
+              failed={outcomes.failed || 0}
+              other={outcomes.other || 0}
+              empty={outcomeTotal === 0}
+            >
+              {#snippet action()}
+                <a class="btn sm" href="#/app/reviews" use:link>Open reviews</a>
+              {/snippet}
+            </OutcomeChart>
           </div>
         </div>
       </section>

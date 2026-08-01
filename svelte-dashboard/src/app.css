@@ -282,18 +282,6 @@ button.danger:hover {
     color: white;
 }
 
-a.btn-link {
-    display: inline-flex;
-    align-items: center;
-    font-size: 13px;
-    color: var(--accent-soft);
-    text-decoration: none;
-}
-
-a.btn-link:hover {
-    text-decoration: underline;
-}
-
 /* Secondary link-as-button — peer nav/actions (not primary CTAs) */
 a.btn {
     display: inline-flex;
@@ -323,15 +311,106 @@ a.btn:hover {
     transform: translateY(-1px);
 }
 
+a.btn.sm,
+button.sm {
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+}
+
+/* Quiet controls — chips, choice cards, compact actions.
+   Do NOT invert to accent (dark mode accent is near-white → unreadable). */
+button.chip,
+button.quiet {
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: var(--weight-medium);
+    padding: 6px 12px;
+    border-radius: 999px;
+    box-shadow: none;
+}
+
+button.chip:not(:disabled):hover,
+button.quiet:not(:disabled):hover {
+    background: var(--bg-tertiary, var(--bg-secondary));
+    color: var(--text-primary);
+    border-color: color-mix(in srgb, var(--text-muted) 55%, var(--border));
+    transform: none;
+    box-shadow: none;
+}
+
+button.choice {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    text-align: left;
+    width: 100%;
+    padding: 14px 16px;
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    box-shadow: none;
+}
+
+button.choice strong {
+    font-size: 14px;
+    font-weight: var(--weight-semibold);
+    color: var(--text-primary);
+}
+
+button.choice span {
+    font-size: 12px;
+    line-height: 1.4;
+    font-weight: var(--weight-regular);
+    color: var(--text-muted);
+}
+
+button.choice:not(:disabled):hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border-color: color-mix(in srgb, var(--text-muted) 55%, var(--border));
+    transform: none;
+    box-shadow: none;
+}
+
+button.choice:not(:disabled):hover strong {
+    color: var(--text-primary);
+}
+
+button.choice:not(:disabled):hover span {
+    color: var(--text-secondary);
+}
+
+button.choice.active {
+    border-color: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-soft) 45%, transparent);
+    background: color-mix(in srgb, var(--accent-soft) 10%, var(--bg-primary));
+    color: var(--text-primary);
+}
+
+button.choice.active:not(:disabled):hover {
+    background: color-mix(in srgb, var(--accent-soft) 14%, var(--bg-secondary));
+    border-color: var(--accent-soft);
+    transform: none;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-soft) 45%, transparent);
+}
+
 /* Ghost */
 button.ghost {
     border-color: transparent;
     background: transparent;
+    color: var(--text-secondary);
 }
 
-button.ghost:hover {
+button.ghost:not(:disabled):hover {
     background: var(--bg-secondary);
     color: var(--text-primary);
+    transform: none;
+    box-shadow: none;
 }
 
 /* Focus ring for all interactive elements */

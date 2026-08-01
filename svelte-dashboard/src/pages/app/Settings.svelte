@@ -660,7 +660,7 @@
               <p class="empty-note">
                 Open
                 {#each visibleTabs as t, i}
-                  {#if i > 0}, {/if}<button type="button" class="linkish" onclick={() => selectTab(t.id)}>{t.label}</button>
+                  {#if i > 0}, {/if}<button type="button" class="quiet sm" onclick={() => selectTab(t.id)}>{t.label}</button>
                 {/each}.
               </p>
             {:else}
@@ -790,8 +790,8 @@
                     <p class="group-desc">{group.desc}</p>
                   </div>
                   <div class="group-actions">
-                    <button type="button" class="linkish" disabled={!canEditSettings} onclick={() => setDetectorGroup(group.id, true)}>All on</button>
-                    <button type="button" class="linkish" disabled={!canEditSettings} onclick={() => setDetectorGroup(group.id, false)}>All off</button>
+                    <button type="button" class="quiet sm" disabled={!canEditSettings} onclick={() => setDetectorGroup(group.id, true)}>All on</button>
+                    <button type="button" class="quiet sm" disabled={!canEditSettings} onclick={() => setDetectorGroup(group.id, false)}>All off</button>
                   </div>
                 </div>
                 <div class="detector-cards">
@@ -838,7 +838,7 @@
               {#each STRICTNESS_OPTIONS as opt}
                 <button
                   type="button"
-                  class="strictness-card"
+                  class="choice"
                   class:active={reviewStrictness === opt.id}
                   role="radio"
                   aria-checked={reviewStrictness === opt.id}
@@ -1007,8 +1007,13 @@
                 </div>
               </div>
               <div class="save-row" style="margin-top:8px">
-                <button onclick={openInstallUrl}>Open install URL</button>
-                <a href="https://github.com/settings/apps" target="_blank" rel="noopener noreferrer" class="btn-link">Manage on GitHub ↗</a>
+                <button type="button" onclick={openInstallUrl}>Open install URL</button>
+                <a
+                  class="btn sm"
+                  href="https://github.com/settings/apps"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >Manage on GitHub ↗</a>
               </div>
               {#if githubMsg}
                 <p class="save-msg" class:error={/fail|error/i.test(githubMsg)}>{githubMsg}</p>
@@ -1306,7 +1311,7 @@
                     {#if rule.file_pattern} · <code>{rule.file_pattern}</code>{/if}
                     <br /><span class="muted">{rule.reason || rule.action}</span>
                   </span>
-                  <button class="linkish" onclick={() => deleteRule(rule.id)} disabled={!$isMaintainer}>Delete</button>
+                  <button type="button" class="quiet sm" onclick={() => deleteRule(rule.id)} disabled={!$isMaintainer}>Delete</button>
                 </div>
               {/each}
             </div>
@@ -1573,26 +1578,6 @@
     margin-bottom: 20px;
   }
 
-  .chip {
-    font-size: 12px;
-    padding: 6px 12px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--bg-secondary);
-    color: var(--text-secondary);
-    cursor: pointer;
-  }
-
-  .chip:hover:not(:disabled) {
-    color: var(--text-primary);
-    border-color: var(--text-muted);
-  }
-
-  .chip:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
   .detector-group {
     margin-top: 8px;
     padding-top: 16px;
@@ -1621,7 +1606,7 @@
 
   .group-actions {
     display: flex;
-    gap: 4px;
+    gap: 8px;
     flex-shrink: 0;
   }
 
@@ -1669,46 +1654,6 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
-  }
-
-  .strictness-card {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-    text-align: left;
-    padding: 14px 16px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--bg-primary);
-    color: var(--text-secondary);
-    cursor: pointer;
-  }
-
-  .strictness-card strong {
-    font-size: 14px;
-    color: var(--text-primary);
-  }
-
-  .strictness-card span {
-    font-size: 12px;
-    line-height: 1.4;
-    color: var(--text-muted);
-  }
-
-  .strictness-card:hover:not(:disabled) {
-    border-color: var(--text-muted);
-  }
-
-  .strictness-card.active {
-    border-color: var(--accent-soft);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-soft) 50%, transparent);
-    background: color-mix(in srgb, var(--accent-soft) 8%, var(--bg-primary));
-  }
-
-  .strictness-card:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
   }
 
   .field-hint {
@@ -1797,6 +1742,9 @@
   .search-item:hover,
   .search-item.active {
     background: var(--bg-secondary);
+    color: var(--text-primary);
+    transform: none;
+    box-shadow: none;
   }
 
   .empty-note {
@@ -1813,19 +1761,6 @@
   .muted {
     font-size: 12px;
     color: var(--text-muted);
-  }
-
-  .linkish {
-    background: none;
-    border: none;
-    color: var(--accent-soft);
-    cursor: pointer;
-    font-size: 13px;
-    padding: 4px 8px;
-  }
-
-  .linkish:hover {
-    text-decoration: underline;
   }
 
   .rules-page-meta {
