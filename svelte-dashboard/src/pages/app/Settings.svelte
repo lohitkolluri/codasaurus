@@ -143,14 +143,18 @@
   async function saveLLM() {
     llmSaving = true; llmMsg = "";
     try {
+      if (modelSearch.trim()) llmModel = modelSearch.trim();
       const updates = [
         api.put("/api/settings/llm_provider", { value: llmProvider }),
-        api.put("/api/settings/openrouter_api_key", { value: llmKey }),
         api.put("/api/settings/llm_model", { value: llmModel }),
         api.put("/api/settings/llm_model_cheap", { value: llmModelCheap }),
         api.put("/api/settings/llm_base_url", { value: llmBaseUrl }),
         api.put("/api/settings/llm_daily_budget_usd", { value: llmDailyBudget }),
       ];
+      // Never write the masked GET placeholder back as the real key.
+      if (llmKey && !llmKey.includes("•") && !llmKey.includes("*")) {
+        updates.push(api.put("/api/settings/openrouter_api_key", { value: llmKey }));
+      }
       const results = await Promise.allSettled(updates);
       const failed = results.filter(r => r.status === "rejected");
       llmMsg = failed.length === 0 ? "Saved" : `Save failed (${failed.length} errors)`;

@@ -18,6 +18,8 @@ pub struct ListAuditParams {
     pub event_type: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -37,8 +39,16 @@ async fn list_audit(
     State(state): State<AppState>,
     Query(params): Query<ListAuditParams>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let limit = params.limit.unwrap_or(50).clamp(1, 500);
-    let offset = params.offset.unwrap_or(0).max(0);
+    let limit = params
+        .per_page
+        .or(params.limit)
+        .unwrap_or(50)
+        .clamp(1, 500);
+    let offset = if let Some(page) = params.page {
+        ((page.max(1) - 1) * limit).max(0)
+    } else {
+        params.offset.unwrap_or(0).max(0)
+    };
     let event_type = params.event_type.as_deref();
 
     let entries = db::audit::list_audit_entries(&state.pool, event_type, limit, offset).await?;
@@ -53,10 +63,12 @@ async fn list_audit(
         )?,
         None => crate::db::db_scalar!(&state.pool, i64, "SELECT COUNT(*) FROM audit_log")?,
     };
+    let total_pages = ((total as f64) / (limit as f64)).ceil() as i64;
 
     Ok(Json(json!({
         "entries": entries,
         "total": total,
+        "total_pages": total_pages.max(1),
         "limit": limit,
         "offset": offset,
     })))

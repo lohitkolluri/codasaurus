@@ -139,6 +139,14 @@ async fn login(
         .ok_or_else(|| ApiError::unauthorized("Invalid email or password"))?;
 
     let cookie = if let Ok(token) = db::sessions::create_session(&state.pool, &user.email).await {
+        db::audit::log_event(
+            &state.pool,
+            "user.login",
+            Some(&user.email),
+            Some("user"),
+            None,
+        )
+        .await;
         set_cookie(&token)
     } else {
         clear_cookie()
@@ -241,6 +249,14 @@ async fn oidc_callback(
     let token = db::sessions::create_session(&state.pool, &email)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
+    db::audit::log_event(
+        &state.pool,
+        "user.login",
+        Some(&email),
+        Some("user"),
+        None,
+    )
+    .await;
     let cookie = set_cookie(&token);
     Ok((
         StatusCode::SEE_OTHER,

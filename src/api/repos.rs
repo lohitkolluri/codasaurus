@@ -122,12 +122,14 @@ async fn sync_repos(
             None => continue,
         };
 
-        // List repos for this installation — follow pagination to get ALL repos
+        // List repos for this installation — follow Link pagination.
         let mut all_repos: Vec<serde_json::Value> = Vec::new();
         let mut page_url: Option<String> =
             Some("https://api.github.com/installation/repositories?per_page=100".into());
+        let mut pages = 0u32;
 
         while let Some(url) = page_url.take() {
+            pages += 1;
             let resp = client
                 .get(&url)
                 .header("Authorization", format!("Bearer {token}"))
@@ -137,7 +139,8 @@ async fn sync_repos(
                 .await
                 .map_err(|e| ApiError::bad_request(format!("Repos request: {e}")))?;
 
-            // Extract repos from this page
+            page_url = next_github_link(resp.headers());
+
             let page_data: serde_json::Value = resp
                 .json()
                 .await
@@ -148,7 +151,7 @@ async fn sync_repos(
             }
 
             // Guard: stop after 10 pages to prevent runaway loops
-            if all_repos.len() >= 1000 {
+            if pages >= 10 || all_repos.len() >= 1000 {
                 break;
             }
         }
@@ -193,6 +196,23 @@ async fn sync_repos(
 fn create_jwt(app_id: &str, private_key_pem: &str) -> Result<String, ApiError> {
     crate::github_jwt::create_app_jwt(app_id, private_key_pem)
         .map_err(|e| ApiError::internal(format!("JWT error: {e}")))
+}
+
+/// Parse GitHub `Link: <url>; rel="next"` header.
+fn next_github_link(headers: &axum::http::HeaderMap) -> Option<String> {
+    let link = headers.get(axum::http::header::LINK)?.to_str().ok()?;
+    for part in link.split(',') {
+        let part = part.trim();
+        if !(part.contains("rel=\"next\"") || part.contains("rel='next'")) {
+            continue;
+        }
+        let start = part.find('<')? + 1;
+        let end = part.find('>')?;
+        if start < end {
+            return Some(part[start..end].to_string());
+        }
+    }
+    None
 }
 
 /// GET /api/v1/repos/:id

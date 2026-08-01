@@ -15,7 +15,6 @@
 
   let filterRepo = $state("");
   let filterStatus = $state("");
-  let filterSeverity = $state("");
   let repos = $state([]);
 
   let page = $state(1);
@@ -41,15 +40,7 @@
       params.set("offset", String((page - 1) * 20));
 
       const data = await api.get(`/api/reviews?${params.toString()}`);
-      let list = data.reviews ?? data ?? [];
-      if (filterSeverity) {
-        // Client-side severity gate until API supports finding-level filters.
-        list = list.filter((r) => {
-          const sev = (r.max_severity || r.severity || "").toLowerCase();
-          return !sev || sev === filterSeverity;
-        });
-      }
-      reviews = list;
+      reviews = data.reviews ?? data ?? [];
       totalPages = data.total_pages ?? 1;
     } catch (err) {
       error = err.message || "Failed to load reviews";
@@ -96,15 +87,6 @@
             <option value="">All</option>
             <option value="passed">Passed</option>
             <option value="failed">Failed</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="filter-severity">Severity</label>
-          <select id="filter-severity" bind:value={filterSeverity} onchange={handleFilterChange}>
-            <option value="">All</option>
-            <option value="blocking">Blocking</option>
-            <option value="warning">Warning</option>
-            <option value="info">Info</option>
           </select>
         </div>
       </div>

@@ -31,16 +31,16 @@
 
 Agents ship volume. Models invent packages, paste last year's APIs, and leave secrets in the hunk. SaaS reviewers charge per seat and still miss the boring breaks.
 
-**Codasaurus** is one Rust binary you run yourself. On every PR it proves what it can (registry HEAD, manifests, secrets, OSV, IaC), then optionally asks *your* LLM. Never a silent cloud fallback.
+**Codasaurus** is one Rust binary you run yourself. On every PR it proves what it can (registry HEAD, manifests, secrets, OSV, IaC), then optionally asks _your_ LLM. Never a silent cloud fallback.
 
-| It catches | How |
-| --- | --- |
-| Hallucinated imports | npm / PyPI / crates.io HEAD |
-| Phantom deps | Import vs manifest |
-| Secrets and vulns | Pattern + OSV |
-| IaC footguns | Open CIDR, privileged pods |
-| Agent-shaped PRs | Tier-1 first, LLM nits capped |
-| Blast radius / dep delta | Walkthrough + `@impact` |
+| It catches               | How                           |
+| ------------------------ | ----------------------------- |
+| Hallucinated imports     | npm / PyPI / crates.io HEAD   |
+| Phantom deps             | Import vs manifest            |
+| Secrets and vulns        | Pattern + OSV                 |
+| IaC footguns             | Open CIDR, privileged pods    |
+| Agent-shaped PRs         | Tier-1 first, LLM nits capped |
+| Blast radius / dep delta | Walkthrough + `@impact`       |
 
 Fail-closed offline mode. Finding provenance. Learning from dismissals. Air-gap honest.
 
@@ -73,15 +73,15 @@ codasaurus serve | health | version
 
 ## Docs
 
-| Guide | Topic |
-| --- | --- |
-| [Onboarding](docs/setup-onboarding.md) | First-run wizard |
-| [GitHub App](docs/setup-github-app.md) | Permissions, manifest, manual keys |
-| [Run for free](docs/run-for-free.md) | Always-free host + Postgres |
-| [Database](docs/database.md) | PostgreSQL, pool, schema |
-| [Configuration](docs/configuration.md) | Env vars, TOML, offline, OIDC |
-| [Commands](docs/commands.md) | `@codasaurus` on PRs |
-| [Backup and restore](docs/operations-backup-restore.md) | Postgres backup, HA, health |
+| Guide                                                   | Topic                              |
+| ------------------------------------------------------- | ---------------------------------- |
+| [Onboarding](docs/setup-onboarding.md)                  | First-run wizard                   |
+| [GitHub App](docs/setup-github-app.md)                  | Permissions, manifest, manual keys |
+| [Run for free](docs/run-for-free.md)                    | Always-free host + Postgres        |
+| [Database](docs/database.md)                            | PostgreSQL, pool, schema           |
+| [Configuration](docs/configuration.md)                  | Env vars, TOML, offline, OIDC      |
+| [Commands](docs/commands.md)                            | `@codasaurus` on PRs               |
+| [Backup and restore](docs/operations-backup-restore.md) | Postgres backup, HA, health        |
 
 Full index: [docs/README.md](docs/README.md).
 
@@ -102,13 +102,13 @@ Also: `summarize`, `labels`, `changelog`, `add_docs`. Full table in [docs/comman
 
 ## vs the field
 
-| | Seat SaaS | PR-Agent | **Codasaurus** |
-| --- | --- | --- | --- |
-| Cost | Per seat | OSS / commercial | **Self-host, free** |
-| Deploy | Their cloud | Your infra | **One Docker binary** |
-| Hallucinated imports | Rare | Rare | **Tier-1** |
-| LLM | Bundled | BYOK / vendor | **BYOK, fail-closed offline** |
-| Trust | Opaque | Varies | **Provenance + dismiss learning** |
+|                      | Seat SaaS   | PR-Agent         | **Codasaurus**                    |
+| -------------------- | ----------- | ---------------- | --------------------------------- |
+| Cost                 | Per seat    | OSS / commercial | **Self-host, free**               |
+| Deploy               | Their cloud | Your infra       | **One Docker binary**             |
+| Hallucinated imports | Rare        | Rare             | **Tier-1**                        |
+| LLM                  | Bundled     | BYOK / vendor    | **BYOK, fail-closed offline**     |
+| Trust                | Opaque      | Varies           | **Provenance + dismiss learning** |
 
 ---
 

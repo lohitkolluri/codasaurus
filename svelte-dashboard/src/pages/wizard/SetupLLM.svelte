@@ -91,6 +91,7 @@
     testResult = "";
     testError = "";
     try {
+      if (modelSearch.trim()) model = modelSearch.trim();
       const shouldProbe = !skipProbe && provider !== "disabled";
       const path = shouldProbe ? "/api/setup/llm?test=true" : "/api/setup/llm";
       const keyToSend = apiKey.startsWith("••••") ? "" : apiKey;

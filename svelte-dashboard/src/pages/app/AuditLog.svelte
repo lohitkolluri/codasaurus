@@ -53,12 +53,13 @@
           <label for="filter-event">Event Type</label>
           <select id="filter-event" bind:value={filterEvent} onchange={handleFilterChange}>
             <option value="">All</option>
-            <option value="review.created">Review Created</option>
-            <option value="review.completed">Review Completed</option>
-            <option value="repo.added">Repo Added</option>
-            <option value="repo.removed">Repo Removed</option>
-            <option value="settings.updated">Settings Updated</option>
-            <option value="user.login">User Login</option>
+            <option value="review.passed">Review passed</option>
+            <option value="review.failed">Review failed</option>
+            <option value="installation.created">Installation created</option>
+            <option value="installation.deleted">Installation deleted</option>
+            <option value="settings.updated">Settings updated</option>
+            <option value="user.login">User login</option>
+            <option value="github.config_cleared">GitHub config cleared</option>
           </select>
         </div>
       </div>

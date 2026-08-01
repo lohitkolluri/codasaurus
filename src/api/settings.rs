@@ -1,5 +1,5 @@
 use axum::extract::{Path, State};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{delete, get, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
@@ -36,7 +36,6 @@ pub fn router() -> Router<AppState> {
         .route("/{key}", put(set_setting))
         .route("/github", get(get_github_settings))
         .route("/github", delete(delete_github_settings))
-        .route("/github/rotate", post(rotate_github_credentials))
 }
 
 // ---------------------------------------------------------------------------
@@ -77,7 +76,9 @@ async fn set_setting(
         "llm_provider",
         "openrouter_api_key",
         "llm_model",
+        "llm_model_cheap",
         "llm_base_url",
+        "llm_daily_budget_usd",
         "public_url",
         "default_severity",
         "max_warnings",
@@ -93,6 +94,7 @@ async fn set_setting(
         "boilerplate_enabled",
         "todo_leaks_enabled",
         "stale_api_enabled",
+        "risky_patterns_enabled",
         "graph_enabled",
         "guidelines_enabled",
         "iac_enabled",
@@ -106,6 +108,18 @@ async fn set_setting(
     if !ALLOWED_KEYS.contains(&key.as_str()) {
         return Err(ApiError::bad_request(format!("Unknown setting: {key}")));
     }
+    // Don't persist the masked placeholder from GET /settings.
+    if key == "openrouter_api_key"
+        && (body.value.is_empty() || body.value.contains('•') || body.value.contains('*'))
+    {
+        return Ok(Json(json!({ "status": "ok", "key": key, "skipped": "unchanged" })));
+    }
+    if key == "llm_daily_budget_usd" && !body.value.trim().is_empty() {
+        body.value
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| ApiError::bad_request("llm_daily_budget_usd must be a number"))?;
+    }
     if key == "llm_base_url" && !body.value.is_empty() {
         let provider = db::config::get_config(&state.pool, "llm_provider")
             .await
@@ -118,6 +132,14 @@ async fn set_setting(
             .map_err(ApiError::bad_request)?;
     }
     db::config::set_config(&state.pool, &key, &body.value).await?;
+    db::audit::log_event(
+        &state.pool,
+        "settings.updated",
+        None,
+        Some(&key),
+        None,
+    )
+    .await;
     if key == "offline_mode" {
         let on = matches!(
             body.value.to_ascii_lowercase().as_str(),
@@ -162,18 +184,18 @@ async fn delete_github_settings(
     for key in GITHUB_KEYS {
         crate::db::db_execute!(&state.pool, "DELETE FROM app_config WHERE key = ?", key)?;
     }
-    Ok(Json(
-        json!({ "status": "ok", "message": "GitHub App configuration removed" }),
-    ))
-}
-
-async fn rotate_github_credentials(
-    State(state): State<AppState>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    for key in GITHUB_KEYS {
-        crate::db::db_execute!(&state.pool, "DELETE FROM app_config WHERE key = ?", key)?;
-    }
-    Ok(Json(
-        json!({ "status": "ok", "message": "Credentials cleared. Re-run the manifest flow to set up a new GitHub App." }),
-    ))
+    // Without App credentials we cannot talk to GitHub; stop reviewing locally.
+    let _ = crate::db::db_execute!(&state.pool, "UPDATE repos SET active = false");
+    db::audit::log_event(
+        &state.pool,
+        "github.config_cleared",
+        None,
+        Some("github_app"),
+        None,
+    )
+    .await;
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "Local GitHub App config cleared and repos marked inactive. This does not uninstall the App on GitHub — remove it under GitHub Settings → Applications if needed."
+    })))
 }
