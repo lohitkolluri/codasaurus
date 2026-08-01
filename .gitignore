@@ -24,9 +24,6 @@ coverage/
 # Research artifacts
 .omo/
 
-# Database (generated at runtime)
-codasaurus.db
-
 # SPA build artifacts
 svelte-dashboard/node_modules/
 svelte-dashboard/dist/

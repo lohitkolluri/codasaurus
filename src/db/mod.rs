@@ -24,7 +24,7 @@ impl DbPool {
         &self.0
     }
 
-    /// Adapt `?` placeholders and datetime helpers to Postgres SQL.
+    /// Adapt `?` placeholders to Postgres `$n` bind parameters.
     pub fn prepare_sql(&self, sql: &str) -> String {
         dialect::prepare(sql)
     }
