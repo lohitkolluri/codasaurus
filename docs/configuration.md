@@ -6,7 +6,13 @@
   <a href="README.md"><img src="https://img.shields.io/badge/docs-index-111827" alt="Docs index"></a>
 </p>
 
-Codasaurus merges **environment variables**, optional **TOML**, and **dashboard / DB** settings. Precedence for GitHub App credentials: env → DB (wizard). Detector toggles and policy prefer DB overlays when present.
+Codasaurus merges **environment variables**, optional **TOML**, and **dashboard / DB** settings.
+
+**Precedence (tunables mirrored in Settings):** host/compose env wins on process start when set; otherwise values from **Settings** (DB) are applied. Saving in the dashboard updates the DB and the live process env for most knobs. `queue_workers` and `max_concurrent_reviews` need a restart to fully apply.
+
+**Not exposed in the dashboard (infra / bind-time only):** `DATABASE_URL`, `PORT` / `HOST`, `CODASAURUS_DATA_DIR`, `CODASAURUS_DB_MAX_CONNECTIONS`, `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS`, `CODASAURUS_FREE_TIER`, `CODASAURUS_CONFIG`, `CODASAURUS_SKIP_FRONTEND_BUILD`.
+
+GitHub App credentials: env → DB (wizard). Detector toggles and policy prefer DB overlays when present.
 
 ## Process commands
 
@@ -29,9 +35,10 @@ codasaurus version
 | `CODASAURUS_DATA_DIR`                | no                  | Data directory (Docker: `/data`)                                                                                |
 | `PORT` / `--port`                    | no                  | Listen port (default `3000`)                                                                                    |
 | `PUBLIC_URL`                         | recommended in prod | Canonical HTTPS origin for GitHub manifest callbacks                                                            |
-| `CODASAURUS_HSTS`                    | no                  | `1` forces `Strict-Transport-Security` even if `PUBLIC_URL` is unset (auto-on when `PUBLIC_URL` is `https://…`) |
-| `CODASAURUS_QUEUE_WORKERS`           | no                  | Durable review queue workers (1–8; default min of review permits / 4)                                           |
-| `CODASAURUS_METRICS_TOKEN`           | no                  | If set, enables `/metrics` (Bearer token required)                                                              |
+| `CODASAURUS_HSTS`                    | no                  | `1` forces `Strict-Transport-Security` even if `PUBLIC_URL` is unset (auto-on when `PUBLIC_URL` is `https://…`). Dashboard: **Settings → Runtime → Force HSTS** |
+| `CODASAURUS_QUEUE_WORKERS`           | no                  | Durable review queue workers (1–8; default min of review permits / 4). Dashboard: **Settings → Runtime** (restart) |
+| `CODASAURUS_METRICS_TOKEN`           | no                  | If set, enables `/metrics` (Bearer token required). Dashboard: **Settings → Runtime** |
+| `CODASAURUS_AUDIT_RETENTION_DAYS`    | no                  | Days to keep audit log entries before automatic deletion (default `90`, clamped 7–730). Dashboard: **Settings → Runtime** |
 
 ### GitHub App
 
@@ -59,6 +66,12 @@ codasaurus version
 | `CODASAURUS_AUTO_IMPROVE_MAX_DIFF`  | Cap aggregated patch chars for auto improve (default `24000`)                  |
 
 Dashboard **Settings → LLM** writes `llm_provider`, `llm_model`, `llm_model_cheap`, `llm_base_url`, `llm_daily_budget_usd`, `openrouter_api_key`.
+
+Dashboard **Settings → Runtime** mirrors `PUBLIC_URL`, audit retention, queue workers, concurrency, review/LLM caps, HSTS, metrics token, cookie flags, and `CODASAURUS_ALLOW_LOCAL_LLM`.
+
+Dashboard **Settings → Auth / SSO** mirrors `OIDC_*` (issuer, client, redirect, scopes, open-join / unverified email / public client).
+
+Dashboard **Settings → Integrations** mirrors `JIRA_*` and `LINEAR_API_KEY`.
 
 ### LLM cost controls
 

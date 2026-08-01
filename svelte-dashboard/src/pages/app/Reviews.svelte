@@ -2,8 +2,7 @@
   import { onMount } from "svelte";
   import { push } from "svelte-spa-router";
   import { api } from "../../stores/api.js";
-  import Sidebar from "../../lib/Sidebar.svelte";
-  import Header from "../../lib/Header.svelte";
+  import AppShell from "../../lib/AppShell.svelte";
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
   import EmptyState from "../../lib/EmptyState.svelte";
   import ErrorState from "../../lib/ErrorState.svelte";
@@ -59,18 +58,16 @@
   }
 </script>
 
-<div class="app-layout">
-  <Sidebar />
-  <div class="app-main">
-    <Header title="Reviews" />
-    <div class="app-content">
-      <div class="page-toolbar compact">
+<AppShell title="Reviews">
+  <div class="page-panel">
+    <div class="page-panel-toolbar">
+      <div class="page-toolbar compact" style="margin-bottom: 0">
         <div>
           <h1 class="page-title">Reviews</h1>
           <p class="page-description">Every automated review and its findings.</p>
         </div>
       </div>
-      <div class="filter-bar">
+      <div class="filter-bar" style="margin-top: var(--space-4); margin-bottom: 0">
         <div class="form-group">
           <label for="filter-repo">Repository</label>
           <select id="filter-repo" bind:value={filterRepo} onchange={handleFilterChange}>
@@ -89,24 +86,26 @@
           </select>
         </div>
       </div>
+    </div>
 
-      <LoadingSpinner loading={loading} />
+    <LoadingSpinner loading={loading} />
 
-      {#if error}
-        <ErrorState message={error} />
-      {:else if loading}
-        <div class="stats-skeleton" aria-hidden="true">
-          {#each Array(3) as _}
-            <div class="skel-card skeleton" style="min-height:72px"></div>
-          {/each}
-        </div>
-      {:else if reviews.length === 0}
-        <EmptyState
-          message="No reviews found"
-          actionLabel="Open dashboard"
-          onAction={() => push("/app/dashboard")}
-        />
-      {:else}
+    {#if error}
+      <ErrorState message={error} />
+    {:else if loading}
+      <div class="stats-skeleton" aria-hidden="true">
+        {#each Array(3) as _}
+          <div class="skel-card skeleton" style="min-height:72px"></div>
+        {/each}
+      </div>
+    {:else if reviews.length === 0}
+      <EmptyState
+        message="No reviews found"
+        actionLabel="Open dashboard"
+        onAction={() => push("/app/dashboard")}
+      />
+    {:else}
+      <div class="page-panel-scroll reviews-scroll">
         <div class="activity-list">
           {#each reviews as review, i}
             <div
@@ -131,9 +130,30 @@
             </div>
           {/each}
         </div>
+      </div>
 
-        <Pagination {page} {totalPages} onChange={(p) => { page = p; loadReviews(); }} />
-      {/if}
-    </div>
+      <div class="page-panel-footer">
+        <Pagination
+          {page}
+          {totalPages}
+          onChange={(p) => {
+            page = p;
+            loadReviews();
+          }}
+        />
+      </div>
+    {/if}
   </div>
-</div>
+</AppShell>
+
+<style>
+  .reviews-scroll {
+    border: none;
+    background: transparent;
+    padding: 0;
+  }
+
+  .reviews-scroll .activity-list {
+    margin: 0;
+  }
+</style>

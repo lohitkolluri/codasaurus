@@ -1,12 +1,13 @@
 <script>
   import { link, location } from "svelte-spa-router";
   import { currentUser } from "../stores/auth.js";
-  import { LayoutDashboard, FolderGit2, GitPullRequest, Users, Settings, ClipboardList } from "lucide-svelte";
+  import { LayoutDashboard, BarChart3, FolderGit2, GitPullRequest, Users, Settings, ClipboardList } from "lucide-svelte";
   import BrandMark from "./BrandMark.svelte";
   import UserAvatar from "./UserAvatar.svelte";
 
   const navItems = [
     { path: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { path: "/app/stats", label: "Stats", icon: BarChart3 },
     { path: "/app/repos", label: "Repositories", icon: FolderGit2 },
     { path: "/app/reviews", label: "Reviews", icon: GitPullRequest },
     { path: "/app/team", label: "Team", icon: Users },

@@ -251,6 +251,26 @@ button.primary:hover {
     color: var(--bg-primary);
 }
 
+a.primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-5);
+    border-radius: var(--radius-md);
+    background: var(--accent);
+    color: var(--bg-primary);
+    border: 1px solid var(--accent);
+    font-size: var(--text-base);
+    font-weight: var(--weight-semibold);
+    text-decoration: none;
+}
+
+a.primary:hover {
+    opacity: 0.85;
+    color: var(--bg-primary);
+}
+
 /* Danger */
 button.danger {
     border-color: var(--error);
@@ -469,18 +489,34 @@ tr:hover td {
 
 /* ── 10. Layout ─────────────────────────────────────────────────── */
 
+html,
+body,
+#app {
+    height: 100%;
+}
+
 .app-layout {
     display: flex;
-    min-height: 100vh;
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
 }
 
 .app-sidebar {
     width: var(--sidebar-width);
     flex-shrink: 0;
+    height: 100%;
     border-right: 1px solid var(--border);
     background: var(--bg-primary);
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+}
+
+.app-sidebar .sidebar-nav {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
 }
 
 .app-main {
@@ -488,18 +524,119 @@ tr:hover td {
     display: flex;
     flex-direction: column;
     min-width: 0;
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
 }
 
 .app-content {
     flex: 1;
+    min-height: 0;
     padding: var(--space-6) clamp(24px, 4vw, var(--space-12));
     overflow-y: auto;
+    overflow-x: hidden;
     width: 100%;
     max-width: 1440px;
     margin: 0 auto;
+    display: flex;
+    flex-direction: column;
     animation: content-enter var(--dur-med) var(--ease-spring) both;
     background-image: var(--surface-glow);
     background-repeat: no-repeat;
+}
+
+/* List pages: toolbar + scrollable table + pinned footer (pagination) */
+.page-panel {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.page-panel-toolbar {
+    flex-shrink: 0;
+}
+
+.page-panel-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+}
+
+.page-panel-scroll table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    overflow: visible;
+}
+
+.page-panel-scroll thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-secondary);
+    box-shadow: 0 1px 0 var(--border);
+}
+
+.page-panel-footer {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+    padding-top: var(--space-2);
+}
+
+.page-panel-note {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+}
+
+.dashboard-hero {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--space-6);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-6);
+}
+
+.dashboard-hero-actions {
+    display: flex;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+}
+
+.dashboard-kpis {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-4);
+    margin-bottom: var(--space-8);
+}
+
+@media (max-width: 960px) {
+    .dashboard-kpis {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 520px) {
+    .dashboard-kpis {
+        grid-template-columns: 1fr;
+    }
+}
+
+.dashboard-activity h2 {
+    margin: 0 0 var(--space-4);
+    font-size: var(--text-xl);
+    font-weight: var(--weight-semibold);
+    letter-spacing: -0.02em;
 }
 
 @keyframes content-enter {
@@ -595,14 +732,14 @@ tr:hover td {
 
 .top-header {
     height: var(--header-height);
+    flex-shrink: 0;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 0 var(--space-6);
     background: var(--bg-primary);
-    position: sticky;
-    top: 0;
+    position: relative;
     z-index: 10;
 }
 

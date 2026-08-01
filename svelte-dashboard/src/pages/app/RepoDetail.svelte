@@ -1,8 +1,7 @@
 <script>
   import { push } from "svelte-spa-router";
   import { api } from "../../stores/api.js";
-  import Sidebar from "../../lib/Sidebar.svelte";
-  import Header from "../../lib/Header.svelte";
+  import AppShell from "../../lib/AppShell.svelte";
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
   import ErrorState from "../../lib/ErrorState.svelte";
 
@@ -107,135 +106,129 @@
   }
 </script>
 
-<div class="app-layout">
-  <Sidebar />
-  <div class="app-main">
-    <Header title={repo?.name ?? "Repository"} />
-    <div class="app-content">
-      <LoadingSpinner loading={loading} />
+<AppShell title={repo?.name ?? "Repository"}>
+  <LoadingSpinner loading={loading} />
 
-      {#if error}
-        <ErrorState message={error} />
-      {:else if repo}
-        <div class="repo-header">
-          <button class="back-btn" onclick={() => push("/app/repos")}>← Back to Repos</button>
-          <h1 class="repo-name">{repo.full_name}</h1>
-          <p class="repo-meta">
-            <span class="branch">{repo.default_branch ?? "main"}</span>
-            {#if repo.private}
-              <span class="badge-private">Private</span>
-            {/if}
-            <span class="repo-owner">{repo.owner}</span>
-          </p>
-        </div>
+  {#if error}
+    <ErrorState message={error} />
+  {:else if repo}
+    <div class="repo-header">
+      <button class="back-btn" onclick={() => push("/app/repos")}>← Back to Repos</button>
+      <h1 class="repo-name">{repo.full_name}</h1>
+      <p class="repo-meta">
+        <span class="branch">{repo.default_branch ?? "main"}</span>
+        {#if repo.private}
+          <span class="badge-private">Private</span>
+        {/if}
+        <span class="repo-owner">{repo.owner}</span>
+      </p>
+    </div>
 
-        <div class="card">
-          <h3>Detectors</h3>
-          <div class="detector-grid">
-            {#each Object.entries(detectors) as [key, val]}
-              <div class="detector-row">
-                <span class="detector-label">{formatLabel(key)}</span>
-                <label class="toggle">
-                  <div class="toggle-track" class:on={val ?? false} role="checkbox" aria-checked={val ?? false}
-                    tabindex="0"
-                    onclick={() => (detectors[key] = !(detectors[key] ?? false))}
-                    onkeydown={(e) => { if (e.key === 'Enter') detectors[key] = !(detectors[key] ?? false); }}>
-                    <div class="toggle-knob"></div>
-                  </div>
-                </label>
-              </div>
-            {/each}
-          </div>
-          {#if Object.keys(detectors).length === 0}
-            <p class="empty-note">No detectors configured for this repo</p>
-          {/if}
-        </div>
-
-        <div class="card">
-          <h3>LLM Review</h3>
-          <div class="llm-row">
+    <div class="card">
+      <h3>Detectors</h3>
+      <div class="detector-grid">
+        {#each Object.entries(detectors) as [key, val]}
+          <div class="detector-row">
+            <span class="detector-label">{formatLabel(key)}</span>
             <label class="toggle">
-              <div class="toggle-track" class:on={llmEnabled} role="checkbox" aria-checked={llmEnabled}
+              <div class="toggle-track" class:on={val ?? false} role="checkbox" aria-checked={val ?? false}
                 tabindex="0"
-                onclick={() => (llmEnabled = !llmEnabled)}
-                onkeydown={(e) => { if (e.key === 'Enter') llmEnabled = !llmEnabled; }}>
+                onclick={() => (detectors[key] = !(detectors[key] ?? false))}
+                onkeydown={(e) => { if (e.key === 'Enter') detectors[key] = !(detectors[key] ?? false); }}>
                 <div class="toggle-knob"></div>
               </div>
             </label>
-            <span>Enable LLM-powered review on this repo</span>
           </div>
-        </div>
-
-        <div class="card">
-          <h3>Automation</h3>
-          <div class="llm-row">
-            <label class="toggle">
-              <div class="toggle-track" class:on={autoDescribe} role="checkbox" aria-checked={autoDescribe}
-                tabindex="0" onclick={() => (autoDescribe = !autoDescribe)}
-                onkeydown={(e) => { if (e.key === 'Enter') autoDescribe = !autoDescribe; }}>
-                <div class="toggle-knob"></div>
-              </div>
-            </label>
-            <span>Auto-describe on open</span>
-          </div>
-          <div class="llm-row">
-            <label class="toggle">
-              <div class="toggle-track" class:on={autoReviewDiff} role="checkbox" aria-checked={autoReviewDiff}
-                tabindex="0" onclick={() => (autoReviewDiff = !autoReviewDiff)}
-                onkeydown={(e) => { if (e.key === 'Enter') autoReviewDiff = !autoReviewDiff; }}>
-                <div class="toggle-knob"></div>
-              </div>
-            </label>
-            <span>Auto LLM review_diff (opt-in · costly)</span>
-          </div>
-          <div class="llm-row">
-            <label class="toggle">
-              <div class="toggle-track" class:on={autoLabels} role="checkbox" aria-checked={autoLabels}
-                tabindex="0" onclick={() => (autoLabels = !autoLabels)}
-                onkeydown={(e) => { if (e.key === 'Enter') autoLabels = !autoLabels; }}>
-                <div class="toggle-knob"></div>
-              </div>
-            </label>
-            <span>Auto-apply labels</span>
-          </div>
-          <div class="llm-row">
-            <label class="toggle">
-              <div class="toggle-track" class:on={updatePrDescription} role="checkbox" aria-checked={updatePrDescription}
-                tabindex="0" onclick={() => (updatePrDescription = !updatePrDescription)}
-                onkeydown={(e) => { if (e.key === 'Enter') updatePrDescription = !updatePrDescription; }}>
-                <div class="toggle-knob"></div>
-              </div>
-            </label>
-            <span>Update PR description on describe</span>
-          </div>
-          <div class="llm-row">
-            <label class="toggle">
-              <div class="toggle-track" class:on={allowAutoFix} role="checkbox" aria-checked={allowAutoFix}
-                tabindex="0" onclick={() => (allowAutoFix = !allowAutoFix)}
-                onkeydown={(e) => { if (e.key === 'Enter') allowAutoFix = !allowAutoFix; }}>
-                <div class="toggle-knob"></div>
-              </div>
-            </label>
-            <span>Allow @codasaurus fix</span>
-          </div>
-          <div class="form-group" style="margin-top:12px">
-            <label for="repo-exclude">Exclude patterns</label>
-            <input id="repo-exclude" type="text" bind:value={excludePatterns} placeholder="vendor/,packages/legacy/" />
-          </div>
-        </div>
-
-        <div class="actions">
-          <button class="primary" onclick={handleSave} disabled={saving}>
-            {saving ? "Saving…" : "Save Changes"}
-          </button>
-          {#if saveMsg}
-            <span class="toast" class:success={saveMsg === 'Saved'}>{saveMsg}</span>
-          {/if}
-        </div>
+        {/each}
+      </div>
+      {#if Object.keys(detectors).length === 0}
+        <p class="empty-note">No detectors configured for this repo</p>
       {/if}
     </div>
-  </div>
-</div>
+
+    <div class="card">
+      <h3>LLM Review</h3>
+      <div class="llm-row">
+        <label class="toggle">
+          <div class="toggle-track" class:on={llmEnabled} role="checkbox" aria-checked={llmEnabled}
+            tabindex="0"
+            onclick={() => (llmEnabled = !llmEnabled)}
+            onkeydown={(e) => { if (e.key === 'Enter') llmEnabled = !llmEnabled; }}>
+            <div class="toggle-knob"></div>
+          </div>
+        </label>
+        <span>Enable LLM-powered review on this repo</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Automation</h3>
+      <div class="llm-row">
+        <label class="toggle">
+          <div class="toggle-track" class:on={autoDescribe} role="checkbox" aria-checked={autoDescribe}
+            tabindex="0" onclick={() => (autoDescribe = !autoDescribe)}
+            onkeydown={(e) => { if (e.key === 'Enter') autoDescribe = !autoDescribe; }}>
+            <div class="toggle-knob"></div>
+          </div>
+        </label>
+        <span>Auto-describe on open</span>
+      </div>
+      <div class="llm-row">
+        <label class="toggle">
+          <div class="toggle-track" class:on={autoReviewDiff} role="checkbox" aria-checked={autoReviewDiff}
+            tabindex="0" onclick={() => (autoReviewDiff = !autoReviewDiff)}
+            onkeydown={(e) => { if (e.key === 'Enter') autoReviewDiff = !autoReviewDiff; }}>
+            <div class="toggle-knob"></div>
+          </div>
+        </label>
+        <span>Auto LLM review_diff (opt-in · costly)</span>
+      </div>
+      <div class="llm-row">
+        <label class="toggle">
+          <div class="toggle-track" class:on={autoLabels} role="checkbox" aria-checked={autoLabels}
+            tabindex="0" onclick={() => (autoLabels = !autoLabels)}
+            onkeydown={(e) => { if (e.key === 'Enter') autoLabels = !autoLabels; }}>
+            <div class="toggle-knob"></div>
+          </div>
+        </label>
+        <span>Auto-apply labels</span>
+      </div>
+      <div class="llm-row">
+        <label class="toggle">
+          <div class="toggle-track" class:on={updatePrDescription} role="checkbox" aria-checked={updatePrDescription}
+            tabindex="0" onclick={() => (updatePrDescription = !updatePrDescription)}
+            onkeydown={(e) => { if (e.key === 'Enter') updatePrDescription = !updatePrDescription; }}>
+            <div class="toggle-knob"></div>
+          </div>
+        </label>
+        <span>Update PR description on describe</span>
+      </div>
+      <div class="llm-row">
+        <label class="toggle">
+          <div class="toggle-track" class:on={allowAutoFix} role="checkbox" aria-checked={allowAutoFix}
+            tabindex="0" onclick={() => (allowAutoFix = !allowAutoFix)}
+            onkeydown={(e) => { if (e.key === 'Enter') allowAutoFix = !allowAutoFix; }}>
+            <div class="toggle-knob"></div>
+          </div>
+        </label>
+        <span>Allow @codasaurus fix</span>
+      </div>
+      <div class="form-group" style="margin-top:12px">
+        <label for="repo-exclude">Exclude patterns</label>
+        <input id="repo-exclude" type="text" bind:value={excludePatterns} placeholder="vendor/,packages/legacy/" />
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="primary" onclick={handleSave} disabled={saving}>
+        {saving ? "Saving…" : "Save Changes"}
+      </button>
+      {#if saveMsg}
+        <span class="toast" class:success={saveMsg === 'Saved'}>{saveMsg}</span>
+      {/if}
+    </div>
+  {/if}
+</AppShell>
 
 <style>
   .repo-header {

@@ -60,6 +60,10 @@ pub async fn serve(
     // Sync env vars → DB config so the setup wizard detects them even
     // after ephemeral storage is wiped (Render free tier, Docker restarts).
     sync_env_to_db(&pool).await;
+    // Then apply dashboard-stored mirrors into process env when unset,
+    // so env-only readers (OIDC, Jira, runtime caps, etc.) pick them up.
+    db::config::sync_env_mirrors_to_db(&pool).await;
+    db::config::apply_db_to_env(&pool).await;
 
     tracing::info!("Database connected (PostgreSQL)");
     println!("  Database connected (PostgreSQL)");
@@ -151,13 +155,14 @@ fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> 
         .route("/webhook", webhook_handler.clone())
         .route("/webhook/", webhook_handler);
 
-    // Metrics only when an auth token is configured (Bearer required).
+    // Metrics endpoint always registered; handler 404s unless a token is set
+    // via env or dashboard (`metrics_token` / CODASAURUS_METRICS_TOKEN).
+    app = app.route("/metrics", get(metrics_handler));
     if std::env::var("CODASAURUS_METRICS_TOKEN")
         .map(|t| !t.is_empty())
         .unwrap_or(false)
     {
-        app = app.route("/metrics", get(metrics_handler));
-        println!("  /metrics enabled (CODASAURUS_METRICS_TOKEN set)");
+        println!("  /metrics enabled (metrics token configured)");
     }
 
     // SPA static file serving — catch-all, but never mask unknown /api routes as HTML.
@@ -236,9 +241,9 @@ async fn security_headers_middleware(req: Request, next: Next) -> Response {
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
     );
-    // HSTS only when serving (or advertised) over HTTPS — local HTTP stays usable.
+    // HSTS when forced, or when PUBLIC_URL (env/dashboard) is https.
     let hsts = std::env::var("CODASAURUS_HSTS")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
         .unwrap_or(false)
         || std::env::var("PUBLIC_URL")
             .map(|u| u.starts_with("https://"))

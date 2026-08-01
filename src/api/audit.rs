@@ -69,5 +69,6 @@ async fn list_audit(
         "total_pages": total_pages.max(1),
         "limit": limit,
         "offset": offset,
+        "retention_days": db::audit::retention_days(),
     })))
 }

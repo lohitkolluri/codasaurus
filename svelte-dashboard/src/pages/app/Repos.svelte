@@ -3,8 +3,7 @@
   import { push } from "svelte-spa-router";
   import { api } from "../../stores/api.js";
   import { isMaintainer } from "../../stores/auth.js";
-  import Sidebar from "../../lib/Sidebar.svelte";
-  import Header from "../../lib/Header.svelte";
+  import AppShell from "../../lib/AppShell.svelte";
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
   import EmptyState from "../../lib/EmptyState.svelte";
   import ErrorState from "../../lib/ErrorState.svelte";
@@ -21,7 +20,7 @@
   let filtered = $derived.by(() => {
     if (!search) return repos;
     const q = search.toLowerCase();
-    return repos.filter(r => (r.full_name ?? "").toLowerCase().includes(q));
+    return repos.filter((r) => (r.full_name ?? "").toLowerCase().includes(q));
   });
 
   onMount(async () => {
@@ -71,7 +70,6 @@
   async function batchToggle(active) {
     syncError = false;
     try {
-      // Chunk into batches of 20 to avoid overwhelming the server
       const chunk = (arr, size) => {
         const result = [];
         for (let i = 0; i < arr.length; i += size) result.push(arr.slice(i, i + size));
@@ -118,23 +116,25 @@
   }
 </script>
 
-<div class="app-layout">
-  <Sidebar />
-  <div class="app-main">
-    <Header title="Repos" />
-    <div class="app-content">
+<AppShell title="Repositories">
+  <div class="page-panel">
+    <div class="page-panel-toolbar">
       <LoadingSpinner loading={loading} />
 
       <div class="page-toolbar">
         <div>
           <h1 class="page-title">Repositories</h1>
-          <p class="page-description">Synced repos start inactive. Enable only what you want reviewed so LLM spend stays intentional.</p>
+          <p class="page-description">
+            Synced repos start inactive. Enable only what you want reviewed so LLM spend stays intentional.
+          </p>
         </div>
         <div class="toolbar-actions">
           <span class="toolbar-count">{repos.length} synced</span>
-          <button onclick={manageRepos}>Configure repos on GitHub</button>
-          <button onclick={syncRepos} disabled={syncing || !canManage}>{syncing ? "Syncing…" : "Sync Repos"}</button>
-          <button class="primary" onclick={installRepo}>Install on new repos</button>
+          <button type="button" onclick={manageRepos}>Configure repos on GitHub</button>
+          <button type="button" onclick={syncRepos} disabled={syncing || !canManage}
+            >{syncing ? "Syncing…" : "Sync Repos"}</button
+          >
+          <button type="button" class="primary" onclick={installRepo}>Install on new repos</button>
         </div>
       </div>
 
@@ -147,62 +147,90 @@
           <input type="search" placeholder="Search repositories…" bind:value={search} />
           <div class="search-actions">
             <span class="filter-count">{filtered.length} of {repos.length}</span>
-            <button onclick={() => batchToggle(true)} disabled={!canManage}>Enable all</button>
-            <button onclick={() => batchToggle(false)} disabled={!canManage}>Disable all</button>
+            <button type="button" onclick={() => batchToggle(true)} disabled={!canManage}
+              >Enable all</button
+            >
+            <button type="button" onclick={() => batchToggle(false)} disabled={!canManage}
+              >Disable all</button
+            >
           </div>
         </div>
       {/if}
-
-      {#if error}
-        <ErrorState message={error} />
-      {:else if loading}
-        <!-- spinner shown -->
-      {:else if repos.length === 0}
-        <EmptyState message="No repositories configured. Install the GitHub App to get started." />
-      {:else}
-        <div class="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Repository</th>
-                <th>Default Branch</th>
-                <th>Last Review</th>
-                <th style="width:100px">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each filtered as repo}
-                <tr onclick={() => openRepo(repo.id)}>
-                  <td class="repo-cell">
-                    <span class="repo-icon" aria-hidden="true">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                      </svg>
-                    </span>
-                    <span class="repo-name">{repo.full_name}</span>
-                  </td>
-                  <td><code>{repo.default_branch ?? "main"}</code></td>
-                  <td>{repo.updated_at ? new Date(repo.updated_at).toLocaleDateString() : "-"}</td>
-                  <td>
-                    <button class="toggle-btn" class:active={repo.active} disabled={!canManage} onclick={(e) => { e.stopPropagation(); if (canManage) toggleRepo(repo.id, repo.active); }}>
-                      {repo.active ? "Active" : "Inactive"}
-                    </button>
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {/if}
     </div>
+
+    {#if error}
+      <ErrorState message={error} />
+    {:else if loading}
+      <!-- spinner -->
+    {:else if repos.length === 0}
+      <EmptyState message="No repositories configured. Install the GitHub App to get started." />
+    {:else}
+      <div class="page-panel-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Repository</th>
+              <th>Default Branch</th>
+              <th>Last Review</th>
+              <th style="width:100px">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each filtered as repo}
+              <tr onclick={() => openRepo(repo.id)}>
+                <td class="repo-cell">
+                  <span class="repo-icon" aria-hidden="true">
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path
+                        d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                      />
+                    </svg>
+                  </span>
+                  <span class="repo-name">{repo.full_name}</span>
+                </td>
+                <td><code>{repo.default_branch ?? "main"}</code></td>
+                <td
+                  >{repo.updated_at
+                    ? new Date(repo.updated_at).toLocaleDateString()
+                    : "—"}</td
+                >
+                <td>
+                  <button
+                    type="button"
+                    class="toggle-btn"
+                    class:active={repo.active}
+                    disabled={!canManage}
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      if (canManage) toggleRepo(repo.id, repo.active);
+                    }}
+                  >
+                    {repo.active ? "Active" : "Inactive"}
+                  </button>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   </div>
-</div>
+</AppShell>
 
 <style>
   .search-bar {
     display: flex;
     gap: 12px;
-    margin-bottom: 16px;
+    margin-top: 12px;
     align-items: center;
     flex-wrap: wrap;
   }
@@ -216,7 +244,6 @@
     background: var(--bg-primary);
     color: var(--text-primary);
     outline: none;
-    transition: border-color 0.15s;
   }
   .search-bar input:focus {
     border-color: var(--accent);
@@ -235,59 +262,14 @@
     font-size: 12px;
     padding: 6px 14px;
     border-radius: 6px;
-    border: 1px solid var(--border);
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    cursor: pointer;
   }
-  .search-actions button:hover {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
+  .inline-flash {
+    font-size: 13px;
+    margin: 12px 0 0;
+    color: var(--success);
   }
-
-  .table-wrapper {
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: auto;
-    max-height: calc(100vh - 360px);
-    background: var(--bg-primary);
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-  thead {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-  th {
-    background: var(--bg-secondary);
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-muted);
-    padding: 10px 14px;
-    text-align: left;
-    border-bottom: 1px solid var(--border);
-  }
-  td {
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--border);
-    font-size: 14px;
-    vertical-align: middle;
-  }
-  tbody tr:last-child td {
-    border-bottom: none;
-  }
-  tbody tr {
-    cursor: pointer;
-    transition: background 0.1s;
-  }
-  tbody tr:hover {
-    background: var(--bg-secondary);
+  .inline-flash.error {
+    color: var(--error);
   }
   .repo-cell {
     display: flex;
@@ -305,13 +287,6 @@
     color: var(--accent-soft);
     flex-shrink: 0;
   }
-  .inline-flash {
-    font-size: 13px;
-    margin-bottom: 12px;
-    color: var(--success);
-    animation: rise-in 120ms var(--ease-out) both;
-  }
-  .inline-flash.error { color: var(--error); }
   .repo-name {
     font-weight: 600;
   }
@@ -320,6 +295,27 @@
     background: var(--bg-secondary);
     padding: 2px 8px;
     border-radius: 4px;
+  }
+  tbody tr {
+    cursor: pointer;
+  }
+  tbody tr:hover {
+    background: var(--bg-secondary);
+  }
+  th,
+  td {
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+    vertical-align: middle;
+  }
+  th {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
   }
   .toggle-btn {
     font-size: 12px;
@@ -330,7 +326,6 @@
     color: var(--text-muted);
     cursor: pointer;
     font-weight: 500;
-    transition: all 0.12s;
     width: 100%;
   }
   .toggle-btn.active {

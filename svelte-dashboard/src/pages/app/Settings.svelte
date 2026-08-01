@@ -4,8 +4,7 @@
   import { api } from "../../stores/api.js";
   import { currentUser, isOwner, isMaintainer, roleLabel } from "../../stores/auth.js";
   import { formatLabel } from "../../lib/utils.js";
-  import Sidebar from "../../lib/Sidebar.svelte";
-  import Header from "../../lib/Header.svelte";
+  import AppShell from "../../lib/AppShell.svelte";
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
   import ErrorState from "../../lib/ErrorState.svelte";
 
@@ -13,6 +12,9 @@
     { id: "llm", label: "LLM" },
     { id: "detectors", label: "Detectors" },
     { id: "policy", label: "Policy" },
+    { id: "runtime", label: "Runtime" },
+    { id: "auth", label: "Auth / SSO" },
+    { id: "integrations", label: "Integrations" },
     { id: "github", label: "GitHub" },
     { id: "account", label: "Account" },
     { id: "learning", label: "Learning" },
@@ -91,6 +93,46 @@
   let pwNew = $state("");
   let pwMsg = $state("");
   let pwSaving = $state(false);
+
+  // Runtime / ops
+  let publicUrl = $state("");
+  let auditRetentionDays = $state("90");
+  let queueWorkers = $state("");
+  let maxConcurrentReviews = $state("");
+  let hsts = $state(false);
+  let metricsToken = $state("");
+  let reviewTimeoutSecs = $state("300");
+  let maxInlineComments = $state("8");
+  let maxReviewerFiles = $state("8");
+  let maxCommentBytes = $state("64000");
+  let maxLlmDiffChars = $state("8000");
+  let autoImproveMaxFiles = $state("40");
+  let autoImproveMaxDiff = $state("24000");
+  let allowLocalLlm = $state(false);
+  let insecureCookies = $state(false);
+  let secureCookies = $state(false);
+  let runtimeSaving = $state(false);
+  let runtimeMsg = $state("");
+
+  // OIDC
+  let oidcIssuer = $state("");
+  let oidcClientId = $state("");
+  let oidcClientSecret = $state("");
+  let oidcRedirectUri = $state("");
+  let oidcScopes = $state("openid email profile");
+  let oidcAllowOpenJoin = $state(false);
+  let oidcAllowUnverifiedEmail = $state(false);
+  let oidcAllowPublicClient = $state(false);
+  let authSaving = $state(false);
+  let authMsg = $state("");
+
+  // Integrations
+  let jiraBaseUrl = $state("");
+  let jiraEmail = $state("");
+  let jiraApiToken = $state("");
+  let linearApiKey = $state("");
+  let integrationsSaving = $state(false);
+  let integrationsMsg = $state("");
 
   const PROVIDER_DEFAULTS = {
     openrouter: { model: "openai/gpt-4o", baseUrl: OPENROUTER_BASE },
@@ -220,6 +262,46 @@
         offlineMode = ["true", "1", "yes", "on"].includes(
           String(data.offline_mode ?? "").toLowerCase()
         );
+        publicUrl = data.public_url ?? "";
+        auditRetentionDays = data.audit_retention_days ?? "90";
+        queueWorkers = data.queue_workers ?? "";
+        maxConcurrentReviews = data.max_concurrent_reviews ?? "";
+        hsts = ["true", "1", "yes", "on"].includes(String(data.hsts ?? "").toLowerCase());
+        metricsToken = data.metrics_token ?? "";
+        reviewTimeoutSecs = data.review_timeout_secs ?? "300";
+        maxInlineComments = data.max_inline_comments ?? "8";
+        maxReviewerFiles = data.max_reviewer_files ?? "8";
+        maxCommentBytes = data.max_comment_bytes ?? "64000";
+        maxLlmDiffChars = data.max_llm_diff_chars ?? "8000";
+        autoImproveMaxFiles = data.auto_improve_max_files ?? "40";
+        autoImproveMaxDiff = data.auto_improve_max_diff ?? "24000";
+        allowLocalLlm = ["true", "1", "yes", "on"].includes(
+          String(data.allow_local_llm ?? "").toLowerCase()
+        );
+        insecureCookies = ["true", "1", "yes", "on"].includes(
+          String(data.insecure_cookies ?? "").toLowerCase()
+        );
+        secureCookies = ["true", "1", "yes", "on"].includes(
+          String(data.secure_cookies ?? "").toLowerCase()
+        );
+        oidcIssuer = data.oidc_issuer ?? "";
+        oidcClientId = data.oidc_client_id ?? "";
+        oidcClientSecret = data.oidc_client_secret ?? "";
+        oidcRedirectUri = data.oidc_redirect_uri ?? "";
+        oidcScopes = data.oidc_scopes ?? "openid email profile";
+        oidcAllowOpenJoin = ["true", "1", "yes", "on"].includes(
+          String(data.oidc_allow_open_join ?? "").toLowerCase()
+        );
+        oidcAllowUnverifiedEmail = ["true", "1", "yes", "on"].includes(
+          String(data.oidc_allow_unverified_email ?? "").toLowerCase()
+        );
+        oidcAllowPublicClient = ["true", "1", "yes", "on"].includes(
+          String(data.oidc_allow_public_client ?? "").toLowerCase()
+        );
+        jiraBaseUrl = data.jira_base_url ?? "";
+        jiraEmail = data.jira_email ?? "";
+        jiraApiToken = data.jira_api_token ?? "";
+        linearApiKey = data.linear_api_key ?? "";
         try {
           const lr = await api.get("/api/learning/rules");
           learnedRules = lr.rules || [];
@@ -339,56 +421,148 @@
       clearingGithub = false;
     }
   }
+
+  function boolVal(on) {
+    return on ? "true" : "false";
+  }
+
+  async function putMany(pairs) {
+    const updates = pairs.map(([key, value]) => api.put(`/api/settings/${key}`, { value }));
+    const results = await Promise.allSettled(updates);
+    const failed = results.filter((r) => r.status === "rejected");
+    const restart = results.some(
+      (r) => r.status === "fulfilled" && r.value?.restart_required
+    );
+    return { failed: failed.length, restart };
+  }
+
+  async function saveRuntime() {
+    runtimeSaving = true;
+    runtimeMsg = "";
+    try {
+      const { failed, restart } = await putMany([
+        ["public_url", publicUrl],
+        ["audit_retention_days", auditRetentionDays],
+        ["queue_workers", queueWorkers],
+        ["max_concurrent_reviews", maxConcurrentReviews],
+        ["hsts", boolVal(hsts)],
+        ["review_timeout_secs", reviewTimeoutSecs],
+        ["max_inline_comments", maxInlineComments],
+        ["max_reviewer_files", maxReviewerFiles],
+        ["max_comment_bytes", maxCommentBytes],
+        ["max_llm_diff_chars", maxLlmDiffChars],
+        ["auto_improve_max_files", autoImproveMaxFiles],
+        ["auto_improve_max_diff", autoImproveMaxDiff],
+        ["allow_local_llm", boolVal(allowLocalLlm)],
+        ["insecure_cookies", boolVal(insecureCookies)],
+        ["secure_cookies", boolVal(secureCookies)],
+      ]);
+      if (metricsToken && !metricsToken.includes("•") && !metricsToken.includes("*")) {
+        await api.put("/api/settings/metrics_token", { value: metricsToken });
+      }
+      if (failed > 0) runtimeMsg = `Save failed (${failed} errors)`;
+      else if (restart) runtimeMsg = "Saved — restart the process to apply worker/concurrency changes";
+      else runtimeMsg = "Saved";
+    } catch (err) {
+      runtimeMsg = err.message || "Save failed";
+    } finally {
+      runtimeSaving = false;
+    }
+  }
+
+  async function saveAuth() {
+    authSaving = true;
+    authMsg = "";
+    try {
+      const pairs = [
+        ["oidc_issuer", oidcIssuer],
+        ["oidc_client_id", oidcClientId],
+        ["oidc_redirect_uri", oidcRedirectUri],
+        ["oidc_scopes", oidcScopes],
+        ["oidc_allow_open_join", boolVal(oidcAllowOpenJoin)],
+        ["oidc_allow_unverified_email", boolVal(oidcAllowUnverifiedEmail)],
+        ["oidc_allow_public_client", boolVal(oidcAllowPublicClient)],
+      ];
+      if (oidcClientSecret && !oidcClientSecret.includes("•") && !oidcClientSecret.includes("*")) {
+        pairs.push(["oidc_client_secret", oidcClientSecret]);
+      }
+      const { failed } = await putMany(pairs);
+      authMsg = failed === 0 ? "Saved" : `Save failed (${failed} errors)`;
+    } catch (err) {
+      authMsg = err.message || "Save failed";
+    } finally {
+      authSaving = false;
+    }
+  }
+
+  async function saveIntegrations() {
+    integrationsSaving = true;
+    integrationsMsg = "";
+    try {
+      const pairs = [
+        ["jira_base_url", jiraBaseUrl],
+        ["jira_email", jiraEmail],
+      ];
+      if (jiraApiToken && !jiraApiToken.includes("•") && !jiraApiToken.includes("*")) {
+        pairs.push(["jira_api_token", jiraApiToken]);
+      }
+      if (linearApiKey && !linearApiKey.includes("•") && !linearApiKey.includes("*")) {
+        pairs.push(["linear_api_key", linearApiKey]);
+      }
+      const { failed } = await putMany(pairs);
+      integrationsMsg = failed === 0 ? "Saved" : `Save failed (${failed} errors)`;
+    } catch (err) {
+      integrationsMsg = err.message || "Save failed";
+    } finally {
+      integrationsSaving = false;
+    }
+  }
 </script>
 
-<div class="app-layout">
-  <Sidebar />
-  <div class="app-main">
-    <Header title="Settings" />
-    <div class="app-content">
-      <LoadingSpinner loading={loading} />
-      {#if error}
-        <ErrorState message={error} />
-      {:else if loading}
-      {:else}
-        <div class="page-toolbar compact settings-hero">
-          <div>
-            <h1 class="page-title">Settings</h1>
-            <p class="page-description">LLM, detectors, policy, GitHub App, account, and learned rules.</p>
-          </div>
-        </div>
+<AppShell title="Settings">
+  <LoadingSpinner loading={loading} />
+  {#if error}
+    <ErrorState message={error} />
+  {:else if loading}
+  {:else}
+    <div class="page-toolbar compact settings-hero">
+      <div>
+        <h1 class="page-title">Settings</h1>
+        <p class="page-description">LLM, detectors, policy, runtime, SSO, integrations, GitHub App, and account.</p>
+      </div>
+    </div>
 
-        {#if !canEditSettings}
-          <div class="settings-readonly-banner" role="status">
-            Only owners can change LLM, detector, policy, and GitHub settings. Your role: {roleLabel($currentUser?.role, $currentUser?.is_bootstrap)}.
-          </div>
-        {/if}
+    {#if !canEditSettings}
+      <div class="settings-readonly-banner" role="status">
+        Only owners can change LLM, detector, policy, and GitHub settings. Your role: {roleLabel($currentUser?.role, $currentUser?.is_bootstrap)}.
+      </div>
+    {/if}
 
-        <div class="settings-tabs-wrap">
-          <nav class="settings-tabs" aria-label="Settings tabs" role="tablist">
-            {#each TABS as s}
-              <button
-                type="button"
-                role="tab"
-                class="settings-tab"
-                class:active={activeTab === s.id}
-                id="tab-{s.id}"
-                aria-selected={activeTab === s.id}
-                aria-controls="panel-{s.id}"
-                tabindex={activeTab === s.id ? 0 : -1}
-                onclick={() => selectTab(s.id)}
-              >{s.label}</button>
-            {/each}
-          </nav>
-        </div>
+    <div class="settings-tabs-wrap">
+      <nav class="settings-tabs" aria-label="Settings tabs" role="tablist">
+        {#each TABS as s}
+          <button
+            type="button"
+            role="tab"
+            class="settings-tab"
+            class:active={activeTab === s.id}
+            id="tab-{s.id}"
+            aria-selected={activeTab === s.id}
+            aria-controls="panel-{s.id}"
+            tabindex={activeTab === s.id ? 0 : -1}
+            onclick={() => selectTab(s.id)}
+          >{s.label}</button>
+        {/each}
+      </nav>
+    </div>
 
-        <div
-          class="settings-panel"
-          role="tabpanel"
-          id="panel-{activeTab}"
-          aria-labelledby="tab-{activeTab}"
-        >
-          {#if activeTab === "llm"}
+    <div
+      class="settings-panel"
+      role="tabpanel"
+      id="panel-{activeTab}"
+      aria-labelledby="tab-{activeTab}"
+    >
+      {#if activeTab === "llm"}
           <section class="card settings-card">
             <header class="settings-section-head">
               <h3 class="section-heading">LLM</h3>
@@ -629,6 +803,220 @@
               {#if policyMsg}<span class="save-msg" class:error={policyMsg !== "Saved"}>{policyMsg}</span>{/if}
             </div>
           </section>
+          {:else if activeTab === "runtime"}
+          <section class="card settings-card">
+            <header class="settings-section-head">
+              <h3 class="section-heading">Runtime &amp; security</h3>
+              <p class="section-desc">
+                Same knobs as env vars. Host env wins on restart if set; saving here applies immediately for most settings.
+                Queue workers and max concurrent reviews need a process restart.
+              </p>
+            </header>
+            <div class="form-group">
+              <label for="public-url">Public URL</label>
+              <input id="public-url" type="url" bind:value={publicUrl} placeholder="https://reviews.example.com" disabled={!canEditSettings} />
+              <p class="field-hint">Canonical origin for OIDC redirects, invites, and HSTS when https.</p>
+            </div>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="audit-retention">Audit retention (days)</label>
+                <input id="audit-retention" type="number" min="7" max="730" bind:value={auditRetentionDays} disabled={!canEditSettings} />
+              </div>
+              <div class="form-group">
+                <label for="review-timeout">Review timeout (secs)</label>
+                <input id="review-timeout" type="number" min="30" max="3600" bind:value={reviewTimeoutSecs} disabled={!canEditSettings} />
+              </div>
+            </div>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="queue-workers">Queue workers (1–8)</label>
+                <input id="queue-workers" type="number" min="1" max="8" bind:value={queueWorkers} placeholder="auto" disabled={!canEditSettings} />
+                <p class="field-hint">Requires restart</p>
+              </div>
+              <div class="form-group">
+                <label for="max-concurrent">Max concurrent reviews</label>
+                <input id="max-concurrent" type="number" min="1" max="64" bind:value={maxConcurrentReviews} placeholder="4" disabled={!canEditSettings} />
+                <p class="field-hint">Requires restart</p>
+              </div>
+            </div>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="max-inline">Max inline comments</label>
+                <input id="max-inline" type="number" bind:value={maxInlineComments} disabled={!canEditSettings} />
+              </div>
+              <div class="form-group">
+                <label for="max-reviewer-files">Max reviewer files</label>
+                <input id="max-reviewer-files" type="number" bind:value={maxReviewerFiles} disabled={!canEditSettings} />
+              </div>
+            </div>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="max-comment-bytes">Max comment bytes</label>
+                <input id="max-comment-bytes" type="number" bind:value={maxCommentBytes} disabled={!canEditSettings} />
+              </div>
+              <div class="form-group">
+                <label for="max-llm-diff">Max LLM diff chars</label>
+                <input id="max-llm-diff" type="number" bind:value={maxLlmDiffChars} disabled={!canEditSettings} />
+              </div>
+            </div>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="auto-improve-files">Auto-improve max files</label>
+                <input id="auto-improve-files" type="number" bind:value={autoImproveMaxFiles} disabled={!canEditSettings} />
+              </div>
+              <div class="form-group">
+                <label for="auto-improve-diff">Auto-improve max diff chars</label>
+                <input id="auto-improve-diff" type="number" bind:value={autoImproveMaxDiff} disabled={!canEditSettings} />
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="metrics-token">Metrics bearer token</label>
+              <input id="metrics-token" type="password" bind:value={metricsToken} placeholder="Leave blank to disable /metrics" disabled={!canEditSettings} autocomplete="off" />
+            </div>
+            <div class="detector-row" style="border:none;padding:8px 0">
+              <span>Force HSTS</span>
+              <label class="toggle">
+                <div class="toggle-track" class:on={hsts} role="checkbox" aria-checked={hsts}
+                  tabindex="0"
+                  onclick={() => canEditSettings && (hsts = !hsts)}
+                  onkeydown={(e) => { if (canEditSettings && e.key === 'Enter') hsts = !hsts; }}>
+                  <div class="toggle-knob"></div>
+                </div>
+              </label>
+            </div>
+            <div class="detector-row" style="border:none;padding:8px 0">
+              <span>Allow local LLM endpoints</span>
+              <label class="toggle">
+                <div class="toggle-track" class:on={allowLocalLlm} role="checkbox" aria-checked={allowLocalLlm}
+                  tabindex="0"
+                  onclick={() => canEditSettings && (allowLocalLlm = !allowLocalLlm)}
+                  onkeydown={(e) => { if (canEditSettings && e.key === 'Enter') allowLocalLlm = !allowLocalLlm; }}>
+                  <div class="toggle-knob"></div>
+                </div>
+              </label>
+            </div>
+            <div class="detector-row" style="border:none;padding:8px 0">
+              <span>Force Secure cookies</span>
+              <label class="toggle">
+                <div class="toggle-track" class:on={secureCookies} role="checkbox" aria-checked={secureCookies}
+                  tabindex="0"
+                  onclick={() => canEditSettings && (secureCookies = !secureCookies)}
+                  onkeydown={(e) => { if (canEditSettings && e.key === 'Enter') secureCookies = !secureCookies; }}>
+                  <div class="toggle-knob"></div>
+                </div>
+              </label>
+            </div>
+            <div class="detector-row" style="border:none;padding:8px 0">
+              <span>Insecure cookies (HTTP only)</span>
+              <label class="toggle">
+                <div class="toggle-track" class:on={insecureCookies} role="checkbox" aria-checked={insecureCookies}
+                  tabindex="0"
+                  onclick={() => canEditSettings && (insecureCookies = !insecureCookies)}
+                  onkeydown={(e) => { if (canEditSettings && e.key === 'Enter') insecureCookies = !insecureCookies; }}>
+                  <div class="toggle-knob"></div>
+                </div>
+              </label>
+            </div>
+            <div class="save-row">
+              <button onclick={saveRuntime} disabled={runtimeSaving || !canEditSettings}>{runtimeSaving ? "Saving…" : "Save"}</button>
+              {#if runtimeMsg}<span class="save-msg" class:error={!runtimeMsg.startsWith("Saved")}>{runtimeMsg}</span>{/if}
+            </div>
+          </section>
+          {:else if activeTab === "auth"}
+          <section class="card settings-card">
+            <header class="settings-section-head">
+              <h3 class="section-heading">OIDC / SSO</h3>
+              <p class="section-desc">Configure an identity provider. Equivalent to OIDC_* environment variables.</p>
+            </header>
+            <div class="form-group">
+              <label for="oidc-issuer">Issuer URL</label>
+              <input id="oidc-issuer" type="url" bind:value={oidcIssuer} placeholder="https://accounts.example.com" disabled={!canEditSettings} />
+            </div>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="oidc-client-id">Client ID</label>
+                <input id="oidc-client-id" type="text" bind:value={oidcClientId} disabled={!canEditSettings} />
+              </div>
+              <div class="form-group">
+                <label for="oidc-client-secret">Client secret</label>
+                <input id="oidc-client-secret" type="password" bind:value={oidcClientSecret} disabled={!canEditSettings} autocomplete="off" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="oidc-redirect">Redirect URI (optional)</label>
+              <input id="oidc-redirect" type="url" bind:value={oidcRedirectUri} placeholder="Defaults to PUBLIC_URL/api/auth/oidc/callback" disabled={!canEditSettings} />
+            </div>
+            <div class="form-group">
+              <label for="oidc-scopes">Scopes</label>
+              <input id="oidc-scopes" type="text" bind:value={oidcScopes} disabled={!canEditSettings} />
+            </div>
+            <div class="detector-row" style="border:none;padding:8px 0">
+              <span>Allow open join (no invite)</span>
+              <label class="toggle">
+                <div class="toggle-track" class:on={oidcAllowOpenJoin} role="checkbox" aria-checked={oidcAllowOpenJoin}
+                  tabindex="0"
+                  onclick={() => canEditSettings && (oidcAllowOpenJoin = !oidcAllowOpenJoin)}
+                  onkeydown={(e) => { if (canEditSettings && e.key === 'Enter') oidcAllowOpenJoin = !oidcAllowOpenJoin; }}>
+                  <div class="toggle-knob"></div>
+                </div>
+              </label>
+            </div>
+            <div class="detector-row" style="border:none;padding:8px 0">
+              <span>Allow unverified email claims</span>
+              <label class="toggle">
+                <div class="toggle-track" class:on={oidcAllowUnverifiedEmail} role="checkbox" aria-checked={oidcAllowUnverifiedEmail}
+                  tabindex="0"
+                  onclick={() => canEditSettings && (oidcAllowUnverifiedEmail = !oidcAllowUnverifiedEmail)}
+                  onkeydown={(e) => { if (canEditSettings && e.key === 'Enter') oidcAllowUnverifiedEmail = !oidcAllowUnverifiedEmail; }}>
+                  <div class="toggle-knob"></div>
+                </div>
+              </label>
+            </div>
+            <div class="detector-row" style="border:none;padding:8px 0">
+              <span>Allow public client (empty secret)</span>
+              <label class="toggle">
+                <div class="toggle-track" class:on={oidcAllowPublicClient} role="checkbox" aria-checked={oidcAllowPublicClient}
+                  tabindex="0"
+                  onclick={() => canEditSettings && (oidcAllowPublicClient = !oidcAllowPublicClient)}
+                  onkeydown={(e) => { if (canEditSettings && e.key === 'Enter') oidcAllowPublicClient = !oidcAllowPublicClient; }}>
+                  <div class="toggle-knob"></div>
+                </div>
+              </label>
+            </div>
+            <div class="save-row">
+              <button onclick={saveAuth} disabled={authSaving || !canEditSettings}>{authSaving ? "Saving…" : "Save"}</button>
+              {#if authMsg}<span class="save-msg" class:error={authMsg !== "Saved"}>{authMsg}</span>{/if}
+            </div>
+          </section>
+          {:else if activeTab === "integrations"}
+          <section class="card settings-card">
+            <header class="settings-section-head">
+              <h3 class="section-heading">Ticket integrations</h3>
+              <p class="section-desc">Enrich PR context from Jira keys and Linear issue IDs in the description.</p>
+            </header>
+            <div class="form-group">
+              <label for="jira-base">Jira base URL</label>
+              <input id="jira-base" type="url" bind:value={jiraBaseUrl} placeholder="https://your-org.atlassian.net" disabled={!canEditSettings} />
+            </div>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="jira-email">Jira email</label>
+                <input id="jira-email" type="email" bind:value={jiraEmail} disabled={!canEditSettings} />
+              </div>
+              <div class="form-group">
+                <label for="jira-token">Jira API token</label>
+                <input id="jira-token" type="password" bind:value={jiraApiToken} disabled={!canEditSettings} autocomplete="off" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="linear-key">Linear API key</label>
+              <input id="linear-key" type="password" bind:value={linearApiKey} disabled={!canEditSettings} autocomplete="off" />
+            </div>
+            <div class="save-row">
+              <button onclick={saveIntegrations} disabled={integrationsSaving || !canEditSettings}>{integrationsSaving ? "Saving…" : "Save"}</button>
+              {#if integrationsMsg}<span class="save-msg" class:error={integrationsMsg !== "Saved"}>{integrationsMsg}</span>{/if}
+            </div>
+          </section>
           {:else if activeTab === "github"}
           <section class="card settings-card">
             <header class="settings-section-head">
@@ -744,9 +1132,7 @@
           {/if}
         </div>
       {/if}
-    </div>
-  </div>
-</div>
+</AppShell>
 
 <style>
   .settings-hero { margin-bottom: 12px; }
@@ -823,6 +1209,14 @@
   }
   .search-item:hover, .search-item.active { background: var(--bg-secondary); }
   .empty-note { font-size: 13px; color: var(--text-muted); }
+  .form-row-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 16px;
+  }
+  @media (max-width: 720px) {
+    .form-row-2 { grid-template-columns: 1fr; }
+  }
   .muted { font-size: 12px; color: var(--text-muted); }
   .linkish {
     background: none;

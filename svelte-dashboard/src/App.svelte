@@ -19,6 +19,7 @@
 
   // App pages
   import Dashboard from "./pages/app/Dashboard.svelte";
+  import Stats from "./pages/app/Stats.svelte";
   import Repos from "./pages/app/Repos.svelte";
   import RepoDetail from "./pages/app/RepoDetail.svelte";
   import Reviews from "./pages/app/Reviews.svelte";
@@ -74,6 +75,7 @@
     "/login": Login,
     "/invite/:token": InviteAccept,
     "/app/dashboard": Dashboard,
+    "/app/stats": Stats,
     "/app/repos": Repos,
     "/app/repos/:id": RepoDetail,
     "/app/reviews": Reviews,

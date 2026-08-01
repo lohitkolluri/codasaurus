@@ -25,4 +25,5 @@ pub async fn run_periodic_cleanup(pool: &DbPool) {
     }
 
     crate::db::events::prune_older_than_days(pool, 30).await;
+    crate::db::audit::prune_older_than_days(pool, crate::db::audit::retention_days()).await;
 }

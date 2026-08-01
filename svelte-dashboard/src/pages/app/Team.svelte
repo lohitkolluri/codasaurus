@@ -2,8 +2,7 @@
   import { onMount } from "svelte";
   import { api } from "../../stores/api.js";
   import { currentUser, isOwner, roleLabel } from "../../stores/auth.js";
-  import Sidebar from "../../lib/Sidebar.svelte";
-  import Header from "../../lib/Header.svelte";
+  import AppShell from "../../lib/AppShell.svelte";
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
   import ErrorState from "../../lib/ErrorState.svelte";
   import EmptyState from "../../lib/EmptyState.svelte";
@@ -200,310 +199,313 @@
   }
 </script>
 
-<div class="app-layout">
-  <Sidebar />
-  <div class="app-main">
-    <Header title="Team" />
-    <div class="app-content">
-      <div class="page-toolbar">
-        <div>
-          <p class="eyebrow">Access</p>
-          <h1 class="page-title">Team</h1>
-          <p class="page-description">
-            Owners, maintainers, and viewers. Invite with a shareable link — no email server required.
-          </p>
+<AppShell title="Team">
+  <div class="page-toolbar">
+    <div>
+      <p class="eyebrow">Access</p>
+      <h1 class="page-title">Team</h1>
+      <p class="page-description">
+        Owners, maintainers, and viewers. Invite with a shareable link — no email server required.
+      </p>
+    </div>
+    {#if $isOwner}
+      <button
+        class="primary"
+        onclick={() => {
+          inviteOpen = !inviteOpen;
+        }}
+      >
+        {inviteOpen ? "Close invite" : "Invite member"}
+      </button>
+    {/if}
+  </div>
+
+  <LoadingSpinner loading={loading} />
+
+  {#if error}
+    <ErrorState message={error} />
+  {:else if !loading}
+    {#if teamMsg}
+      <p class="save-msg team-toast" class:error={teamMsgError}>{teamMsg}</p>
+    {/if}
+
+    {#if $isOwner && inviteOpen}
+      <section class="team-invite-panel">
+        <h2 class="team-section-title">Create invite link</h2>
+        <p class="page-description" style="margin-bottom: var(--space-4)">
+          Anyone with the link can join (optional email lock). Links expire in 7 days.
+        </p>
+        <div class="team-invite-grid">
+          <div class="form-group">
+            <label for="invite-email">Email lock (optional)</label>
+            <input
+              id="invite-email"
+              type="email"
+              bind:value={inviteEmail}
+              placeholder="optional@company.com"
+            />
+          </div>
+          <div class="form-group">
+            <label for="invite-role">Role</label>
+            <select id="invite-role" bind:value={inviteRole}>
+              <option value="viewer">Viewer</option>
+              <option value="maintainer">Maintainer</option>
+              <option value="owner">Owner</option>
+            </select>
+          </div>
         </div>
-        {#if $isOwner}
-          <button
-            class="primary"
-            onclick={() => {
-              inviteOpen = !inviteOpen;
-            }}
-          >
-            {inviteOpen ? "Close invite" : "Invite member"}
+        <div class="save-row">
+          <button class="primary" onclick={createInvite} disabled={inviteCreating}>
+            {inviteCreating ? "Creating…" : "Create link"}
           </button>
+          {#if lastInviteUrl}
+            <button onclick={copyInviteUrl}>Copy link</button>
+          {/if}
+        </div>
+        {#if lastInviteUrl}
+          <p class="field-hint team-invite-url">{lastInviteUrl}</p>
         {/if}
+      </section>
+    {/if}
+
+    <section class="team-roster">
+      <div class="team-toolbar">
+        <div class="team-filters" role="tablist" aria-label="Filter by role">
+          {#each ROLE_FILTERS as f}
+            <button
+              type="button"
+              class="team-filter"
+              class:active={roleFilter === f.id}
+              role="tab"
+              aria-selected={roleFilter === f.id}
+              onclick={() => (roleFilter = f.id)}
+            >
+              {f.label}
+              <span class="team-filter-count">{roleCounts[f.id] ?? 0}</span>
+            </button>
+          {/each}
+        </div>
+        <div class="form-group team-search">
+          <label class="sr-only" for="member-search">Search members</label>
+          <input
+            id="member-search"
+            type="search"
+            bind:value={search}
+            placeholder="Search by email…"
+          />
+        </div>
       </div>
 
-      <LoadingSpinner loading={loading} />
+      {#if pageMembers.length === 0}
+        <EmptyState
+          message={members.length === 0
+            ? "No members yet."
+            : "No members match this filter."}
+        />
+      {:else}
+        <div class="page-panel-scroll">
+          <table class="team-table">
+            <thead>
+              <tr>
+                <th scope="col">Member</th>
+                <th scope="col">Role</th>
+                <th scope="col">Auth</th>
+                <th scope="col">Joined</th>
+                {#if $isOwner}
+                  <th scope="col" class="team-col-actions">Actions</th>
+                {/if}
+              </tr>
+            </thead>
+            <tbody>
+              {#each pageMembers as m}
+                <tr>
+                  <td>
+                    <div class="team-member-cell">
+                      <UserAvatar email={m.email} size={32} />
+                      <div>
+                        <div class="team-email">
+                          {m.email}
+                          {#if m.id === $currentUser?.id}
+                            <span class="team-you">you</span>
+                          {/if}
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    {#if $isOwner && !m.is_bootstrap}
+                      <select
+                        class="team-role-select"
+                        value={m.role}
+                        aria-label={`Role for ${m.email}`}
+                        onchange={(e) => changeMemberRole(m.id, e.target.value)}
+                      >
+                        <option value="owner">Owner</option>
+                        <option value="maintainer">Maintainer</option>
+                        <option value="viewer">Viewer</option>
+                      </select>
+                    {:else}
+                      <span class="role-badge" class:bootstrap={!!m.is_bootstrap}
+                        >{roleLabel(m.role, m.is_bootstrap)}</span
+                      >
+                    {/if}
+                  </td>
+                  <td class="muted">{m.auth_provider || "—"}</td>
+                  <td class="muted">{m.created_at?.slice?.(0, 10) || "—"}</td>
+                  {#if $isOwner}
+                    <td class="team-col-actions">
+                      {#if m.is_bootstrap}
+                        <span class="muted">Protected</span>
+                      {:else}
+                        <div class="team-row-actions">
+                          {#if $currentUser?.is_bootstrap && m.role === "owner"}
+                            <button class="linkish" onclick={() => transferBootstrap(m.id)}
+                              >Make superuser</button
+                            >
+                          {/if}
+                          {#if confirmRemoveId === m.id}
+                            <button class="danger" onclick={() => removeMember(m.id)}
+                              >Confirm</button
+                            >
+                            <button onclick={() => (confirmRemoveId = null)}>Cancel</button>
+                          {:else}
+                            <button class="linkish" onclick={() => (confirmRemoveId = m.id)}
+                              >Remove</button
+                            >
+                          {/if}
+                        </div>
+                      {/if}
+                    </td>
+                  {/if}
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
 
-      {#if error}
-        <ErrorState message={error} />
-      {:else if !loading}
-        {#if teamMsg}
-          <p class="save-msg team-toast" class:error={teamMsgError}>{teamMsg}</p>
-        {/if}
+        <div class="page-panel-footer">
+          <span class="muted">
+            {filteredMembers.length} member{filteredMembers.length === 1 ? "" : "s"}
+            {#if filteredMembers.length > PAGE_SIZE}
+              · page {pageSafe} of {totalPages}
+            {/if}
+          </span>
+          {#if totalPages > 1}
+            <div class="team-page-btns">
+              <button
+                disabled={pageSafe <= 1}
+                onclick={() => (page = pageSafe - 1)}>Previous</button
+              >
+              <button
+                disabled={pageSafe >= totalPages}
+                onclick={() => (page = pageSafe + 1)}>Next</button
+              >
+            </div>
+          {/if}
+        </div>
+      {/if}
+    </section>
 
-        {#if $isOwner && inviteOpen}
-          <section class="team-invite-panel">
-            <h2 class="team-section-title">Create invite link</h2>
-            <p class="page-description" style="margin-bottom: var(--space-4)">
-              Anyone with the link can join (optional email lock). Links expire in 7 days.
-            </p>
+    {#if $isOwner && pendingInvites.length > 0}
+      <section class="team-pending">
+        <h2 class="team-section-title">Pending invites ({pendingInvites.length})</h2>
+        <div class="team-table-wrap">
+          <table class="team-table">
+            <thead>
+              <tr>
+                <th scope="col">Invite</th>
+                <th scope="col">Role</th>
+                <th scope="col">Expires</th>
+                <th scope="col">Created by</th>
+                <th scope="col" class="team-col-actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each pendingInvites as inv}
+                <tr>
+                  <td><strong>{inv.email || "Open link"}</strong></td>
+                  <td><span class="role-badge">{roleLabel(inv.role)}</span></td>
+                  <td class="muted">{inv.expires_at?.slice?.(0, 10) || "—"}</td>
+                  <td class="muted">{inv.created_by || "—"}</td>
+                  <td class="team-col-actions">
+                    <button class="linkish" onclick={() => revokeInvite(inv.id)}>Revoke</button>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {/if}
+
+    <section class="team-account">
+      <button
+        type="button"
+        class="team-account-toggle"
+        aria-expanded={accountOpen}
+        aria-controls="team-account-panel"
+        id="team-account-toggle"
+        onclick={() => {
+          accountOpen = !accountOpen;
+        }}
+      >
+        <span class="team-account-toggle-label">
+          Your account · {roleLabel($currentUser?.role, $currentUser?.is_bootstrap)} · {$currentUser?.email}
+        </span>
+        <span class="team-account-toggle-action" aria-hidden="true">
+          {accountOpen ? "Hide" : "Show"}
+        </span>
+      </button>
+      {#if accountOpen}
+        <div
+          class="team-account-body"
+          id="team-account-panel"
+          role="region"
+          aria-labelledby="team-account-toggle"
+        >
+          {#if $currentUser?.auth_provider !== "oidc"}
+            <h3 class="team-section-title">Change password</h3>
             <div class="team-invite-grid">
               <div class="form-group">
-                <label for="invite-email">Email lock (optional)</label>
+                <label for="pw-current">Current password</label>
                 <input
-                  id="invite-email"
-                  type="email"
-                  bind:value={inviteEmail}
-                  placeholder="optional@company.com"
+                  id="pw-current"
+                  type="password"
+                  bind:value={pwCurrent}
+                  autocomplete="current-password"
                 />
               </div>
               <div class="form-group">
-                <label for="invite-role">Role</label>
-                <select id="invite-role" bind:value={inviteRole}>
-                  <option value="viewer">Viewer</option>
-                  <option value="maintainer">Maintainer</option>
-                  <option value="owner">Owner</option>
-                </select>
+                <label for="pw-new">New password</label>
+                <input
+                  id="pw-new"
+                  type="password"
+                  bind:value={pwNew}
+                  placeholder="At least 10 characters"
+                  autocomplete="new-password"
+                />
               </div>
             </div>
             <div class="save-row">
-              <button class="primary" onclick={createInvite} disabled={inviteCreating}>
-                {inviteCreating ? "Creating…" : "Create link"}
+              <button
+                type="button"
+                onclick={changePassword}
+                disabled={pwSaving || !pwCurrent || pwNew.length < 10}
+              >
+                {pwSaving ? "Updating…" : "Update password"}
               </button>
-              {#if lastInviteUrl}
-                <button onclick={copyInviteUrl}>Copy link</button>
+              {#if pwMsg}
+                <span class="save-msg" class:error={pwMsg !== "Password updated"}>{pwMsg}</span>
               {/if}
             </div>
-            {#if lastInviteUrl}
-              <p class="field-hint team-invite-url">{lastInviteUrl}</p>
-            {/if}
-          </section>
-        {/if}
-
-        <section class="team-roster">
-          <div class="team-toolbar">
-            <div class="team-filters" role="tablist" aria-label="Filter by role">
-              {#each ROLE_FILTERS as f}
-                <button
-                  type="button"
-                  class="team-filter"
-                  class:active={roleFilter === f.id}
-                  role="tab"
-                  aria-selected={roleFilter === f.id}
-                  onclick={() => (roleFilter = f.id)}
-                >
-                  {f.label}
-                  <span class="team-filter-count">{roleCounts[f.id] ?? 0}</span>
-                </button>
-              {/each}
-            </div>
-            <div class="form-group team-search">
-              <label class="sr-only" for="member-search">Search members</label>
-              <input
-                id="member-search"
-                type="search"
-                bind:value={search}
-                placeholder="Search by email…"
-              />
-            </div>
-          </div>
-
-          {#if pageMembers.length === 0}
-            <EmptyState
-              message={members.length === 0
-                ? "No members yet."
-                : "No members match this filter."}
-            />
           {:else}
-            <div class="team-table-wrap">
-              <table class="team-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Member</th>
-                    <th scope="col">Role</th>
-                    <th scope="col">Auth</th>
-                    <th scope="col">Joined</th>
-                    {#if $isOwner}
-                      <th scope="col" class="team-col-actions">Actions</th>
-                    {/if}
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each pageMembers as m}
-                    <tr>
-                      <td>
-                        <div class="team-member-cell">
-                          <UserAvatar email={m.email} size={32} />
-                          <div>
-                            <div class="team-email">
-                              {m.email}
-                              {#if m.id === $currentUser?.id}
-                                <span class="team-you">you</span>
-                              {/if}
-                            </div>
-                            {#if m.is_bootstrap}
-                              <span class="role-badge bootstrap">Superuser</span>
-                            {/if}
-                          </div>
-                        </div>
-                      </td>
-                      <td>
-                        {#if $isOwner && !m.is_bootstrap}
-                          <select
-                            class="team-role-select"
-                            value={m.role}
-                            aria-label={`Role for ${m.email}`}
-                            onchange={(e) => changeMemberRole(m.id, e.target.value)}
-                          >
-                            <option value="owner">Owner</option>
-                            <option value="maintainer">Maintainer</option>
-                            <option value="viewer">Viewer</option>
-                          </select>
-                        {:else}
-                          <span class="role-badge" class:bootstrap={!!m.is_bootstrap}
-                            >{roleLabel(m.role, m.is_bootstrap)}</span
-                          >
-                        {/if}
-                      </td>
-                      <td class="muted">{m.auth_provider || "—"}</td>
-                      <td class="muted">{m.created_at?.slice?.(0, 10) || "—"}</td>
-                      {#if $isOwner}
-                        <td class="team-col-actions">
-                          {#if m.is_bootstrap}
-                            <span class="muted">Protected</span>
-                          {:else}
-                            <div class="team-row-actions">
-                              {#if $currentUser?.is_bootstrap && m.role === "owner"}
-                                <button class="linkish" onclick={() => transferBootstrap(m.id)}
-                                  >Make superuser</button
-                                >
-                              {/if}
-                              {#if confirmRemoveId === m.id}
-                                <button class="danger" onclick={() => removeMember(m.id)}
-                                  >Confirm</button
-                                >
-                                <button onclick={() => (confirmRemoveId = null)}>Cancel</button>
-                              {:else}
-                                <button class="linkish" onclick={() => (confirmRemoveId = m.id)}
-                                  >Remove</button
-                                >
-                              {/if}
-                            </div>
-                          {/if}
-                        </td>
-                      {/if}
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-
-            <div class="team-pagination">
-              <span class="muted">
-                {filteredMembers.length} member{filteredMembers.length === 1 ? "" : "s"}
-                {#if filteredMembers.length > PAGE_SIZE}
-                  · page {pageSafe} of {totalPages}
-                {/if}
-              </span>
-              {#if totalPages > 1}
-                <div class="team-page-btns">
-                  <button
-                    disabled={pageSafe <= 1}
-                    onclick={() => (page = pageSafe - 1)}>Previous</button
-                  >
-                  <button
-                    disabled={pageSafe >= totalPages}
-                    onclick={() => (page = pageSafe + 1)}>Next</button
-                  >
-                </div>
-              {/if}
-            </div>
+            <p class="muted">Signed in with SSO — password is managed by your identity provider.</p>
           {/if}
-        </section>
-
-        {#if $isOwner && pendingInvites.length > 0}
-          <section class="team-pending">
-            <h2 class="team-section-title">Pending invites ({pendingInvites.length})</h2>
-            <div class="team-table-wrap">
-              <table class="team-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Invite</th>
-                    <th scope="col">Role</th>
-                    <th scope="col">Expires</th>
-                    <th scope="col">Created by</th>
-                    <th scope="col" class="team-col-actions">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each pendingInvites as inv}
-                    <tr>
-                      <td><strong>{inv.email || "Open link"}</strong></td>
-                      <td><span class="role-badge">{roleLabel(inv.role)}</span></td>
-                      <td class="muted">{inv.expires_at?.slice?.(0, 10) || "—"}</td>
-                      <td class="muted">{inv.created_by || "—"}</td>
-                      <td class="team-col-actions">
-                        <button class="linkish" onclick={() => revokeInvite(inv.id)}>Revoke</button>
-                      </td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        {/if}
-
-        <section class="team-account">
-          <button
-            type="button"
-            class="team-account-toggle"
-            aria-expanded={accountOpen}
-            onclick={() => (accountOpen = !accountOpen)}
-          >
-            <span>
-              Your account · {roleLabel($currentUser?.role, $currentUser?.is_bootstrap)} · {$currentUser?.email}
-            </span>
-            <span class="muted">{accountOpen ? "Hide" : "Show"}</span>
-          </button>
-          {#if accountOpen}
-            <div class="team-account-body">
-              {#if $currentUser?.auth_provider !== "oidc"}
-                <h3 class="team-section-title">Change password</h3>
-                <div class="team-invite-grid">
-                  <div class="form-group">
-                    <label for="pw-current">Current password</label>
-                    <input
-                      id="pw-current"
-                      type="password"
-                      bind:value={pwCurrent}
-                      autocomplete="current-password"
-                    />
-                  </div>
-                  <div class="form-group">
-                    <label for="pw-new">New password</label>
-                    <input
-                      id="pw-new"
-                      type="password"
-                      bind:value={pwNew}
-                      placeholder="At least 10 characters"
-                      autocomplete="new-password"
-                    />
-                  </div>
-                </div>
-                <div class="save-row">
-                  <button
-                    onclick={changePassword}
-                    disabled={pwSaving || !pwCurrent || pwNew.length < 10}
-                  >
-                    {pwSaving ? "Updating…" : "Update password"}
-                  </button>
-                  {#if pwMsg}
-                    <span class="save-msg" class:error={pwMsg !== "Password updated"}>{pwMsg}</span>
-                  {/if}
-                </div>
-              {:else}
-                <p class="muted">Signed in with SSO — password is managed by your identity provider.</p>
-              {/if}
-            </div>
-          {/if}
-        </section>
+        </div>
       {/if}
-    </div>
-  </div>
-</div>
+    </section>
+  {/if}
+</AppShell>
 
 <style>
   .team-toast {
@@ -620,6 +622,11 @@
     font-size: var(--text-sm);
   }
 
+  .page-panel-scroll .team-table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
   .team-table th,
   .team-table td {
     text-align: left;
@@ -680,41 +687,61 @@
     justify-content: flex-end;
   }
 
-  .team-pagination {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-4);
-    margin-top: var(--space-4);
-    flex-wrap: wrap;
-  }
-
   .team-page-btns {
     display: flex;
     gap: 8px;
   }
 
-  .team-account-toggle {
+  button.team-account-toggle {
     width: 100%;
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: var(--space-4);
-    padding: 12px 0;
-    background: transparent;
-    border: none;
-    border-radius: 0;
+    padding: 12px 14px;
+    margin: 0;
+    background: var(--bg-secondary, transparent);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
     text-align: left;
     font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    color: var(--text-primary);
+    cursor: pointer;
+    box-shadow: none;
+    transform: none;
+  }
+
+  button.team-account-toggle:hover,
+  button.team-account-toggle:not(:disabled):hover,
+  button.team-account-toggle:not(:disabled):active {
+    background: var(--bg-secondary, transparent);
+    border-color: var(--border);
+    color: var(--text-primary);
+    transform: none;
+    box-shadow: none;
+  }
+
+  button.team-account-toggle .team-account-toggle-label {
+    color: var(--text-primary);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  button.team-account-toggle .team-account-toggle-action {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+  }
+
+  button.team-account-toggle:hover .team-account-toggle-action,
+  button.team-account-toggle:not(:disabled):hover .team-account-toggle-action {
     color: var(--text-primary);
   }
 
-  .team-account-toggle:hover {
-    background: transparent;
-  }
-
   .team-account-body {
-    padding-top: var(--space-2);
+    padding: var(--space-4) 0 0;
   }
 
   .muted {
