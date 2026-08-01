@@ -38,7 +38,7 @@
     syncError = false;
     try {
       const data = await api.post("/api/repos/sync");
-      syncMsg = `Synced ${data.synced} repos`;
+      syncMsg = `Synced ${data.synced} repos (new ones stay inactive until you enable them)`;
       repos = await api.get("/api/repos");
     } catch (err) {
       syncMsg = "Sync failed: " + (err.message || "unknown error");
@@ -127,10 +127,10 @@
         <div>
           <p class="eyebrow">Workspace</p>
           <h1 class="page-title">Repositories</h1>
-          <p class="page-description">Manage the codebases Codasaurus reviews for your team.</p>
+          <p class="page-description">Synced repos start inactive. Enable only what you want reviewed so LLM spend stays intentional.</p>
         </div>
         <div class="toolbar-actions">
-          <span class="toolbar-count">{repos.length} configured</span>
+          <span class="toolbar-count">{repos.length} synced</span>
           <button onclick={manageRepos}>Configure repos on GitHub</button>
           <button onclick={syncRepos} disabled={syncing}>{syncing ? "Syncing…" : "Sync Repos"}</button>
           <button class="primary" onclick={installRepo}>Install on new repos</button>
@@ -181,7 +181,7 @@
                     <span class="repo-name">{repo.full_name}</span>
                   </td>
                   <td><code>{repo.default_branch ?? "main"}</code></td>
-                  <td>{repo.updated_at ? new Date(repo.updated_at).toLocaleDateString() : "—"}</td>
+                  <td>{repo.updated_at ? new Date(repo.updated_at).toLocaleDateString() : "-"}</td>
                   <td>
                     <button class="toggle-btn" class:active={repo.active} onclick={(e) => { e.stopPropagation(); toggleRepo(repo.id, repo.active); }}>
                       {repo.active ? "Active" : "Inactive"}

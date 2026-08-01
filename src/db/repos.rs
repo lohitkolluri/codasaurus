@@ -41,7 +41,7 @@ pub async fn create_repo(pool: &DbPool, repo: &RepoCreate) -> Result<Repo, sqlx:
         &repo.default_branch,
         repo.installation_id,
         repo.private,
-        true
+        false // opt-in: operator enables reviews in the dashboard
     )
 }
 
