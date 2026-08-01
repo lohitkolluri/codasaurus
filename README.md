@@ -14,17 +14,19 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/lohitkolluri/codasaurus/releases/tag/v0.1.0"><img src="https://img.shields.io/badge/release-v0.1.0-111827" alt="v0.1.0"></a>
   <a href="https://github.com/lohitkolluri/codasaurus/actions/workflows/ci.yml"><img src="https://github.com/lohitkolluri/codasaurus/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.88+-dea584?logo=rust&logoColor=white" alt="Rust"></a>
   <a href="docs/database.md"><img src="https://img.shields.io/badge/db-PostgreSQL-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL"></a>
   <a href="docs/run-for-free.md"><img src="https://img.shields.io/badge/host-run%20for%20%240-2ea44f" alt="Run for free"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/lohitkolluri/codasaurus" alt="License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License"></a>
 </p>
 
 <p align="center">
   <a href="docs/setup-onboarding.md"><img src="https://img.shields.io/badge/docs-onboarding-0ea5e9" alt="Onboarding"></a>
   <a href="docs/commands.md"><img src="https://img.shields.io/badge/docs-@codasaurus%20commands-8b5cf6" alt="Commands"></a>
   <a href="docs/configuration.md"><img src="https://img.shields.io/badge/docs-config-64748b" alt="Config"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/changelog-Keep%20a%20Changelog-orange" alt="Changelog"></a>
 </p>
 
 ---
@@ -51,10 +53,11 @@ Fail-closed offline mode. Finding provenance. Learning from dismissals. Air-gap 
 ```bash
 git clone https://github.com/lohitkolluri/codasaurus.git
 cd codasaurus
+cp .env.example .env   # optional
 docker compose up
 ```
 
-Open the dashboard, finish the [onboarding wizard](docs/setup-onboarding.md) (~5 min), install the GitHub App.
+Open [http://localhost:3000](http://localhost:3000), finish the [onboarding wizard](docs/setup-onboarding.md) (~5 min), install the GitHub App.
 
 Want **$0 forever** (no trials)? [Run on always-free infra](docs/run-for-free.md): Render free web + Aiven Free Postgres (or Neon). LLM optional / off.
 
@@ -64,6 +67,8 @@ cargo build --release
 export DATABASE_URL="postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus"
 ./target/release/codasaurus serve --port 3000
 ```
+
+Prebuilt Linux binary: [GitHub Releases](https://github.com/lohitkolluri/codasaurus/releases) (`codasaurus-v*-x86_64-unknown-linux-gnu.tar.gz`).
 
 ```text
 codasaurus serve | health | version
@@ -94,7 +99,7 @@ Full index: [docs/README.md](docs/README.md).
 @codasaurus review      @codasaurus describe     @codasaurus improve
 @codasaurus security    @codasaurus impact       @codasaurus similar
 @codasaurus ask …       @codasaurus fix [fp]     @codasaurus ignore <fp>
-@codasaurus help
+@codasaurus digest      @codasaurus help
 ```
 
 Also: `summarize`, `labels`, `changelog`, `add_docs`. React 👎 on a finding comment to dismiss. Full table in [docs/commands.md](docs/commands.md).
@@ -143,12 +148,16 @@ Repo overlays live in the dashboard (`config_json`). OIDC: `OIDC_ISSUER`, `OIDC_
 
 ## Develop
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and PR checks.
+
 ```bash
 cargo fmt --check
 cargo clippy -- -D warnings
 CODASAURUS_SKIP_FRONTEND_BUILD=1 cargo test
 cargo build --release
 ```
+
+Security reports: [SECURITY.md](SECURITY.md). Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ---
 

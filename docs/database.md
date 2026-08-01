@@ -87,7 +87,7 @@ Logs should show `Connecting to PostgreSQL at host:port/db` (password never prin
 - Findings insert via `UNNEST` (one round-trip per review)
 - Sessions expire via `expires_at > NOW()`; cleanup is periodic (not on every auth)
 
-Migrations run automatically on boot (`schema_version` through **v11**).
+Migrations run automatically on boot (`schema_version` through **v15**).
 
 ## Multi-replica
 

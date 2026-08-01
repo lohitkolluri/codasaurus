@@ -64,7 +64,7 @@ max_warnings = 20
 | `strict`   | Surface more warnings; thorough LLM tone                       |
 | `nitpick`  | Force info floor; wider info/warning budgets; nitpick LLM tone |
 
-Dashboard **Settings → Policy → Review strictness** overrides TOML when set. Repo `config_json.policy.review_strictness` overrides both.
+Dashboard **Settings → Review → Tone & thresholds** overrides TOML when set. Repo `config_json.policy.review_strictness` overrides both.
 
 ## Repo `config_json` (dashboard)
 

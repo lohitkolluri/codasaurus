@@ -59,7 +59,7 @@ export GITHUB_APP_PRIVATE_KEY="$(cat codasaurus.pem)"
 export GITHUB_WEBHOOK_SECRET="…"
 ```
 
-The setup wizard and **Settings → GitHub** can store the same fields in the DB. Env vars win when both are set (see [configuration.md](configuration.md)).
+The setup wizard and **Settings → Connections → GitHub App** can store the same fields in the DB. Env vars win when both are set (see [configuration.md](configuration.md)).
 
 ## Install on repositories
 

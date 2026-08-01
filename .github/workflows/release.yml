@@ -46,7 +46,7 @@ jobs:
           staging="${{ env.BINARY_NAME }}-${{ github.ref_name }}-x86_64-unknown-linux-gnu"
           mkdir -p "$staging"
           cp target/release/${{ env.BINARY_NAME }} "$staging/"
-          cp README.md LICENSE "$staging/" 2>/dev/null || true
+          cp README.md LICENSE CHANGELOG.md "$staging/" 2>/dev/null || true
           echo "$staging"
 
       - name: Package archive
@@ -83,15 +83,27 @@ jobs:
       - name: Generate release notes
         id: release_notes
         run: |
-          prev_tag=$(git describe --tags --abbrev=0 "${{ github.ref_name }}"^ 2>/dev/null || echo "")
-          if [ -n "$prev_tag" ]; then
-            notes=$(git log "$prev_tag".."${{ github.ref_name }}" --oneline --no-decorate 2>/dev/null)
-          else
-            notes="Initial release ${{ github.ref_name }}"
-          fi
+          tag="${{ github.ref_name }}"
+          ver="${tag#v}"
           {
             echo 'notes<<EOF'
-            echo "$notes"
+            if [ -f CHANGELOG.md ] && grep -q "## \[${ver}\]" CHANGELOG.md; then
+              # Excerpt the matching CHANGELOG section (until next ## or EOF).
+              awk -v ver="$ver" '
+                $0 ~ "^## \\[" ver "\\]" {grab=1; next}
+                grab && /^## / {exit}
+                grab {print}
+              ' CHANGELOG.md
+            else
+              prev_tag=$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || echo "")
+              if [ -n "$prev_tag" ]; then
+                git log "$prev_tag".."$tag" --oneline --no-decorate
+              else
+                echo "Initial release ${tag}."
+                echo ""
+                echo "See CHANGELOG.md for details."
+              fi
+            fi
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
@@ -102,6 +114,10 @@ jobs:
             ## Codasaurus ${{ github.ref_name }}
 
             ${{ steps.release_notes.outputs.notes }}
+
+            ---
+            **Install:** extract the tarball and run `./codasaurus serve`. Needs PostgreSQL (`DATABASE_URL`).
+            **Docs:** [README](https://github.com/lohitkolluri/codasaurus#readme) · [Changelog](https://github.com/lohitkolluri/codasaurus/blob/main/CHANGELOG.md)
 
   # publish-crates:
   #   name: Publish to crates.io

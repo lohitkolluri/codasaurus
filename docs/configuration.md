@@ -163,7 +163,7 @@ Per-repo overlays and policy packs are edited in the dashboard (`config_json`, f
 
 Use this checklist when GitHub Enterprise is reachable but the public internet is not (or you want Tier-1-only):
 
-1. Set dashboard **Settings → Policy → Offline / air-gap mode**, or `CODASAURUS_OFFLINE=1`.
+1. Set dashboard **Settings → System → Offline / air-gap mode**, or `CODASAURUS_OFFLINE=1`.
 2. Leave LLM keys empty (or clear `openrouter_api_key` / `llm_base_url`).
 3. Expect registry/OSV to be **cache-only** — warm caches on a network-connected host if needed, or accept soft misses.
 4. Confirm `/health` reports `egress_profile: offline`.

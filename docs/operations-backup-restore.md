@@ -48,7 +48,7 @@ curl -sf http://localhost:3000/metrics | head
 
 `/health` JSON includes `status`, `db`, `data_dir`, `version`, `egress_profile` (`full` · `byok-only` · `offline`), and `network` flags for LLM / registries / OSV.
 
-Docker healthcheck runs `codasaurus health --port 3000`.
+Docker healthcheck runs `codasaurus health --ready` (liveness/readiness against the running process).
 
 ## Disaster checklist
 

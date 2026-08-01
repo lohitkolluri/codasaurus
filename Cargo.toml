@@ -2,6 +2,7 @@
 name = "codasaurus"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.88"
 description = "Self-hosted GitHub App PR review agent — Tier-1 detectors, BYOK LLM, walkthroughs, and slash commands."
 authors = ["Lohit Kolluri <lohitkolluri@gmail.com>"]
 license = "AGPL-3.0-or-later"

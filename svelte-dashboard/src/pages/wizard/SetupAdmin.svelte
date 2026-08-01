@@ -66,7 +66,7 @@
     <label for="password">Password</label>
     <input id="password" type="password" bind:value={password} autocomplete="new-password" />
     <div class="wizard-hint">
-      At least 8 characters
+      At least 10 characters
       {#if password.length > 0}
         <span style="color:{lengthOk ? 'var(--success)' : 'var(--error)'}">
           {lengthOk ? "meets minimum" : `${password.length}/10`}
