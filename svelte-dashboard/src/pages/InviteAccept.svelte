@@ -73,22 +73,25 @@
   }
 </script>
 
-<div class="auth-minimal">
-  <div class="auth-minimal-bg" aria-hidden="true"></div>
-  <div class="auth-minimal-inner">
-    <header class="auth-minimal-brand">
-      <BrandMark size={40} />
-      <h1>Codasaurus</h1>
+<div class="auth-matte">
+  <div class="auth-matte-wordmark" aria-hidden="true">CODASAURUS</div>
+  <div class="auth-matte-panel">
+    <header class="auth-matte-hero">
+      <BrandMark size={32} />
+      <div class="auth-matte-titles">
+        <h1>Welcome</h1>
+        <p class="auth-matte-lead">Accept your Codasaurus invite</p>
+      </div>
     </header>
 
     {#if loading}
-      <p class="auth-minimal-lead">Checking invite…</p>
+      <p class="auth-matte-lead auth-matte-lead-solo">Checking invite…</p>
     {:else if !invite}
-      <p class="auth-minimal-lead">Invite unavailable</p>
+      <p class="auth-matte-lead auth-matte-lead-solo">Invite unavailable</p>
       <div class="login-error" role="alert">{error || "Invalid invite"}</div>
-      <p class="login-invite-hint"><a href="#/login" use:link>Back to sign in</a></p>
+      <p class="login-invite-hint"><a href="#/login" use:link>Back to login</a></p>
     {:else}
-      <p class="auth-minimal-lead">
+      <p class="auth-matte-lead auth-matte-lead-solo">
         Join as <strong>{invite.role}</strong>
         {#if invite.email} · {invite.email}{/if}
       </p>

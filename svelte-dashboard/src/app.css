@@ -1148,89 +1148,224 @@ tr:hover td {
 }
 
 /* ── 25. Auth / Login ───────────────────────────────────────────── */
+/*
+ * Inspiration (ideas only, not a clone):
+ * - Login UX: Discord — elevated card, “Welcome back”, clear CTA, friendly tone
+ *   https://www.eleken.co/blog-posts/login-page-examples
+ * - Dark craft: Obys Agency — pure black stage, bold type as atmosphere
+ *   https://obys.agency/ · https://reallygooddesigns.com/dark-mode-websites
+ */
 
-/* Minimal centered sign-in (preferred) */
-.auth-minimal {
+.auth-matte {
+    --auth-matte: #000000;
+    --auth-panel: #1e1f22;
+    --auth-ink: #f2f3f5;
+    --auth-muted: #b5bac1;
+    --auth-label: #b5bac1;
+    --auth-line: #2b2d31;
+    --auth-field: #111214;
+    --auth-cta: #e85d4c;
+    --auth-cta-hover: #f06a5a;
+
     position: relative;
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: var(--space-8) var(--space-5);
+    padding: var(--space-10) var(--space-5);
     overflow: hidden;
+    background: var(--auth-matte);
+    color: var(--auth-ink);
 }
 
-.auth-minimal-bg {
+/* Obys: typographic atmosphere on pure black */
+.auth-matte-wordmark {
     position: absolute;
-    inset: 0;
-    background:
-        radial-gradient(
-            ellipse 70% 55% at 50% -10%,
-            color-mix(in srgb, var(--accent-soft) 10%, transparent),
-            transparent 60%
-        ),
-        radial-gradient(
-            ellipse 50% 40% at 100% 100%,
-            color-mix(in srgb, var(--text-muted) 8%, transparent),
-            transparent 55%
-        ),
-        var(--bg-primary);
-    pointer-events: none;
+    left: 50%;
+    top: 48%;
+    transform: translate(-50%, -50%);
     z-index: 0;
+    margin: 0;
+    font-family: "Syne", var(--font-display);
+    font-weight: 800;
+    font-size: clamp(64px, 18vw, 180px);
+    letter-spacing: -0.05em;
+    line-height: 0.85;
+    white-space: nowrap;
+    color: rgba(255, 255, 255, 0.035);
+    user-select: none;
+    pointer-events: none;
+    animation: auth-word-in 1s var(--ease-spring) both;
 }
 
-.auth-minimal-inner {
+/* Discord: floating opaque card over dark stage */
+.auth-matte-panel,
+.auth-matte-inner {
     position: relative;
     z-index: 1;
-    width: min(360px, 100%);
-    animation: auth-rise 0.45s var(--ease-spring) both;
+    width: min(420px, 100%);
+    padding: 32px;
+    background-color: var(--auth-panel);
+    border: 1px solid transparent;
+    border-radius: 8px;
+    box-shadow:
+        0 8px 16px rgba(0, 0, 0, 0.35),
+        0 0 0 1px rgba(255, 255, 255, 0.04);
+    animation: auth-rise 0.45s var(--ease-spring) 0.06s both;
 }
 
-.auth-minimal-brand {
+.auth-matte-hero {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
     gap: var(--space-4);
-    margin-bottom: var(--space-6);
-}
-
-.auth-minimal-brand :global(svg) {
-    color: var(--accent-soft);
-}
-
-.auth-minimal-brand h1 {
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: clamp(28px, 5vw, 36px);
-    font-weight: var(--weight-bold);
-    letter-spacing: -0.045em;
-    line-height: 1.1;
-}
-
-.auth-minimal-lead {
-    margin: 0 0 var(--space-6);
-    font-size: var(--text-sm);
-    color: var(--text-muted);
-    line-height: 1.45;
-}
-
-.auth-minimal .auth-submit,
-.auth-minimal .auth-sso {
-    width: 100%;
-}
-
-.auth-minimal .login-invite-hint {
-    margin-top: var(--space-6);
+    margin-bottom: 20px;
+    color: var(--auth-ink);
     text-align: left;
 }
 
-.auth-minimal .login-invite-hint a {
-    color: var(--text-secondary);
+.auth-matte-titles {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+}
+
+.auth-matte-hero h1 {
+    margin: 0;
+    font-family: "Syne", var(--font-display);
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    color: #fff;
+}
+
+.auth-matte-lead {
+    margin: 0;
+    font-size: 14px;
+    color: var(--auth-muted);
+    text-align: left;
+    line-height: 1.4;
+}
+
+.auth-matte-lead-solo {
+    margin-bottom: 16px;
+}
+
+.auth-matte .auth-submit,
+.auth-matte .auth-sso {
+    width: 100%;
+}
+
+.auth-matte .auth-submit.primary,
+.auth-matte button.primary.auth-submit {
+    margin-top: 8px;
+    height: 44px;
+    background: var(--auth-cta);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.auth-matte .auth-submit.primary:hover:not(:disabled),
+.auth-matte button.primary.auth-submit:hover:not(:disabled) {
+    background: var(--auth-cta-hover);
+    color: #fff;
+}
+
+.auth-matte .auth-submit.primary:disabled {
+    opacity: 0.55;
+}
+
+.auth-matte .form-group label {
+    color: var(--auth-label);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+}
+
+.auth-matte .form-group {
+    margin-bottom: 16px;
+}
+
+.auth-matte .auth-form input {
+    height: 40px;
+    background: var(--auth-field);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--auth-ink);
+    padding: 0 12px;
+}
+
+.auth-matte .auth-form input::placeholder {
+    color: #6d6f78;
+}
+
+.auth-matte .auth-form input:focus {
+    border-color: var(--auth-cta);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--auth-cta);
+}
+
+.auth-matte .auth-sso {
+    height: 40px;
+    background: var(--auth-field);
+    border: 1px solid var(--auth-line);
+    color: var(--auth-ink);
+    border-radius: 4px;
+}
+
+.auth-matte .auth-sso:hover {
+    border-color: #3f4147;
+}
+
+.auth-matte .login-divider {
+    color: #6d6f78;
+    margin: 16px 0;
+}
+
+.auth-matte .login-divider::before,
+.auth-matte .login-divider::after {
+    background: var(--auth-line);
+}
+
+.auth-matte .login-invite-hint {
+    margin-top: 16px;
+    text-align: left;
+    font-size: 13px;
+    color: #949ba4;
+}
+
+.auth-matte .login-invite-hint a {
+    color: #00a8fc;
     text-decoration: none;
 }
 
-.auth-minimal .login-invite-hint a:hover {
-    color: var(--text-primary);
+.auth-matte .login-invite-hint a:hover {
+    text-decoration: underline;
+}
+
+.auth-matte .login-error {
+    margin-bottom: 12px;
+    background: rgba(237, 66, 69, 0.1);
+    border: 1px solid rgba(237, 66, 69, 0.35);
+    color: #f23f43;
+}
+
+@keyframes auth-word-in {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -44%) scale(1.03);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
 }
 
 /* Legacy split shell (kept for any residual use) */

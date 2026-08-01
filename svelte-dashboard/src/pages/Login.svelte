@@ -41,15 +41,19 @@
   }
 </script>
 
-<div class="auth-minimal">
-  <div class="auth-minimal-bg" aria-hidden="true"></div>
-  <div class="auth-minimal-inner">
-    <header class="auth-minimal-brand">
-      <BrandMark size={40} />
-      <h1>Codasaurus</h1>
-    </header>
+<div class="auth-matte">
+  <!-- Obys-style: pure black stage + bold type as atmosphere -->
+  <div class="auth-matte-wordmark" aria-hidden="true">CODASAURUS</div>
 
-    <p class="auth-minimal-lead">Sign in to your instance</p>
+  <!-- Discord-style: elevated opaque card, welcome headline, clear form -->
+  <div class="auth-matte-panel">
+    <header class="auth-matte-hero">
+      <BrandMark size={32} />
+      <div class="auth-matte-titles">
+        <h1>Welcome back</h1>
+        <p class="auth-matte-lead">Sign in to your Codasaurus instance</p>
+      </div>
+    </header>
 
     {#if error}
       <div class="login-error" role="alert">{error}</div>
@@ -83,14 +87,14 @@
         />
       </div>
       <button type="submit" class="primary auth-submit" disabled={submitting}>
-        {submitting ? "Signing in…" : "Sign in"}
+        {submitting ? "Signing in…" : "Log in"}
       </button>
     </form>
 
     <p class="login-invite-hint">
       <a href="#/" use:link>Home</a>
       <span aria-hidden="true"> · </span>
-      Invite link opens a join page
+      Need an invite? Ask your instance owner
     </p>
   </div>
 </div>
