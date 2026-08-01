@@ -16,6 +16,7 @@
   let llmModel = $state("");
   let llmModelCheap = $state("");
   let llmBaseUrl = $state("");
+  let llmDailyBudget = $state("");
   let llmSaving = $state(false);
   let llmMsg = $state("");
 
@@ -105,6 +106,7 @@
       llmModel = data.llm_model ?? "";
       llmModelCheap = data.llm_model_cheap ?? "";
       llmBaseUrl = data.llm_base_url ?? "";
+      llmDailyBudget = data.llm_daily_budget_usd ?? "";
       modelSearch = llmModel;
       if (llmProvider === "openrouter") loadModels();
       const toggles = {};
@@ -147,6 +149,7 @@
         api.put("/api/settings/llm_model", { value: llmModel }),
         api.put("/api/settings/llm_model_cheap", { value: llmModelCheap }),
         api.put("/api/settings/llm_base_url", { value: llmBaseUrl }),
+        api.put("/api/settings/llm_daily_budget_usd", { value: llmDailyBudget }),
       ];
       const results = await Promise.allSettled(updates);
       const failed = results.filter(r => r.status === "rejected");
@@ -280,6 +283,10 @@
             <div class="form-group">
               <label for="llm-url">Base URL</label>
               <input id="llm-url" type="text" bind:value={llmBaseUrl} />
+            </div>
+            <div class="form-group">
+              <label for="llm-budget">Daily LLM budget USD (0 = unlimited)</label>
+              <input id="llm-budget" type="text" bind:value={llmDailyBudget} placeholder="e.g. 5" />
             </div>
           {/if}
           <div class="save-row">

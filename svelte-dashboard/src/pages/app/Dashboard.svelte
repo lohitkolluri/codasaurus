@@ -120,10 +120,14 @@
             <StatsCard label="Dismissals" value={stats.trust?.dismissals ?? 0} />
             <StatsCard
               label="LLM spend (est.)"
-              value={stats.llm?.spend_usd_estimate != null
-                ? `$${Number(stats.llm.spend_usd_estimate).toFixed(3)}`
-                : "—"}
-              hint={`${stats.llm?.requests ?? 0} requests · since restart`}
+              value={stats.llm?.spend_usd_last_day != null
+                ? `$${Number(stats.llm.spend_usd_last_day).toFixed(3)}`
+                : stats.llm?.spend_usd_estimate != null
+                  ? `$${Number(stats.llm.spend_usd_estimate).toFixed(3)}`
+                  : "—"}
+              hint={stats.llm?.daily_budget_usd > 0
+                ? `last day · budget $${Number(stats.llm.daily_budget_usd).toFixed(2)}`
+                : `${stats.llm?.requests ?? 0} requests · last day`}
             />
           </div>
         </section>

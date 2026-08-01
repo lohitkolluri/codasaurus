@@ -109,7 +109,9 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
                 "requests": crate::metrics::llm_request_count(),
                 "prompt_chars": crate::metrics::llm_prompt_chars_total(),
                 "spend_usd_estimate": crate::metrics::llm_spend_usd_estimate(),
-                "note": "Process-local estimates since last restart; not billing truth.",
+                "spend_usd_last_day": crate::db::events::spend_usd_last_day(&state.pool).await,
+                "daily_budget_usd": crate::llm::budget::daily_budget_usd(Some(&state.pool)).await,
+                "note": "Estimates from agent_events + process metrics; not billing truth.",
             }),
         );
     }

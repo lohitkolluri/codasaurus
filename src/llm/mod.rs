@@ -1,4 +1,5 @@
 mod cost;
+pub mod budget;
 
 pub use cost::{
     all_paths_low_signal, default_cheap_model, estimate_spend_microdollars, filter_llm_files,
@@ -224,6 +225,9 @@ pub struct LlmIssue {
     pub suggestion: Option<String>,
     #[serde(default = "default_confidence")]
     pub confidence: String,
+    /// Why the model believes this (citation / rationale). Optional for older models.
+    #[serde(default)]
+    pub rationale: Option<String>,
 }
 
 fn default_confidence() -> String {
@@ -273,6 +277,10 @@ pub fn review_schema() -> serde_json::Value {
                             "type": "string",
                             "enum": ["high", "medium", "low"],
                             "description": "Confidence in this finding"
+                        },
+                        "rationale": {
+                            "type": "string",
+                            "description": "Short evidence-backed reason citing the diff (why this is real)"
                         }
                     },
                     "required": [
@@ -364,16 +372,18 @@ pub async fn review_diff(
     config: &LlmConfig,
     context: Option<&ReviewContext>,
 ) -> Result<LlmReviewOutput> {
+    let pool = crate::bot::CONFIG_POOL.get();
+    budget::assert_within_budget(pool).await?;
     assert_endpoint_safe(config).await?;
     let max_diff = crate::bot_runtime::BotRuntimeConfig::default().max_llm_diff_chars;
     let diff = truncate_chars(diff, max_diff);
     let prompt = build_review_prompt(&diff, context);
-    crate::metrics::record_llm_request(
-        prompt.len() + 800, // approx system prompt
-        config.max_tokens,
-        true,
-    );
+    let prompt_chars = prompt.len() + 800;
+    crate::metrics::record_llm_request(prompt_chars, config.max_tokens, true);
+    let micros = estimate_spend_microdollars(prompt_chars, config.max_tokens, true);
+    budget::record_local_spend_micros(micros);
 
+    let started = std::time::Instant::now();
     let client = llm_client()?;
 
     let url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
@@ -400,19 +410,20 @@ HOW YOU REVIEW:
 - You are comfortable saying \"no issues found\" when the code is solid.
 
 YOUR OUTPUT:
-- For each issue: file:line, severity (critical/warning/info), category, description, and a \
-concrete suggested fix (<=30 words).
+- For each issue: file:line, severity (critical/warning/info), category, description, \
+optional rationale (evidence from the diff), and a concrete suggested fix (<=30 words).
 - Your verdict is one of: \"ship\" (merge as-is), \"fix-before-ship\" (address issues first), \
 or \"hold\" (needs design discussion).
 - If you are unsure about a finding, set confidence to \"low\" and explain why. \
-Never report something you made up.
+Never report something you made up. Prefer fewer high-confidence findings.
 
 RULES:
 1. Only report issues you are confident are real. False positives erode trust.
 2. No evidence = no finding. Every issue must cite the specific file and line.
 3. If the PR description references requirements, verify the code actually implements them.
 4. Consider: null safety, error handling, concurrency, input validation, authz, data leakage.
-5. If the diff is large, focus on the most impactful changes, not the first ones you see.";
+5. If the diff is large, focus on the most impactful changes, not the first ones you see.
+6. Set confidence honestly: high = clear evidence in the diff; medium = likely; low = speculative.";
 
     let body = json!({
         "model": config.model,
@@ -451,8 +462,25 @@ RULES:
             request.send().await.map_err(Into::into)
         },
     )
-    .await?;
+    .await;
 
+    let latency_ms = started.elapsed().as_millis() as u64;
+    let outcome = if resp.is_ok() { "ok" } else { "error" };
+    if let Some(pool) = pool {
+        crate::db::events::emit_llm_call(
+            pool,
+            "review_diff",
+            &config.model,
+            prompt_chars,
+            config.max_tokens,
+            true,
+            latency_ms,
+            outcome,
+        )
+        .await;
+    }
+
+    let resp = resp?;
     let status = resp.status();
     if !status.is_success() {
         crate::metrics::record_llm_error();
@@ -745,7 +773,14 @@ async fn chat_completion_text(
     user_prompt: &str,
     max_tokens: u32,
 ) -> Result<String> {
+    let pool = crate::bot::CONFIG_POOL.get();
+    budget::assert_within_budget(pool).await?;
     let model = config.effective_text_model();
+    let prompt_chars = system_prompt.len() + user_prompt.len();
+    let micros = estimate_spend_microdollars(prompt_chars, max_tokens, false);
+    budget::record_local_spend_micros(micros);
+    let started = std::time::Instant::now();
+
     let body = json!({
         "model": model,
         "messages": [
@@ -780,8 +815,25 @@ async fn chat_completion_text(
                 .map_err(Into::into)
         },
     )
-    .await
-    .inspect_err(|_| crate::metrics::record_llm_error())?;
+    .await;
+
+    let latency_ms = started.elapsed().as_millis() as u64;
+    let outcome = if resp.is_ok() { "ok" } else { "error" };
+    if let Some(pool) = pool {
+        crate::db::events::emit_llm_call(
+            pool,
+            "chat_text",
+            model,
+            prompt_chars,
+            max_tokens,
+            false,
+            latency_ms,
+            outcome,
+        )
+        .await;
+    }
+
+    let resp = resp.inspect_err(|_| crate::metrics::record_llm_error())?;
 
     resp["choices"][0]["message"]["content"]
         .as_str()

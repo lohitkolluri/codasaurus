@@ -374,6 +374,39 @@ pub async fn run_migrations_sqlite(pool: &SqlitePool) -> Result<(), sqlx::Error>
             .await?;
     }
 
+    if current < 10 {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS agent_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                agent TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                model TEXT,
+                tokens_in INTEGER,
+                tokens_out INTEGER,
+                cost_usd_est REAL,
+                latency_ms INTEGER,
+                outcome TEXT,
+                payload TEXT
+            )",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_agent_events_ts ON agent_events(ts)",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_agent_events_type_ts ON agent_events(event_type, ts)",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (10)")
+            .execute(pool)
+            .await?;
+    }
+
     Ok(())
 }
 
@@ -565,6 +598,23 @@ CREATE INDEX IF NOT EXISTS idx_review_jobs_status_created
     ON review_jobs(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_review_jobs_status_updated
     ON review_jobs(status, updated_at);
+
+CREATE TABLE IF NOT EXISTS agent_events (
+    id BIGSERIAL PRIMARY KEY,
+    ts TEXT NOT NULL DEFAULT (NOW()::text),
+    agent TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    model TEXT,
+    tokens_in INTEGER,
+    tokens_out INTEGER,
+    cost_usd_est DOUBLE PRECISION,
+    latency_ms INTEGER,
+    outcome TEXT,
+    payload TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_events_ts ON agent_events(ts);
+CREATE INDEX IF NOT EXISTS idx_agent_events_type_ts ON agent_events(event_type, ts);
 "#;
 
 pub async fn run_migrations_postgres(pool: &PgPool) -> Result<(), sqlx::Error> {
@@ -582,11 +632,31 @@ pub async fn run_migrations_postgres(pool: &PgPool) -> Result<(), sqlx::Error> {
         "CREATE INDEX IF NOT EXISTS idx_dismissed_detector ON dismissed_findings(detector)",
         "CREATE INDEX IF NOT EXISTS idx_webhook_received_at ON webhook_deliveries(received_at)",
         "CREATE INDEX IF NOT EXISTS idx_review_jobs_status_updated ON review_jobs(status, updated_at)",
+        "CREATE TABLE IF NOT EXISTS agent_events (
+            id BIGSERIAL PRIMARY KEY,
+            ts TEXT NOT NULL DEFAULT (NOW()::text),
+            agent TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            model TEXT,
+            tokens_in INTEGER,
+            tokens_out INTEGER,
+            cost_usd_est DOUBLE PRECISION,
+            latency_ms INTEGER,
+            outcome TEXT,
+            payload TEXT
+        )",
+        "CREATE INDEX IF NOT EXISTS idx_agent_events_ts ON agent_events(ts)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_events_type_ts ON agent_events(event_type, ts)",
     ] {
         sqlx::query(stmt).execute(pool).await?;
     }
     sqlx::query(
         "INSERT INTO schema_version (version) VALUES (9) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (10) ON CONFLICT (version) DO NOTHING",
     )
     .execute(pool)
     .await?;

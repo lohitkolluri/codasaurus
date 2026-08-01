@@ -70,7 +70,7 @@ pub(crate) async fn maybe_post_auto_improve(
     if let Some(summary) = output.summary.as_deref().filter(|s| !s.is_empty()) {
         let _ = writeln!(text, "{summary}\n");
     }
-    text.push_str("| File | Line | Severity | Suggestion | Source |\n| --- | ---: | --- | --- | --- |\n");
+    text.push_str("| File | Line | Severity | Conf | Suggestion | Source |\n| --- | ---: | --- | --- | --- | --- |\n");
     for issue in issues.iter().take(max_issues.max(1)) {
         let sug = issue
             .suggestion
@@ -82,13 +82,14 @@ pub(crate) async fn maybe_post_auto_improve(
             .collect::<String>();
         let _ = writeln!(
             text,
-            "| `{}` | {} | `{}` | {sug} | `llm` |",
-            issue.file, issue.line, issue.severity
+            "| `{}` | {} | `{}` | `{}` | {sug} | `llm` |",
+            issue.file, issue.line, issue.severity, issue.confidence
         );
     }
     text.push_str(
         "\n<details>\n<summary>Notes</summary>\n\n\
-         LLM findings were re-verified against PR paths before posting.\n\
+         LLM findings were re-verified (path + confidence + evidence) before posting. \
+         Low-confidence issues are dropped automatically.\n\
          Enable with repo `config_json.auto_review_diff: true` (opt-in; skipped when Tier-1 blocks).\n\n\
          </details>\n",
     );

@@ -1,4 +1,4 @@
-//! Finding provenance lines for Tier-1 auditability.
+//! Finding provenance lines for Tier-1 auditability + LLM confidence gates.
 
 use crate::detectors::Finding;
 
@@ -68,7 +68,23 @@ fn path_matches(known: &str, candidate: &str) -> bool {
     known.ends_with(&format!("/{candidate}")) || candidate.ends_with(&format!("/{known}"))
 }
 
-/// Drop LLM issues that do not reference a path present in the PR (hallucination guard).
+fn confidence_rank(conf: &str) -> u8 {
+    match conf.to_ascii_lowercase().as_str() {
+        "high" => 3,
+        "medium" => 2,
+        "low" => 1,
+        _ => 0,
+    }
+}
+
+/// Drop LLM issues that fail path/evidence/confidence gates (hallucination + HITL posture).
+///
+/// Rules (Antern-style confidence gate, auto-post path):
+/// - unknown path → drop
+/// - `confidence=low` or missing → drop (never auto-post unsure findings)
+/// - empty/short description (no rationale) → drop
+/// - non-info without a line citation → drop
+/// - `critical` + only `medium` confidence → downgrade severity to `warning`
 pub fn reverify_llm_issues(
     issues: &[crate::llm::LlmIssue],
     known_paths: &[String],
@@ -76,15 +92,40 @@ pub fn reverify_llm_issues(
 ) -> Vec<crate::llm::LlmIssue> {
     issues
         .iter()
-        .filter(|issue| {
+        .filter_map(|issue| {
             if issue.file.is_empty() || issue.file == "?" {
-                return false;
+                return None;
             }
             let path_ok = known_paths.iter().any(|p| path_matches(p, &issue.file));
             if !path_ok {
-                return false;
+                return None;
             }
-            // If we have content, require a token from the description to appear (weak check).
+
+            let conf = confidence_rank(&issue.confidence);
+            if conf < 2 {
+                tracing::debug!(
+                    file = %issue.file,
+                    confidence = %issue.confidence,
+                    "dropping low-confidence LLM issue"
+                );
+                return None;
+            }
+
+            let rationale = issue
+                .rationale
+                .as_deref()
+                .unwrap_or(issue.description.as_str())
+                .trim();
+            if rationale.chars().count() < 16 {
+                return None;
+            }
+
+            let sev = issue.severity.to_ascii_lowercase();
+            if issue.line == 0 && sev != "info" {
+                return None;
+            }
+
+            // Weak content check when patch is available.
             if let Some((_, content)) = file_contents
                 .iter()
                 .find(|(p, _)| path_matches(p, &issue.file))
@@ -98,12 +139,17 @@ pub fn reverify_llm_issues(
                     && !content.to_ascii_lowercase().contains(&needle.to_ascii_lowercase())
                     && issue.line == 0
                 {
-                    return false;
+                    return None;
                 }
             }
-            true
+
+            let mut out = issue.clone();
+            // Critical claims need high confidence to stay critical when auto-posted.
+            if sev == "critical" && conf < 3 {
+                out.severity = "warning".into();
+            }
+            Some(out)
         })
-        .cloned()
         .collect()
 }
 
@@ -111,6 +157,19 @@ pub fn reverify_llm_issues(
 mod tests {
     use super::*;
     use crate::llm::LlmIssue;
+
+    fn issue(file: &str, conf: &str, sev: &str, line: usize, desc: &str) -> LlmIssue {
+        LlmIssue {
+            severity: sev.into(),
+            category: "logic".into(),
+            file: file.into(),
+            line,
+            description: desc.into(),
+            suggestion: None,
+            confidence: conf.into(),
+            rationale: None,
+        }
+    }
 
     #[test]
     fn provenance_includes_detector() {
@@ -132,33 +191,63 @@ mod tests {
 
     #[test]
     fn drops_llm_issue_with_unknown_path() {
-        let issues = vec![LlmIssue {
-            severity: "warning".into(),
-            category: "logic".into(),
-            file: "does/not/exist.rs".into(),
-            line: 1,
-            description: "something odd here".into(),
-            suggestion: None,
-            confidence: "medium".into(),
-        }];
+        let issues = vec![issue(
+            "does/not/exist.rs",
+            "medium",
+            "warning",
+            1,
+            "something odd here definitely",
+        )];
         let kept = reverify_llm_issues(&issues, &["src/main.rs".into()], &[]);
         assert!(kept.is_empty());
     }
 
     #[test]
     fn rejects_partial_path_suffix_match() {
-        let issues = vec![LlmIssue {
-            severity: "warning".into(),
-            category: "logic".into(),
-            file: "app.ts".into(),
-            line: 1,
-            description: "something odd here".into(),
-            suggestion: None,
-            confidence: "medium".into(),
-        }];
+        let issues = vec![issue(
+            "app.ts",
+            "medium",
+            "warning",
+            1,
+            "something odd here definitely",
+        )];
         let kept = reverify_llm_issues(&issues, &["src/not-app.ts".into()], &[]);
         assert!(kept.is_empty());
         let kept_ok = reverify_llm_issues(&issues, &["src/app.ts".into()], &[]);
         assert_eq!(kept_ok.len(), 1);
+    }
+
+    #[test]
+    fn drops_low_confidence() {
+        let issues = vec![issue(
+            "src/a.rs",
+            "low",
+            "warning",
+            3,
+            "possible null dereference on user input",
+        )];
+        let kept = reverify_llm_issues(&issues, &["src/a.rs".into()], &[]);
+        assert!(kept.is_empty());
+    }
+
+    #[test]
+    fn downgrades_critical_without_high_confidence() {
+        let issues = vec![issue(
+            "src/a.rs",
+            "medium",
+            "critical",
+            3,
+            "SQL injection via string concat on query",
+        )];
+        let kept = reverify_llm_issues(&issues, &["src/a.rs".into()], &[]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].severity, "warning");
+    }
+
+    #[test]
+    fn drops_short_rationale() {
+        let issues = vec![issue("src/a.rs", "high", "warning", 1, "bad")];
+        let kept = reverify_llm_issues(&issues, &["src/a.rs".into()], &[]);
+        assert!(kept.is_empty());
     }
 }

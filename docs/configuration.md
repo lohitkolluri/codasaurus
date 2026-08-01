@@ -40,12 +40,13 @@ codasaurus version
 | `CODASAURUS_BASE_URL`               | OpenAI-compatible base, e.g. `http://localhost:11434/v1`                       |
 | `CODASAURUS_MODEL`                  | Strong model for structured `review_diff`                                      |
 | `CODASAURUS_MODEL_CHEAP`            | Cheap model for summarize / describe / ask / changelog (defaults from primary) |
+| `CODASAURUS_LLM_DAILY_BUDGET_USD`   | Hard daily spend cap (estimate); `0` / unset = unlimited                       |
 | `CODASAURUS_OFFLINE`                | `1` / `true` — fail-closed: no LLM socket; registry/OSV cache-only             |
 | `CODASAURUS_MAX_LLM_DIFF_CHARS`     | Cap chars sent to `review_diff` (default `8000`)                               |
 | `CODASAURUS_AUTO_IMPROVE_MAX_FILES` | Skip auto improve above this file count (default `40`)                         |
 | `CODASAURUS_AUTO_IMPROVE_MAX_DIFF`  | Cap aggregated patch chars for auto improve (default `24000`)                  |
 
-Dashboard **Settings → LLM** writes `llm_provider`, `llm_model`, `llm_model_cheap`, `llm_base_url`, `openrouter_api_key`.
+Dashboard **Settings → LLM** writes `llm_provider`, `llm_model`, `llm_model_cheap`, `llm_base_url`, `llm_daily_budget_usd`, `openrouter_api_key`.
 
 ### LLM cost controls
 
@@ -57,8 +58,12 @@ Dashboard **Settings → LLM** writes `llm_provider`, `llm_model`, `llm_model_ch
 | Hunk filter                                 | always              | Lockfiles, `vendor/`, `dist/`, maps, binaries stripped before LLM |
 | Two-tier models                             | on                  | Strong for `review_diff`; cheap for text helpers                  |
 | Prompt caching                              | Claude / OpenRouter | `cache_control` on stable system prefixes when supported          |
+| Confidence gate                             | always              | Drop `low` confidence LLM issues; downgrade critical without `high` |
+| Citation / rationale                        | always              | Short description required; non-info needs a line citation          |
+| Daily BudgetGuard                           | off (`0`)           | Hard-block LLM when estimated last-day spend ≥ cap                  |
+| `agent_events` spine                        | on                  | LLM call rows (model, tokens, cost est, latency) for audit/cost     |
 
-`/metrics` exposes `codasaurus_llm_spend_usd_estimate` (rough process-local estimate). Dashboard **stats** includes `llm.spend_usd_estimate`.
+`/metrics` exposes `codasaurus_llm_spend_usd_estimate`. Dashboard **stats** includes `llm.spend_usd_last_day` and `llm.daily_budget_usd`.
 
 ### Auth / SSO
 
@@ -89,7 +94,7 @@ Local admin users are created in the [onboarding wizard](setup-onboarding.md).
 | Webhook dedup    | `webhook_deliveries` PK; rows pruned after **14 days**.                                                                                                                                                                |
 | Sessions         | **7 days**; purged on lookup and by worker maintenance.                                                                                                                                                                |
 | Review jobs      | Terminal `done`/`failed` purged after **30 days**.                                                                                                                                                                     |
-| DB indexes       | `findings(detector)`, `dismissed_findings(detector)`, `webhook_deliveries(received_at)`, `review_jobs(status, updated_at)` (schema v9).                                                                                |
+| DB indexes       | `findings(detector)`, `dismissed_findings(detector)`, `webhook_deliveries(received_at)`, `review_jobs(status, updated_at)` (v9); `agent_events` (v10).                                                                |
 
 ### Pattern-first (reduce LLM)
 

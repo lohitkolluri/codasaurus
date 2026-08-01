@@ -29,4 +29,6 @@ pub async fn run_periodic_cleanup(pool: &DbPool) {
     ) {
         tracing::debug!(error = %e, "review_jobs cleanup skipped");
     }
+
+    crate::db::events::prune_older_than_days(pool, 30).await;
 }

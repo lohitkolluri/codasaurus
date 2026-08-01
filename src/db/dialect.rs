@@ -19,6 +19,14 @@ fn to_pg(sql: &str) -> String {
         "(CURRENT_TIMESTAMP - INTERVAL '14 days')",
     );
     s = s.replace(
+        "datetime('now', '-30 days')",
+        "(CURRENT_TIMESTAMP - INTERVAL '30 days')",
+    );
+    s = s.replace(
+        "datetime('now', '-1 day')",
+        "(CURRENT_TIMESTAMP - INTERVAL '1 day')",
+    );
+    s = s.replace(
         "datetime('now', '+7 days')",
         "(CURRENT_TIMESTAMP + INTERVAL '7 days')",
     );
