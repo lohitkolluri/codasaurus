@@ -2,45 +2,39 @@
   import { onMount } from "svelte";
   import { push } from "svelte-spa-router";
   import { api } from "../../stores/api.js";
+  import WizardShell from "../../lib/WizardShell.svelte";
+  import {
+    SETUP_STEPS,
+    firstIncomplete,
+    completedCount,
+  } from "../../lib/wizard.js";
 
   let status = $state(null);
   let loading = $state(true);
   let error = $state("");
 
-  const steps = [
-    { key: "database", label: "Database", desc: "Configure your database connection" },
-    { key: "llm", label: "LLM", desc: "Set up AI-powered code review" },
-    { key: "github", label: "GitHub App", desc: "Connect your repositories" },
-    { key: "admin", label: "Admin Account", desc: "Create your login credentials" },
-  ];
-
-  function completedCount() {
-    if (!status) return 0;
-    return steps.filter((s) => status[s.key]).length;
-  }
-
-  function firstIncomplete() {
-    if (!status) return null;
-    for (const s of steps) {
-      if (!status[s.key]) return s;
-    }
-    return null;
+  function goToStep(key) {
+    const step = SETUP_STEPS.find((s) => s.key === key);
+    push(step?.route ?? "/setup");
   }
 
   function startSetup() {
-    const next = firstIncomplete();
-    if (!next) return;
-    goToStep(next.key);
-  }
-
-  function goToStep(key) {
-    const routes = { database: "/setup/database", llm: "/setup/llm", github: "/setup/github", admin: "/setup/admin" };
-    push(routes[key] ?? "/setup");
+    if (status?.complete) {
+      push("/login");
+      return;
+    }
+    const next = firstIncomplete(status);
+    if (next) push(next.route);
   }
 
   onMount(async () => {
     try {
       status = await api.get("/api/setup/status");
+      if (status?.complete) {
+        // Already set up — send operators to login instead of trapping them.
+        push("/login");
+        return;
+      }
     } catch (err) {
       error = err.message || "Could not check setup status";
     } finally {
@@ -49,51 +43,76 @@
   });
 </script>
 
-<div class="wizard-card" style="text-align:center;padding-top:120px">
-  <h1 style="font-size:48px;font-weight:700;margin-bottom:8px">Codasaurus</h1>
-  <p style="font-size:16px;color:var(--text-muted);margin-bottom:48px">AI Code Review Platform</p>
+{#if loading}
+  <WizardShell showProgress={false}>
+    <p style="color:var(--text-muted);text-align:center;margin:48px 0">Checking setup status…</p>
+  </WizardShell>
+{:else if error}
+  <WizardShell showProgress={false} title="Can't reach the server" subtitle={error}>
+    <div class="wizard-actions" style="border:none;padding-top:0">
+      <button class="primary" onclick={() => push("/setup/database")}>Start setup anyway</button>
+    </div>
+  </WizardShell>
+{:else}
+  <WizardShell
+    showProgress={false}
+    title="Set up Codasaurus"
+    subtitle="Self-hosted PR review in four short steps. You'll review your first pull request in about five minutes."
+  >
+    <div class="wizard-time" aria-hidden="true">About 5 minutes · resume anytime</div>
 
-  {#if loading}
-    <p style="color:var(--text-muted)">Checking setup status…</p>
-  {:else if error}
-    <div class="error-state" style="margin-bottom:16px">{error}</div>
-    <button class="primary" onclick={() => push("/setup/database")}>Start Setup</button>
-  {:else}
-    <div style="max-width:400px;margin:0 auto">
-      {#each steps as step, i}
-        <div class="step-row" onclick={() => goToStep(step.key)} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && goToStep(step.key)}>
-          <div style="text-align:left">
-            <div style="font-size:14px;font-weight:500">{step.label}</div>
-            <div style="font-size:12px;color:var(--text-muted)">{step.desc}</div>
-          </div>
-          <span style="font-size:18px">
-            {#if status[step.key]}
-              <span style="color:var(--accent-soft)">✓</span>
-            {:else}
-              <span style="color:var(--text-muted);font-weight:600">{i + 1}</span>
-            {/if}
-          </span>
-        </div>
+    <ul class="wiz-hub-list">
+      {#each SETUP_STEPS as step, i}
+        {@const done = !!status?.[step.key]}
+        {@const next = firstIncomplete(status)?.key === step.key}
+        <li>
+          <button
+            type="button"
+            class="wiz-hub-item"
+            class:done
+            class:next
+            onclick={() => goToStep(step.key)}
+          >
+            <span class="wiz-hub-badge">
+              {#if done}✓{:else}{i + 1}{/if}
+            </span>
+            <div class="wiz-hub-text">
+              <strong>
+                {step.label}
+                {#if step.optional}<span style="font-weight:400;color:var(--text-muted)"> · optional</span>{/if}
+              </strong>
+              <span>{step.desc}</span>
+            </div>
+            <span class="wiz-hub-meta">{done ? "Done" : step.eta}</span>
+          </button>
+        </li>
       {/each}
+    </ul>
+
+    <div class="wizard-actions" style="border:none;padding-top:0;margin-top:0">
+      <button class="primary" style="width:100%;padding:12px 24px;font-size:15px" onclick={startSetup}>
+        {completedCount(status) === 0
+          ? "Get started"
+          : `Continue setup (${completedCount(status)}/${SETUP_STEPS.length})`}
+      </button>
     </div>
 
-    <button class="primary" style="font-size:16px;padding:12px 40px;margin-top:32px" onclick={startSetup}>
-      {status.complete ? "Go to Login" : `Continue Setup (${completedCount()}/4)`}
-    </button>
-  {/if}
-</div>
+    <p class="wizard-hint" style="text-align:center;margin-top:16px">
+      Already configured?
+      <button type="button" class="linkish" onclick={() => push("/login")}>Sign in</button>
+    </p>
+  </WizardShell>
+{/if}
 
 <style>
-  .step-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 0;
-    border-bottom: 1px solid var(--border-light);
+  .linkish {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent-soft, var(--accent));
     cursor: pointer;
-    transition: opacity 0.15s;
-  }
-  .step-row:hover {
-    opacity: 0.7;
+    font-size: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 </style>

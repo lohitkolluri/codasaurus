@@ -372,6 +372,7 @@ pub fn walkthrough_body_ext(
     body
 }
 
+#[allow(dead_code)]
 pub fn clean_approve_body() -> String {
     clean_approve_body_ext(None, "", "")
 }

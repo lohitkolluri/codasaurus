@@ -29,13 +29,7 @@
   let loading = $state(true);
   let initialCheckDone = $state(false);
 
-  onMount(async () => {
-    await checkSession();
-    loading = false;
-    initialCheckDone = true;
-  });
-
-  // Conditionally redirect based on auth state
+  // Conditionally redirect based on auth + setup state
   $effect(() => {
     if (!initialCheckDone || $authLoading) return;
     const loc = $location;
@@ -43,6 +37,27 @@
 
     if (loc.startsWith("/app") && !user) {
       push("/login");
+    }
+  });
+
+  onMount(async () => {
+    await checkSession();
+    loading = false;
+    initialCheckDone = true;
+
+    // If setup is already complete, don't trap users on the wizard hub.
+    try {
+      const loc = window.location.hash.replace(/^#/, "") || "/";
+      if (loc === "/" || loc === "/setup") {
+        const status = await fetch("/api/setup/status", { credentials: "same-origin" }).then((r) =>
+          r.ok ? r.json() : null,
+        );
+        if (status?.complete) {
+          push($currentUser ? "/app/dashboard" : "/login");
+        }
+      }
+    } catch {
+      /* stay on current route */
     }
   });
 

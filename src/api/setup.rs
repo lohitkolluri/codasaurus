@@ -121,6 +121,9 @@ pub struct SetupStatus {
     pub github: bool,
     pub admin: bool,
     pub complete: bool,
+    /// Present when a GitHub App slug is known — used by the complete screen before login.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub github_install_url: Option<String>,
 }
 
 /// GET /api/v1/setup/status — check which setup steps have been completed.
@@ -161,12 +164,19 @@ async fn setup_status(State(state): State<AppState>) -> Result<Json<SetupStatus>
 
     let complete = database && llm && github && admin;
 
+    let github_install_url = get_config(&state.pool, "github_app_slug")
+        .await
+        .ok()
+        .flatten()
+        .map(|slug| format!("https://github.com/apps/{slug}/installations/new"));
+
     Ok(Json(SetupStatus {
         database,
         llm,
         github,
         admin,
         complete,
+        github_install_url,
     }))
 }
 
@@ -379,6 +389,7 @@ async fn test_llm_connection(
                 model.unwrap_or("default"),
             )
         }
+        "disabled" => return Ok(Some(true)),
         _ => {
             return Err(ApiError::bad_request(format!(
                 "Unknown provider: {provider}"

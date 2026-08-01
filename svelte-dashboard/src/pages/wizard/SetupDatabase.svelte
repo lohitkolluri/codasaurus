@@ -1,6 +1,8 @@
 <script>
+  import { onMount } from "svelte";
   import { push } from "svelte-spa-router";
   import { api } from "../../stores/api.js";
+  import WizardShell from "../../lib/WizardShell.svelte";
 
   let provider = $state("sqlite");
   let postgresUrl = $state("");
@@ -8,18 +10,36 @@
   let testResult = $state("");
   let testError = $state("");
   let configured = $state(false);
+  let status = $state(null);
+
+  onMount(async () => {
+    try {
+      status = await api.get("/api/setup/status");
+      if (status?.database) {
+        configured = true;
+        testResult = "Already configured — you can continue.";
+      }
+    } catch {
+      /* ignore */
+    }
+  });
 
   async function testConnection() {
     testing = true;
     testResult = "";
     testError = "";
     try {
-      const body = provider === "sqlite"
-        ? { provider: "sqlite", url: "codasaurus.db" }
-        : { provider: "postgres", url: postgresUrl };
+      const body =
+        provider === "sqlite"
+          ? { provider: "sqlite", url: "codasaurus.db" }
+          : { provider: "postgres", url: postgresUrl };
       await api.post("/api/setup/database", body);
-      testResult = "Connection successful";
+      testResult =
+        provider === "sqlite"
+          ? "SQLite ready — reviews and settings will persist here."
+          : "Postgres URL validated. Runtime still uses the server’s configured database.";
       configured = true;
+      status = { ...(status ?? {}), database: true };
     } catch (err) {
       testError = err.message || "Connection failed";
       configured = false;
@@ -27,60 +47,61 @@
       testing = false;
     }
   }
-
-  function handleNext() {
-    push("/setup/llm");
-  }
 </script>
 
-<div class="wizard-card">
-  <div class="step-indicator">
-    <span class="step-dot completed"></span>
-    <span class="step-dot active"></span>
-    <span class="step-dot"></span>
-    <span class="step-dot"></span>
-  </div>
-  <p class="wizard-step-label">Step 1 of 4 — Database</p>
-
+<WizardShell
+  current="database"
+  {status}
+  title="Choose where data lives"
+  subtitle="SQLite is zero-config and production-ready with a volume. Prefer it unless you already run Postgres HA."
+>
   <div class="form-group">
-    <label>Database Provider</label>
+    <label>Database</label>
     <div class="radio-card" class:selected={provider === "sqlite"}>
       <label>
         <input type="radio" name="provider" value="sqlite" bind:group={provider} />
-        SQLite
+        SQLite — recommended
       </label>
-      <div class="radio-hint">Embedded database — recommended for self-host. Path: /data/codasaurus.db</div>
+      <div class="radio-hint">Embedded file DB. Path: <code>/data/codasaurus.db</code> (or local <code>codasaurus.db</code>).</div>
     </div>
-    <div class="radio-card" class:selected={provider === "postgres"} style="opacity:0.55">
+    <div class="radio-card" class:selected={provider === "postgres"}>
       <label>
         <input type="radio" name="provider" value="postgres" bind:group={provider} />
         PostgreSQL
       </label>
-      <div class="radio-hint">Connection test only in this release — runtime remains SQLite. Prefer SQLite + volume for production.</div>
+      <div class="radio-hint">
+        Set <code>DATABASE_URL</code> when starting the server for HA. This step validates the URL and stores preference.
+      </div>
     </div>
   </div>
 
   {#if provider === "postgres"}
     <div class="form-group">
-      <label for="pgurl">Database URL (validated, not used as runtime yet)</label>
-      <input id="pgurl" type="text" bind:value={postgresUrl} placeholder="postgresql://user:pass@localhost:5432/codasaurus" />
+      <label for="pgurl">Database URL</label>
+      <input
+        id="pgurl"
+        type="text"
+        bind:value={postgresUrl}
+        placeholder="postgresql://user:pass@localhost:5432/codasaurus"
+        autocomplete="off"
+      />
     </div>
   {/if}
 
-  <div style="margin-bottom:16px">
+  <div style="margin-bottom:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
     <button onclick={testConnection} disabled={testing || (provider === "postgres" && !postgresUrl)}>
-      {testing ? "Testing…" : "Test & Save"}
+      {testing ? "Testing…" : configured ? "Re-test & save" : "Save & continue"}
     </button>
     {#if testResult}
-      <span style="color:var(--success);margin-left:12px;font-size:13px">{testResult}</span>
-    {/if}
-    {#if testError}
-      <span class="error-state" style="display:block;padding:12px 0;text-align:left">{testError}</span>
+      <span style="color:var(--success);font-size:13px">{testResult}</span>
     {/if}
   </div>
+  {#if testError}
+    <div class="error-box">{testError}</div>
+  {/if}
 
   <div class="wizard-actions">
     <button onclick={() => push("/setup")}>Back</button>
-    <button class="primary" onclick={handleNext} disabled={!configured}>Next Step</button>
+    <button class="primary" onclick={() => push("/setup/llm")} disabled={!configured}>Continue</button>
   </div>
-</div>
+</WizardShell>

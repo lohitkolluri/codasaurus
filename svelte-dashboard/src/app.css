@@ -1193,10 +1193,67 @@ tr:hover td {
 
 /* ── 26. Wizard ────────────────────────────────────────────────── */
 
+.wizard-shell {
+    min-height: 100vh;
+    padding: var(--space-6) var(--space-4) var(--space-12);
+    background:
+        radial-gradient(
+            ellipse 80% 50% at 50% -20%,
+            color-mix(in srgb, var(--accent-soft) 12%, transparent),
+            transparent
+        ),
+        var(--bg-primary);
+}
+
+.wizard-shell-header {
+    max-width: 560px;
+    margin: 0 auto var(--space-6);
+}
+
+.wizard-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    color: var(--text-primary);
+}
+
+.wizard-brand-name {
+    font-size: var(--text-base);
+    font-weight: var(--weight-semibold);
+    letter-spacing: -0.02em;
+}
+
 .wizard-card {
     max-width: 520px;
     margin: 0 auto;
     padding: var(--space-12) 0;
+}
+
+.wizard-card--shell {
+    padding: var(--space-8) var(--space-6);
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg, 12px);
+    box-shadow: var(--shadow-md);
+}
+
+.wizard-title {
+    font-size: 1.375rem;
+    font-weight: 650;
+    letter-spacing: -0.03em;
+    margin: 0 0 var(--space-2);
+    color: var(--text-primary);
+}
+
+.wizard-subtitle {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    margin: 0 0 var(--space-6);
+    line-height: 1.5;
+}
+
+.wizard-body {
+    text-align: left;
 }
 
 .wizard-step-label {
@@ -1209,10 +1266,286 @@ tr:hover td {
 .wizard-actions {
     display: flex;
     justify-content: space-between;
+    align-items: center;
+    gap: var(--space-3);
     margin-top: var(--space-8);
+    padding-top: var(--space-6);
+    border-top: 1px solid var(--border-light);
 }
 
-/* Step indicator */
+.wizard-actions .primary {
+    margin-left: auto;
+}
+
+.wizard-hint {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    margin-top: var(--space-2);
+    line-height: 1.45;
+}
+
+.wizard-time {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    background: var(--bg-secondary);
+    border-radius: 999px;
+    padding: 4px 10px;
+    margin-bottom: var(--space-5);
+}
+
+/* Step indicator — numbered circles + connecting line */
+.wiz-progress {
+    margin-bottom: var(--space-7);
+}
+
+.wiz-progress-list {
+    display: flex;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0;
+}
+
+.wiz-progress-item {
+    position: relative;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 0;
+}
+
+.wiz-progress-line {
+    position: absolute;
+    top: 14px;
+    right: 50%;
+    width: 100%;
+    height: 2px;
+    background: var(--border);
+    z-index: 0;
+}
+
+.wiz-progress-line.filled {
+    background: color-mix(in srgb, var(--accent-soft) 70%, var(--border));
+}
+
+.wiz-progress-btn {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    color: var(--text-muted);
+    width: 100%;
+}
+
+.wiz-progress-btn:disabled {
+    cursor: default;
+    opacity: 0.55;
+}
+
+.wiz-progress-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    background: var(--bg-primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    transition:
+        border-color 0.15s,
+        background 0.15s,
+        color 0.15s;
+}
+
+.wiz-progress-btn.active .wiz-progress-num {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--bg-primary);
+}
+
+.wiz-progress-btn.done .wiz-progress-num {
+    border-color: var(--accent-soft);
+    background: color-mix(in srgb, var(--accent-soft) 18%, var(--bg-primary));
+    color: var(--accent-soft);
+}
+
+.wiz-progress-label {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+}
+
+.wiz-progress-btn.active .wiz-progress-label {
+    color: var(--text-primary);
+}
+
+.wiz-progress-meta {
+    text-align: center;
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    margin: var(--space-3) 0 0;
+}
+
+.wiz-optional {
+    color: var(--text-secondary);
+}
+
+.wiz-eta {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Hub checklist */
+.wiz-hub-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 0 0 var(--space-6);
+    padding: 0;
+    list-style: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.wiz-hub-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-4);
+    border: none;
+    background: transparent;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    color: inherit;
+    border-bottom: 1px solid var(--border-light);
+    transition: background 0.12s;
+}
+
+.wiz-hub-item:last-child {
+    border-bottom: none;
+}
+
+.wiz-hub-item:hover {
+    background: var(--bg-secondary);
+}
+
+.wiz-hub-item.done {
+    opacity: 0.85;
+}
+
+.wiz-hub-badge {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+    color: var(--text-muted);
+}
+
+.wiz-hub-item.done .wiz-hub-badge {
+    border-color: var(--success);
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+    color: var(--success);
+}
+
+.wiz-hub-item.next .wiz-hub-badge {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--bg-primary);
+}
+
+.wiz-hub-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.wiz-hub-text strong {
+    display: block;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.wiz-hub-text span {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}
+
+.wiz-hub-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.wiz-activation {
+    list-style: none;
+    margin: 0 0 var(--space-6);
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.wiz-activation li {
+    display: flex;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--border-light);
+    font-size: var(--text-sm);
+}
+
+.wiz-activation li:last-child {
+    border-bottom: none;
+}
+
+.wiz-activation-num {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--bg-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    flex-shrink: 0;
+    color: var(--text-secondary);
+}
+
+.wiz-activation strong {
+    display: block;
+    margin-bottom: 2px;
+}
+
+.wiz-activation p {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+/* Legacy dots kept for any residual use */
 .step-indicator {
     display: flex;
     justify-content: center;

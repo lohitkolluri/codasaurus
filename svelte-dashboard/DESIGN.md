@@ -7,6 +7,7 @@ Developer tool for AI-generated code review. Clean, technical, confident. Inspir
 ## 2. Color Palette
 
 ### Light Mode
+
 - `--bg-primary`: `#ffffff`
 - `--bg-secondary`: `#f6f6f6`
 - `--bg-tertiary`: `#eeeeee`
@@ -24,6 +25,7 @@ Developer tool for AI-generated code review. Clean, technical, confident. Inspir
 - `--info`: `#2563eb`
 
 ### Dark Mode
+
 - `--bg-primary`: `#0a0a0a`
 - `--bg-secondary`: `#121212`
 - `--bg-tertiary`: `#1a1a1a`
@@ -41,11 +43,13 @@ Developer tool for AI-generated code review. Clean, technical, confident. Inspir
 - `--info`: `#3b82f6`
 
 ### Shadows (light)
+
 - `--shadow-sm`: `0 1px 2px rgba(0,0,0,0.04)`
 - `--shadow-md`: `0 2px 8px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)`
 - `--shadow-lg`: `0 4px 24px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.04)`
 
 ### Shadows (dark)
+
 - `--shadow-sm`: `0 1px 2px rgba(0,0,0,0.3)`
 - `--shadow-md`: `0 2px 8px rgba(0,0,0,0.4)`
 - `--shadow-lg`: `0 4px 24px rgba(0,0,0,0.5)`
@@ -53,10 +57,12 @@ Developer tool for AI-generated code review. Clean, technical, confident. Inspir
 ## 3. Typography
 
 ### Font Family
+
 - Body: `"Inter", -apple-system, BlinkMacSystemFont, sans-serif`
 - Mono: `"JetBrains Mono", "SF Mono", "Fira Code", monospace`
 
 ### Scale
+
 - `--text-xs`: `11px` (labels, captions)
 - `--text-sm`: `13px` (secondary text, meta)
 - `--text-base`: `14px` (body)
@@ -67,6 +73,7 @@ Developer tool for AI-generated code review. Clean, technical, confident. Inspir
 - `--text-4xl`: `48px` (display)
 
 ### Weights
+
 - Regular: 400
 - Medium: 500
 - Semibold: 600
@@ -88,6 +95,7 @@ Developer tool for AI-generated code review. Clean, technical, confident. Inspir
 ## 5. Components
 
 ### Buttons
+
 - Border radius: `8px`
 - Padding: `8px 20px` (default), `10px 24px` (lg)
 - Transition: `all 0.15s cubic-bezier(0.4, 0, 0.2, 1)`
@@ -96,14 +104,16 @@ Developer tool for AI-generated code review. Clean, technical, confident. Inspir
 - Variants: primary (filled accent), secondary (outlined), ghost (borderless), danger (red)
 
 ### Cards
+
 - Border radius: `10px`
-- Background: `var(--surface)` 
+- Background: `var(--surface)`
 - Border: `1px solid var(--border)`
 - Padding: `20px`
 - Hover: subtle shadow elevation + `translateY(-1px)`
 - Transition: `all 0.2s cubic-bezier(0.4, 0, 0.2, 1)`
 
 ### Inputs
+
 - Border radius: `8px`
 - Padding: `10px 14px`
 - Border: `1px solid var(--border)`
@@ -111,22 +121,28 @@ Developer tool for AI-generated code review. Clean, technical, confident. Inspir
 - Transition: `all 0.15s ease`
 
 ### Sidebar
+
 - Width: `240px`
 - Border-right
 - Nav items: `10px 20px`, border-radius `6px`, icon + label layout
 - Active: subtle background + medium weight
 
 ### Wizard
-- Max width: `520px`
-- Step indicator: numbered circles with connecting line
-- Card: centered, bordered
+
+- Max width: `520px` card on a soft atmospheric shell
+- Step indicator: numbered circles with connecting line (active / done / upcoming)
+- One primary CTA per screen; optional steps clearly labeled
+- Time estimate on hub + per-step meta (“~30s”)
+- Resume from first incomplete step; completed setup redirects to login
 
 ### Toggle
+
 - Width: `38px`, height: `22px`
 - Border radius: `11px` (pill)
 - Transition: background 0.2s, knob position 0.2s
 
 ### Badges / Status
+
 - Border radius: `6px`
 - Padding: `2px 8px`
 - Font: `11px`, semibold

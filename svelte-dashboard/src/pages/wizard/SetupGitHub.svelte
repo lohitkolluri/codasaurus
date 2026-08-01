@@ -1,67 +1,99 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { push } from "svelte-spa-router";
   import { api } from "../../stores/api.js";
+  import WizardShell from "../../lib/WizardShell.svelte";
 
   let configured = $state(false);
   let checking = $state(true);
-  onMount(async () => {
+  let status = $state(null);
+  let poll = null;
+  let refreshing = $state(false);
+
+  async function refreshStatus() {
+    refreshing = true;
     try {
-      const status = await api.get("/api/setup/status");
-      configured = status.github;
+      status = await api.get("/api/setup/status");
+      configured = !!status.github;
     } catch {
-      // ignore
+      /* ignore */
     } finally {
       checking = false;
+      refreshing = false;
+    }
+  }
+
+  onMount(() => {
+    refreshStatus();
+    poll = setInterval(() => {
+      if (!configured) refreshStatus();
+    }, 2500);
+    const onFocus = () => refreshStatus();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      if (poll) clearInterval(poll);
+      window.removeEventListener("focus", onFocus);
+    };
+  });
+
+  onDestroy(() => {
+    if (poll) clearInterval(poll);
+  });
+
+  $effect(() => {
+    if (configured && poll) {
+      clearInterval(poll);
+      poll = null;
     }
   });
 
-  async function openManifest() {
-    // Opens a page that auto-submits the manifest to GitHub via POST form.
-    // This is the officially documented flow — GET with ?manifest= is unreliable.
-    window.open("/api/setup/github/manifest-page", "_blank");
-  }
-
-  function handleNext() {
-    push("/setup/admin");
+  function openManifest() {
+    window.open("/api/setup/github/manifest-page", "_blank", "noopener,noreferrer");
   }
 </script>
 
-<div class="wizard-card">
-  <div class="step-indicator">
-    <span class="step-dot completed"></span>
-    <span class="step-dot completed"></span>
-    <span class="step-dot active"></span>
-    <span class="step-dot"></span>
-  </div>
-  <p class="wizard-step-label">Step 3 of 4 — GitHub App</p>
-
+<WizardShell
+  current="github"
+  {status}
+  title="Connect GitHub"
+  subtitle="Create a GitHub App in one click. Codasaurus gets webhook + PR permissions — you keep the keys on your server."
+>
   {#if checking}
-    <p style="color:var(--text-muted)">Checking…</p>
+    <p style="color:var(--text-muted)">Checking GitHub App status…</p>
   {:else if configured}
     <div class="success-box">
-      <p>GitHub App is configured.</p>
+      <strong>GitHub App connected</strong>
+      <p style="margin:8px 0 0;font-size:13px;opacity:0.9">
+        Next you'll create an admin login. After that, install the App on the repos you want reviewed.
+      </p>
     </div>
   {:else}
-    <button onclick={openManifest} style="width:100%;margin-bottom:12px">
-      Create GitHub App on GitHub
+    <button class="primary" onclick={openManifest} style="width:100%;margin-bottom:12px;padding:12px">
+      Create GitHub App
     </button>
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
-      A new browser tab will open. Complete the GitHub App creation form, then you will be redirected back here.
+    <p class="wizard-hint" style="margin-bottom:16px">
+      Opens GitHub in a new tab. Finish the form — credentials save automatically when you return.
+      {#if refreshing}
+        <span> Checking…</span>
+      {/if}
     </p>
 
     <div class="info-box">
-      <strong style="font-size:13px">After the GitHub redirect:</strong>
-      <ul style="font-size:13px;margin:8px 0 0 0;padding-left:20px">
-        <li>Your credentials are saved automatically</li>
-        <li>Install the app on your repositories</li>
-        <li>Return here and click Next</li>
+      <strong style="font-size:13px">What happens</strong>
+      <ul>
+        <li>Manifest pre-fills webhook URL, permissions, and callbacks</li>
+        <li>Private key + App ID are stored on this server only</li>
+        <li>Install on orgs/repos after setup completes</li>
       </ul>
     </div>
+
+    <button type="button" onclick={refreshStatus} disabled={refreshing} style="margin-top:8px">
+      {refreshing ? "Checking…" : "I've finished — refresh status"}
+    </button>
   {/if}
 
-  <div class="wizard-actions" style="margin-top:24px">
+  <div class="wizard-actions">
     <button onclick={() => push("/setup/llm")}>Back</button>
-    <button class="primary" onclick={handleNext} disabled={!configured}>Next Step</button>
+    <button class="primary" onclick={() => push("/setup/admin")} disabled={!configured}>Continue</button>
   </div>
-</div>
+</WizardShell>
