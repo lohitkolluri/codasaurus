@@ -28,6 +28,8 @@ pub fn detect_remote(
     branch: &str,
     commit_messages: &[String],
     changed_paths: &[String],
+    // Paths known to exist at the review ref (for FileRequired rules).
+    present_paths: &[String],
 ) -> Vec<Finding> {
     if files.is_empty() {
         return Vec::new();
@@ -65,25 +67,36 @@ pub fn detect_remote(
                         codemod: None,
                     });
                 }
-                ExtractedRule::FileRequired { path: _ } => {
-                    // Skip: verifying required files needs extra Contents GETs per path.
+                ExtractedRule::FileRequired { path } => {
+                    let needed = path.trim().trim_start_matches('/');
+                    if needed.is_empty() {
+                        continue;
+                    }
+                    let exists = present_paths.iter().any(|p| {
+                        let p = p.trim_start_matches('/');
+                        p == needed || p.ends_with(needed) || p.ends_with(&format!("/{needed}"))
+                    });
+                    if !exists {
+                        findings.push(Finding {
+                            detector: "guidelines".to_string(),
+                            severity: "blocking",
+                            file: needed.to_string(),
+                            line: 1,
+                            column: 0,
+                            message: format!(
+                                "Required file `{needed}` is missing (from contribution guidelines)"
+                            ),
+                            suggestion: Some(format!(
+                                "Add `{needed}` to this PR as required by CONTRIBUTING."
+                            )),
+                            evidence: None,
+                            codemod: None,
+                        });
+                    }
                 }
                 ExtractedRule::SectionRule { heading, text } => {
-                    findings.push(Finding {
-                        detector: "guidelines".to_string(),
-                        severity: "info",
-                        file: gf.path.to_string_lossy().to_string(),
-                        line: 0,
-                        column: 0,
-                        message: format!(
-                            "Guideline section: {} — {}",
-                            heading,
-                            text.chars().take(200).collect::<String>()
-                        ),
-                        suggestion: None,
-                        evidence: None,
-                        codemod: None,
-                    });
+                    // Keep section tips out of the default signal budget — too noisy.
+                    let _ = (heading, text);
                 }
             }
         }
@@ -157,7 +170,7 @@ fn check_sign_off_remote(
     if !unsigned.is_empty() {
         findings.push(Finding {
             detector: "guidelines".to_string(),
-            severity: "warning",
+            severity: "blocking",
             file: gf.path.to_string_lossy().to_string(),
             line: 0,
             column: 0,
@@ -195,11 +208,11 @@ fn check_conventional_remote(
     if !non_conventional.is_empty() {
         findings.push(Finding {
             detector: "guidelines".to_string(),
-            severity: "info",
+            severity: "warning",
             file: gf.path.to_string_lossy().to_string(),
             line: 0,
             column: 0,
-            message: "Conventional commits are recommended but some PR commits don't match `type(scope): description`".into(),
+            message: "Conventional commits are required by guidelines but some PR commits don't match `type(scope): description`".into(),
             suggestion: Some(
                 "Use format: feat|fix|chore|docs|refactor|test(scope): description".into(),
             ),
@@ -243,8 +256,26 @@ mod tests {
             "fix/typo",
             &["wip stuff".into()],
             &["src/a.rs".into()],
+            &[],
         );
         assert!(findings.iter().any(|f| f.message.contains("doesn't match")));
         assert!(findings.iter().any(|f| f.message.contains("checklist")));
+    }
+
+    #[test]
+    fn file_required_blocks_when_missing() {
+        let mut gf = GuidelineFile::from_content(
+            "CONTRIBUTING.md",
+            "CONTRIBUTING.md",
+            "# Contributing\n".into(),
+        )
+        .unwrap();
+        gf.rules = vec![ExtractedRule::FileRequired {
+            path: "CHANGELOG.md".into(),
+        }];
+        let findings = detect_remote(&[gf], "feat/x", &[], &[], &["src/a.rs".into()]);
+        assert!(findings.iter().any(|f| {
+            f.severity == "blocking" && f.message.contains("CHANGELOG.md")
+        }));
     }
 }

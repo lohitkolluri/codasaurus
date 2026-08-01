@@ -98,6 +98,13 @@ impl LearningStore {
         .bind(&finding.message)
         .execute(&self.pool)
         .await?;
+        let _ = crate::learning::mine::promote_dismissal_to_rule(
+            self,
+            &finding.detector,
+            &finding.file,
+            &finding.message,
+        )
+        .await;
         Ok(())
     }
 
@@ -119,25 +126,41 @@ impl LearningStore {
         .bind(message)
         .execute(&self.pool)
         .await?;
+        // Best-effort: promote repeated noise into a learned rule.
+        let _ = crate::learning::mine::promote_dismissal_to_rule(self, detector, file, message)
+            .await;
         Ok(())
     }
 
     pub fn add_rule(&self, rule: &crate::learning::LearnedRule) -> Result<()> {
-        block_on(async {
-            sqlx::query(
-                "INSERT OR REPLACE INTO learned_rules (id, detector, file_pattern, message_pattern, action, reason)
-                 VALUES (?, ?, ?, ?, ?, ?)",
-            )
-            .bind(&rule.id)
-            .bind(&rule.detector)
-            .bind(&rule.file_pattern)
-            .bind(&rule.message_pattern)
-            .bind(rule.action.as_str())
-            .bind(&rule.reason)
-            .execute(&self.pool)
-            .await
-        })?;
+        block_on(self.add_rule_async(rule))
+    }
+
+    pub async fn add_rule_async(&self, rule: &crate::learning::LearnedRule) -> Result<()> {
+        sqlx::query(
+            "INSERT OR REPLACE INTO learned_rules (id, detector, file_pattern, message_pattern, action, reason)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&rule.id)
+        .bind(&rule.detector)
+        .bind(&rule.file_pattern)
+        .bind(&rule.message_pattern)
+        .bind(rule.action.as_str())
+        .bind(&rule.reason)
+        .execute(&self.pool)
+        .await?;
         Ok(())
+    }
+
+    /// Count dismissals for a detector (used to auto-promote learned rules).
+    pub async fn count_dismissals_for_detector(&self, detector: &str) -> Result<i64> {
+        let n: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM dismissed_findings WHERE detector = ?",
+        )
+        .bind(detector)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(n.0)
     }
 
     #[cfg(test)]
@@ -165,8 +188,6 @@ impl LearningStore {
         let fingerprints: Vec<String> = findings.iter().map(|f| f.fingerprint()).collect();
         let mut dismissed_set = std::collections::HashSet::new();
 
-        // Query only fingerprints present in this review (avoids full-table scan as dismissals grow).
-        // SQLite binds are capped; chunk to stay safe.
         for chunk in fingerprints.chunks(400) {
             let placeholders = std::iter::repeat_n("?", chunk.len())
                 .collect::<Vec<_>>()
@@ -188,21 +209,22 @@ impl LearningStore {
             detector: String,
             file_pattern: Option<String>,
             message_pattern: Option<String>,
+            action: String,
         }
-        let rules: Vec<Rule> = sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
-            "SELECT detector, file_pattern, message_pattern FROM learned_rules",
+        let rules: Vec<Rule> = sqlx::query_as::<_, (String, Option<String>, Option<String>, String)>(
+            "SELECT detector, file_pattern, message_pattern, action FROM learned_rules",
         )
         .fetch_all(&self.pool)
         .await?
         .into_iter()
-        .map(|(detector, file_pattern, message_pattern)| Rule {
+        .map(|(detector, file_pattern, message_pattern, action)| Rule {
             detector,
             file_pattern,
             message_pattern,
+            action,
         })
         .collect();
 
-        // Short fingerprints from `@codasaurus ignore <12-hex>` must match full hashes.
         let short_prefixes: Vec<String> = sqlx::query_as::<_, (String,)>(
             "SELECT fingerprint FROM dismissed_findings WHERE length(fingerprint) BETWEEN 8 AND 63",
         )
@@ -214,17 +236,19 @@ impl LearningStore {
 
         Ok(findings
             .iter()
-            .filter(|f| {
+            .filter_map(|f| {
                 let fp = f.fingerprint();
                 if dismissed_set.contains(&fp) {
-                    return false;
+                    return None;
                 }
                 if short_prefixes
                     .iter()
                     .any(|p| fp.starts_with(p.as_str()) || p.starts_with(fp.as_str()))
                 {
-                    return false;
+                    return None;
                 }
+
+                let mut out = f.clone();
                 for rule in &rules {
                     if rule.detector != f.detector {
                         continue;
@@ -239,11 +263,25 @@ impl LearningStore {
                             continue;
                         }
                     }
-                    return false;
+                    match rule.action.as_str() {
+                        "ignore" => return None,
+                        "downgrade" => {
+                            out.severity = match out.severity {
+                                "blocking" => "warning",
+                                "warning" => "info",
+                                other => other,
+                            };
+                        }
+                        "always_warn" => {
+                            if out.severity == "info" {
+                                out.severity = "warning";
+                            }
+                        }
+                        _ => return None,
+                    }
                 }
-                true
+                Some(out)
             })
-            .cloned()
             .collect())
     }
 }

@@ -535,13 +535,77 @@ pub async fn review_pr_with_options(
     };
 
     if want_guidelines && !remote_ctx.guidelines.is_empty() {
+        // Probe required files from guidelines (budgeted Contents GETs).
+        let mut required: Vec<String> = Vec::new();
+        for gf in &remote_ctx.guidelines {
+            for rule in &gf.rules {
+                if let crate::context::rules::ExtractedRule::FileRequired { path } = rule {
+                    let p = path.trim().trim_start_matches('/').to_string();
+                    if !p.is_empty() && !required.iter().any(|x| x == &p) {
+                        required.push(p);
+                    }
+                }
+            }
+        }
+        required.truncate(5);
+        let mut present_paths = changed_paths.clone();
+        let git_ref = if head_ref.is_empty() {
+            if base_sha.is_empty() {
+                "HEAD"
+            } else {
+                base_sha
+            }
+        } else {
+            head_ref
+        };
+        for path in &required {
+            match super::github_files::fetch_repo_file(
+                client, &headers, repo_name, path, git_ref,
+            )
+            .await
+            {
+                Ok(Some(_)) => present_paths.push(path.clone()),
+                Ok(None) => {}
+                Err(e) => tracing::debug!(error = %e, path, "required-file probe failed"),
+            }
+        }
+
         let g = detectors::guidelines::detect_remote(
             &remote_ctx.guidelines,
             head_ref,
             &commit_messages,
             &changed_paths,
+            &present_paths,
         );
         findings.findings.extend(g);
+    }
+
+    // Mine human feedback on this PR into learned rules (budgeted; best-effort).
+    if let Some(pool) = pool {
+        let store = crate::learning::store::LearningStore::from_pool(pool);
+        match crate::learning::mine::mine_pr_comment_feedback(
+            client, &headers, repo_name, pr_number, &store,
+        )
+        .await
+        {
+            Ok(n) if n > 0 => tracing::info!(learned = n, "mined PR feedback into rules"),
+            Ok(_) => {}
+            Err(e) => tracing::debug!(error = %e, "feedback mining skipped"),
+        }
+    }
+
+    // Related PRs by path history (for LLM / walkthrough context).
+    let related_prs = super::related_prs::find_related_prs(
+        client,
+        &headers,
+        repo_name,
+        &changed_paths,
+        pr_number,
+    )
+    .await
+    .unwrap_or_default();
+    if !related_prs.is_empty() {
+        tracing::info!(n = related_prs.len(), "found related PRs");
     }
 
     // Apply default_severity floor from dashboard settings
@@ -603,13 +667,14 @@ pub async fn review_pr_with_options(
         }
     }
 
-    let review_ctx = crate::bot::repo_context::to_review_context(
+    let mut review_ctx = crate::bot::repo_context::to_review_context(
         &remote_ctx,
         repo_name,
         head_ref,
         &pr_title,
         &pr_body,
     );
+    review_ctx.related_prs = related_prs;
 
     let mut review_comments: Vec<serde_json::Value> = Vec::new();
     let mut has_blocking = false;

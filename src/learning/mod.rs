@@ -1,3 +1,4 @@
+pub mod mine;
 pub mod store;
 
 /// Action to take when a learned rule matches a finding.
