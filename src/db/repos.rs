@@ -1,33 +1,32 @@
 use crate::db::models::*;
-use crate::db::DbPool;
+use crate::db::{db_execute, db_fetch_all, db_fetch_one, db_fetch_optional, DbPool};
 
 pub async fn list_repos(pool: &DbPool) -> Result<Vec<Repo>, sqlx::Error> {
-    sqlx::query_as::<_, Repo>("SELECT * FROM repos ORDER BY full_name")
-        .fetch_all(&pool.0)
-        .await
+    db_fetch_all!(pool, Repo, "SELECT * FROM repos ORDER BY full_name")
 }
 
 pub async fn get_repo(pool: &DbPool, id: i64) -> Result<Option<Repo>, sqlx::Error> {
-    sqlx::query_as::<_, Repo>("SELECT * FROM repos WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&pool.0)
-        .await
+    db_fetch_optional!(pool, Repo, "SELECT * FROM repos WHERE id = ?", id)
 }
 
 pub async fn get_repo_by_full_name(
     pool: &DbPool,
     full_name: &str,
 ) -> Result<Option<Repo>, sqlx::Error> {
-    sqlx::query_as::<_, Repo>("SELECT * FROM repos WHERE full_name = ?")
-        .bind(full_name)
-        .fetch_optional(&pool.0)
-        .await
+    db_fetch_optional!(
+        pool,
+        Repo,
+        "SELECT * FROM repos WHERE full_name = ?",
+        full_name
+    )
 }
 
 pub async fn create_repo(pool: &DbPool, repo: &RepoCreate) -> Result<Repo, sqlx::Error> {
-    sqlx::query_as::<_, Repo>(
+    db_fetch_one!(
+        pool,
+        Repo,
         "INSERT INTO repos (github_id, full_name, owner, name, default_branch, installation_id, private, active)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(full_name) DO UPDATE SET
            github_id = excluded.github_id,
            installation_id = excluded.installation_id,
@@ -35,16 +34,15 @@ pub async fn create_repo(pool: &DbPool, repo: &RepoCreate) -> Result<Repo, sqlx:
            default_branch = COALESCE(excluded.default_branch, repos.default_branch),
            updated_at = CURRENT_TIMESTAMP
          RETURNING *",
+        repo.github_id,
+        &repo.full_name,
+        &repo.owner,
+        &repo.name,
+        &repo.default_branch,
+        repo.installation_id,
+        repo.private,
+        true
     )
-    .bind(repo.github_id)
-    .bind(&repo.full_name)
-    .bind(&repo.owner)
-    .bind(&repo.name)
-    .bind(&repo.default_branch)
-    .bind(repo.installation_id)
-    .bind(repo.private)
-    .fetch_one(&pool.0)
-    .await
 }
 
 pub async fn update_repo(
@@ -53,21 +51,17 @@ pub async fn update_repo(
     config_json: &str,
     active: bool,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    db_execute!(
+        pool,
         "UPDATE repos SET config_json = ?, active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-    )
-    .bind(config_json)
-    .bind(active)
-    .bind(id)
-    .execute(&pool.0)
-    .await?;
+        config_json,
+        active,
+        id
+    )?;
     Ok(())
 }
 
 pub async fn delete_repo(pool: &DbPool, id: i64) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM repos WHERE id = ?")
-        .bind(id)
-        .execute(&pool.0)
-        .await?;
+    db_execute!(pool, "DELETE FROM repos WHERE id = ?", id)?;
     Ok(())
 }

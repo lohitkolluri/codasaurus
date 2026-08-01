@@ -63,6 +63,10 @@ pub struct CheckConfig {
     #[serde(default = "default_true")]
     pub graph: bool,
 
+    /// Terraform / Kubernetes IaC red flags
+    #[serde(default = "default_true")]
+    pub iac: bool,
+
     /// Glob patterns for files/directories to skip during scanning
     #[serde(default = "default_exclude_patterns")]
     pub exclude_patterns: Vec<String>,
@@ -166,6 +170,7 @@ impl Default for Config {
                 todo_leaks: true,
                 guidelines: true,
                 graph: true,
+                iac: true,
                 exclude_patterns: default_exclude_patterns(),
             },
             behavior: BehaviorConfig { strict: false },

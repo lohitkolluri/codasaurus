@@ -78,11 +78,24 @@ async fn list_reviews(
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!("SELECT id, full_name FROM repos WHERE id IN ({placeholders})");
-        let mut q = sqlx::query_as::<_, (i64, String)>(&sql);
-        for id in &unique_ids {
-            q = q.bind(id);
-        }
-        if let Ok(rows) = q.fetch_all(&state.pool.0).await {
+        let prepared = state.pool.prepare_sql(&sql);
+        let rows: Result<Vec<(i64, String)>, _> = match &state.pool {
+            crate::db::DbPool::Sqlite(p) => {
+                let mut q = sqlx::query_as::<_, (i64, String)>(&prepared);
+                for id in &unique_ids {
+                    q = q.bind(id);
+                }
+                q.fetch_all(p).await
+            }
+            crate::db::DbPool::Postgres(p) => {
+                let mut q = sqlx::query_as::<_, (i64, String)>(&prepared);
+                for id in &unique_ids {
+                    q = q.bind(id);
+                }
+                q.fetch_all(p).await
+            }
+        };
+        if let Ok(rows) = rows {
             for (id, name) in rows {
                 name_by_id.insert(id, name);
             }
@@ -118,30 +131,20 @@ async fn count_reviews(
     status: Option<&str>,
 ) -> Result<i64, ApiError> {
     let count = match (repo_id, status) {
-        (Some(rid), Some(st)) => {
-            sqlx::query_scalar("SELECT COUNT(*) FROM reviews WHERE repo_id = ? AND status = ?")
-                .bind(rid)
-                .bind(st)
-                .fetch_one(&pool.0)
-                .await?
-        }
+        (Some(rid), Some(st)) => crate::db::db_scalar!(
+            pool,
+            i64,
+            "SELECT COUNT(*) FROM reviews WHERE repo_id = ? AND status = ?",
+            rid,
+            st
+        )?,
         (Some(rid), None) => {
-            sqlx::query_scalar("SELECT COUNT(*) FROM reviews WHERE repo_id = ?")
-                .bind(rid)
-                .fetch_one(&pool.0)
-                .await?
+            crate::db::db_scalar!(pool, i64, "SELECT COUNT(*) FROM reviews WHERE repo_id = ?", rid)?
         }
         (None, Some(st)) => {
-            sqlx::query_scalar("SELECT COUNT(*) FROM reviews WHERE status = ?")
-                .bind(st)
-                .fetch_one(&pool.0)
-                .await?
+            crate::db::db_scalar!(pool, i64, "SELECT COUNT(*) FROM reviews WHERE status = ?", st)?
         }
-        (None, None) => {
-            sqlx::query_scalar("SELECT COUNT(*) FROM reviews")
-                .fetch_one(&pool.0)
-                .await?
-        }
+        (None, None) => crate::db::db_scalar!(pool, i64, "SELECT COUNT(*) FROM reviews")?,
     };
     Ok(count)
 }
@@ -157,13 +160,14 @@ async fn get_review(
 
     let findings = db::reviews::get_findings_for_review(&state.pool, id).await?;
 
-    let repo_full_name: Option<String> =
-        sqlx::query_scalar("SELECT full_name FROM repos WHERE id = ?")
-            .bind(review.repo_id)
-            .fetch_optional(&state.pool.0)
-            .await
-            .ok()
-            .flatten();
+    let repo_full_name: Option<String> = crate::db::db_scalar_optional!(
+        &state.pool,
+        String,
+        "SELECT full_name FROM repos WHERE id = ?",
+        review.repo_id
+    )
+    .ok()
+    .flatten();
 
     let mut review_val = serde_json::to_value(&review).unwrap_or_default();
     if let Some(obj) = review_val.as_object_mut() {

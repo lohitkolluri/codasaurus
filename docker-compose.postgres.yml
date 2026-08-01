@@ -1,0 +1,37 @@
+# Postgres-backed multi-node deploy (optional).
+# Usage: docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: codasaurus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-codasaurus}
+      POSTGRES_DB: codasaurus
+    volumes:
+      - codasaurus-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codasaurus"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  codasaurus:
+    environment:
+      - DATABASE_URL=postgres://codasaurus:${POSTGRES_PASSWORD:-codasaurus}@postgres:5432/codasaurus
+      - OIDC_ISSUER=${OIDC_ISSUER:-}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET:-}
+      - OIDC_REDIRECT_URI=${OIDC_REDIRECT_URI:-}
+      - PUBLIC_URL=${PUBLIC_URL:-http://localhost:3000}
+      - JIRA_BASE_URL=${JIRA_BASE_URL:-}
+      - JIRA_EMAIL=${JIRA_EMAIL:-}
+      - JIRA_API_TOKEN=${JIRA_API_TOKEN:-}
+      - LINEAR_API_KEY=${LINEAR_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  codasaurus-pg:

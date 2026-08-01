@@ -195,19 +195,45 @@ async fn webhook_delivery_dedup_persists() {
     let pool = test_pool().await;
     let id = "delivery-abc-123";
 
-    let first = sqlx::query("INSERT OR IGNORE INTO webhook_deliveries (delivery_id) VALUES (?)")
-        .bind(id)
-        .execute(&pool.0)
-        .await
-        .unwrap();
-    assert_eq!(first.rows_affected(), 1);
+    // First insert via public API path (ON CONFLICT DO NOTHING).
+    let sql = "INSERT INTO webhook_deliveries (delivery_id) VALUES (?) ON CONFLICT(delivery_id) DO NOTHING";
+    let first = match &pool {
+        codasaurus::db::DbPool::Sqlite(p) => sqlx::query(sql)
+            .bind(id)
+            .execute(p)
+            .await
+            .unwrap()
+            .rows_affected(),
+        codasaurus::db::DbPool::Postgres(p) => {
+            let s = pool.prepare_sql(sql);
+            sqlx::query(&s)
+                .bind(id)
+                .execute(p)
+                .await
+                .unwrap()
+                .rows_affected()
+        }
+    };
+    assert_eq!(first, 1);
 
-    let second = sqlx::query("INSERT OR IGNORE INTO webhook_deliveries (delivery_id) VALUES (?)")
-        .bind(id)
-        .execute(&pool.0)
-        .await
-        .unwrap();
-    assert_eq!(second.rows_affected(), 0);
+    let second = match &pool {
+        codasaurus::db::DbPool::Sqlite(p) => sqlx::query(sql)
+            .bind(id)
+            .execute(p)
+            .await
+            .unwrap()
+            .rows_affected(),
+        codasaurus::db::DbPool::Postgres(p) => {
+            let s = pool.prepare_sql(sql);
+            sqlx::query(&s)
+                .bind(id)
+                .execute(p)
+                .await
+                .unwrap()
+                .rows_affected()
+        }
+    };
+    assert_eq!(second, 0);
 }
 
 #[tokio::test]

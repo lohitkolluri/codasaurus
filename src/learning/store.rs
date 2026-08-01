@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sqlx::SqlitePool;
+use crate::db::{db_execute, db_fetch_all, db_scalar, DbPool};
 use std::path::PathBuf;
 use std::sync::LazyLock;
 use tokio::runtime::{Handle, Runtime};
@@ -18,13 +18,13 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 
 /// Persistent store for feedback learning
 pub struct LearningStore {
-    pool: SqlitePool,
+    pool: DbPool,
 }
 
 impl LearningStore {
-    pub fn from_pool(pool: &crate::db::DbPool) -> Self {
+    pub fn from_pool(pool: &DbPool) -> Self {
         Self {
-            pool: pool.0.clone(),
+            pool: pool.clone(),
         }
     }
 
@@ -37,48 +37,12 @@ impl LearningStore {
             std::fs::create_dir_all(parent)?;
         }
         let url = format!("sqlite://{}?mode=rwc", path.display());
-        let pool = block_on(SqlitePool::connect(&url))?;
-        let store = Self { pool };
-        store.initialize()?;
-        Ok(store)
+        let pool = block_on(crate::db::create_pool(&url))?;
+        Ok(Self { pool })
     }
 
     fn db_path() -> Result<PathBuf> {
         Ok(crate::storage::data_dir().join("learnings.db"))
-    }
-
-    fn initialize(&self) -> Result<()> {
-        block_on(async {
-            sqlx::query("PRAGMA journal_mode = WAL")
-                .execute(&self.pool)
-                .await?;
-            sqlx::query(
-                "CREATE TABLE IF NOT EXISTS dismissed_findings (
-                    fingerprint TEXT PRIMARY KEY,
-                    detector TEXT NOT NULL,
-                    file TEXT NOT NULL,
-                    line INTEGER NOT NULL,
-                    message TEXT NOT NULL,
-                    dismissed_at TEXT NOT NULL DEFAULT (datetime('now'))
-                 )",
-            )
-            .execute(&self.pool)
-            .await?;
-            sqlx::query(
-                "CREATE TABLE IF NOT EXISTS learned_rules (
-                    id TEXT PRIMARY KEY,
-                    detector TEXT NOT NULL,
-                    file_pattern TEXT,
-                    message_pattern TEXT,
-                    action TEXT NOT NULL DEFAULT 'ignore',
-                    reason TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-                 )",
-            )
-            .execute(&self.pool)
-            .await?;
-            Ok::<_, anyhow::Error>(())
-        })
     }
 
     pub fn dismiss(&self, finding: &Finding) -> Result<()> {
@@ -87,17 +51,18 @@ impl LearningStore {
 
     pub async fn dismiss_async(&self, finding: &Finding) -> Result<()> {
         let fingerprint = finding.fingerprint();
-        sqlx::query(
-            "INSERT OR IGNORE INTO dismissed_findings (fingerprint, detector, file, line, message)
-             VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind(&fingerprint)
-        .bind(&finding.detector)
-        .bind(&finding.file)
-        .bind(finding.line as i64)
-        .bind(&finding.message)
-        .execute(&self.pool)
-        .await?;
+        db_execute!(
+            &self.pool,
+            "INSERT INTO dismissed_findings (fingerprint, detector, file, line, message)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(fingerprint) DO NOTHING",
+            &fingerprint,
+            &finding.detector,
+            &finding.file,
+            finding.line as i64,
+            &finding.message
+        )?;
+        crate::metrics::record_dismissal();
         let _ = crate::learning::mine::promote_dismissal_to_rule(
             self,
             &finding.detector,
@@ -108,7 +73,6 @@ impl LearningStore {
         Ok(())
     }
 
-    /// Dismiss by fingerprint string (used by bot `@codasaurus ignore <fp>`).
     pub async fn dismiss_fingerprint(
         &self,
         fingerprint: &str,
@@ -116,17 +80,17 @@ impl LearningStore {
         file: &str,
         message: &str,
     ) -> Result<()> {
-        sqlx::query(
-            "INSERT OR IGNORE INTO dismissed_findings (fingerprint, detector, file, line, message)
-             VALUES (?, ?, ?, 0, ?)",
-        )
-        .bind(fingerprint)
-        .bind(detector)
-        .bind(file)
-        .bind(message)
-        .execute(&self.pool)
-        .await?;
-        // Best-effort: promote repeated noise into a learned rule.
+        db_execute!(
+            &self.pool,
+            "INSERT INTO dismissed_findings (fingerprint, detector, file, line, message)
+             VALUES (?, ?, ?, 0, ?)
+             ON CONFLICT(fingerprint) DO NOTHING",
+            fingerprint,
+            detector,
+            file,
+            message
+        )?;
+        crate::metrics::record_dismissal();
         let _ = crate::learning::mine::promote_dismissal_to_rule(self, detector, file, message)
             .await;
         Ok(())
@@ -137,41 +101,49 @@ impl LearningStore {
     }
 
     pub async fn add_rule_async(&self, rule: &crate::learning::LearnedRule) -> Result<()> {
-        sqlx::query(
-            "INSERT OR REPLACE INTO learned_rules (id, detector, file_pattern, message_pattern, action, reason)
-             VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&rule.id)
-        .bind(&rule.detector)
-        .bind(&rule.file_pattern)
-        .bind(&rule.message_pattern)
-        .bind(rule.action.as_str())
-        .bind(&rule.reason)
-        .execute(&self.pool)
-        .await?;
+        db_execute!(
+            &self.pool,
+            "INSERT INTO learned_rules (id, detector, file_pattern, message_pattern, action, reason)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               detector = excluded.detector,
+               file_pattern = excluded.file_pattern,
+               message_pattern = excluded.message_pattern,
+               action = excluded.action,
+               reason = excluded.reason",
+            &rule.id,
+            &rule.detector,
+            &rule.file_pattern,
+            &rule.message_pattern,
+            rule.action.as_str(),
+            &rule.reason
+        )?;
         Ok(())
     }
 
-    /// Count dismissals for a detector (used to auto-promote learned rules).
     pub async fn count_dismissals_for_detector(&self, detector: &str) -> Result<i64> {
-        let n: (i64,) = sqlx::query_as(
+        Ok(db_scalar!(
+            &self.pool,
+            i64,
             "SELECT COUNT(*) FROM dismissed_findings WHERE detector = ?",
-        )
-        .bind(detector)
-        .fetch_one(&self.pool)
-        .await?;
-        Ok(n.0)
+            detector
+        )?)
+    }
+
+    pub async fn count_dismissals_total(&self) -> Result<i64> {
+        Ok(db_scalar!(
+            &self.pool,
+            i64,
+            "SELECT COUNT(*) FROM dismissed_findings"
+        )?)
     }
 
     #[cfg(test)]
     pub fn clear_for_test(&self) -> Result<()> {
         block_on(async {
-            sqlx::query("DELETE FROM dismissed_findings")
-                .execute(&self.pool)
-                .await?;
-            sqlx::query("DELETE FROM learned_rules")
-                .execute(&self.pool)
-                .await
+            db_execute!(&self.pool, "DELETE FROM dismissed_findings")?;
+            db_execute!(&self.pool, "DELETE FROM learned_rules")?;
+            Ok::<_, sqlx::Error>(())
         })?;
         Ok(())
     }
@@ -195,11 +167,23 @@ impl LearningStore {
             let sql = format!(
                 "SELECT fingerprint FROM dismissed_findings WHERE fingerprint IN ({placeholders})"
             );
-            let mut q = sqlx::query_as::<_, (String,)>(&sql);
-            for fp in chunk {
-                q = q.bind(fp);
-            }
-            let rows = q.fetch_all(&self.pool).await?;
+            let prepared = self.pool.prepare_sql(&sql);
+            let rows: Vec<(String,)> = match &self.pool {
+                DbPool::Sqlite(p) => {
+                    let mut q = sqlx::query_as::<_, (String,)>(&prepared);
+                    for fp in chunk {
+                        q = q.bind(fp);
+                    }
+                    q.fetch_all(p).await?
+                }
+                DbPool::Postgres(p) => {
+                    let mut q = sqlx::query_as::<_, (String,)>(&prepared);
+                    for fp in chunk {
+                        q = q.bind(fp);
+                    }
+                    q.fetch_all(p).await?
+                }
+            };
             for (fp,) in rows {
                 dismissed_set.insert(fp);
             }
@@ -211,11 +195,11 @@ impl LearningStore {
             message_pattern: Option<String>,
             action: String,
         }
-        let rules: Vec<Rule> = sqlx::query_as::<_, (String, Option<String>, Option<String>, String)>(
-            "SELECT detector, file_pattern, message_pattern, action FROM learned_rules",
-        )
-        .fetch_all(&self.pool)
-        .await?
+        let rules: Vec<Rule> = db_fetch_all!(
+            &self.pool,
+            (String, Option<String>, Option<String>, String),
+            "SELECT detector, file_pattern, message_pattern, action FROM learned_rules"
+        )?
         .into_iter()
         .map(|(detector, file_pattern, message_pattern, action)| Rule {
             detector,
@@ -225,14 +209,12 @@ impl LearningStore {
         })
         .collect();
 
-        let short_prefixes: Vec<String> = sqlx::query_as::<_, (String,)>(
-            "SELECT fingerprint FROM dismissed_findings WHERE length(fingerprint) BETWEEN 8 AND 63",
-        )
-        .fetch_all(&self.pool)
-        .await?
-        .into_iter()
-        .map(|(fp,)| fp)
-        .collect();
+        let short_sql =
+            "SELECT fingerprint FROM dismissed_findings WHERE length(fingerprint) BETWEEN 8 AND 63";
+        let short_prefixes: Vec<String> = db_fetch_all!(&self.pool, (String,), short_sql)?
+            .into_iter()
+            .map(|(fp,)| fp)
+            .collect();
 
         Ok(findings
             .iter()

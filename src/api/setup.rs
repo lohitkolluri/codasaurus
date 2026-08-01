@@ -151,12 +151,13 @@ async fn setup_status(State(state): State<AppState>) -> Result<Json<SetupStatus>
         .is_some()
         || std::env::var("OPENROUTER_API_KEY").is_ok();
 
-    let admin: bool =
-        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE role = 'admin'")
-            .fetch_one(&state.pool.0)
-            .await
-            .map(|count| count > 0)
-            .unwrap_or(false);
+    let admin: bool = crate::db::db_scalar!(
+        &state.pool,
+        i64,
+        "SELECT COUNT(*) FROM users WHERE role = 'admin'"
+    )
+    .map(|count| count > 0)
+    .unwrap_or(false);
 
     let complete = database && llm && github && admin;
 
@@ -184,8 +185,9 @@ async fn setup_database(
             // Validate by running a query on the existing pool instead of
             // creating a new connection (which would use a relative path
             // from the CWD inside the container).
-            sqlx::query_scalar::<_, i64>("SELECT 1")
-                .fetch_one(&state.pool.0)
+            state
+                .pool
+                .ping()
                 .await
                 .map_err(|e| ApiError::bad_request(format!("Test query failed: {e}")))?;
 

@@ -1,67 +1,65 @@
 # Operations: Backup & Restore
 
-Codasaurus persists everything in one SQLite database (`DATABASE_URL`, default
-`sqlite://$CODASAURUS_DATA_DIR/codasaurus.db`).
+Codasaurus persists state in SQLite (default) or PostgreSQL when
+`DATABASE_URL=postgres://…` / `postgresql://…`.
 
 ## What to back up
 
-| Path / var | Contents |
-| --- | --- |
-| `CODASAURUS_DATA_DIR` (default OS data dir) | `codasaurus.db` (+ `-wal` / `-shm` if hot) |
-| Docker volume `/data` | Same when using the official image |
-| Env / secrets store | `GITHUB_APP_*`, `OPENROUTER_API_KEY`, webhook secret |
+| Path / var                                  | Contents                                                                      |
+| ------------------------------------------- | ----------------------------------------------------------------------------- |
+| `CODASAURUS_DATA_DIR` (default OS data dir) | `codasaurus.db` (+ `-wal` / `-shm` if hot) — SQLite mode                      |
+| Docker volume `/data`                       | Same when using the official image                                            |
+| Postgres volume / managed DB                | Full DB when using `docker-compose.postgres.yml`                              |
+| Env / secrets store                         | `GITHUB_APP_*`, `OPENROUTER_API_KEY`, webhook secret, `OIDC_*`, ticket tokens |
 
 Dashboard settings, repos, reviews, dismissals, learned rules, and `review_jobs`
-all live in that SQLite file.
+all live in that database.
 
-## Hot backup (recommended)
+## Hot backup — SQLite (recommended)
 
 While the server is running (WAL mode):
 
 ```bash
-# Inside the data directory
 sqlite3 codasaurus.db "PRAGMA wal_checkpoint(TRUNCATE);"
 sqlite3 codasaurus.db ".backup 'codasaurus-backup-$(date +%Y%m%d).db'"
 ```
 
-Or copy after checkpoint:
+## Hot backup — Postgres
 
 ```bash
-sqlite3 "$CODASAURUS_DATA_DIR/codasaurus.db" "PRAGMA wal_checkpoint(FULL);"
-cp "$CODASAURUS_DATA_DIR/codasaurus.db" "/backups/codasaurus-$(date +%Y%m%d%H%M).db"
+pg_dump "$DATABASE_URL" -Fc -f "codasaurus-$(date +%Y%m%d).dump"
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml exec postgres \
+  pg_dump -U codasaurus -Fc codasaurus > "codasaurus-$(date +%Y%m%d).dump"
 ```
 
-## Cold backup
-
-```bash
-# Stop the process / compose stack first
-docker compose stop
-cp ./data/codasaurus.db ./backups/codasaurus.db
-docker compose start
-```
-
-## Restore
+## Restore — SQLite
 
 1. Stop Codasaurus.
-2. Replace the DB file with the backup (keep permissions owned by the runtime user).
-3. Remove stale WAL/SHM if present: `rm -f codasaurus.db-wal codasaurus.db-shm`
-4. Start Codasaurus. Migrations are idempotent and will no-op on a current schema.
+2. Replace the DB file; remove stale WAL/SHM: `rm -f codasaurus.db-wal codasaurus.db-shm`
+3. Start Codasaurus.
+
+## Restore — Postgres
 
 ```bash
-docker compose stop
-cp ./backups/codasaurus-YYYYMMDD.db ./data/codasaurus.db
-rm -f ./data/codasaurus.db-wal ./data/codasaurus.db-shm
-docker compose start
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml stop codasaurus
+pg_restore -d "$DATABASE_URL" --clean --if-exists codasaurus-YYYYMMDD.dump
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml start codasaurus
 ```
 
 ## Multi-replica notes
 
-- SQLite is single-writer. Run **one** `codasaurus serve` writer, or put the DB on
-  networked block storage only if you accept SQLite locking limits.
-- SHA leases use `lease_owner` (`HOSTNAME`/`CODASAURUS_INSTANCE_ID` + pid) so a
-  second replica will not steal an active in-progress review until the lease is
-  stale (~10 minutes).
-- For true HA, plan a Postgres dual-backend (not enabled as the runtime DB yet).
+- **SQLite** is single-writer — one `codasaurus serve` writer.
+- **Postgres** is the production HA path; workers claim jobs with `FOR UPDATE SKIP LOCKED`.
+- SHA leases use `lease_owner` (`HOSTNAME` / `CODASAURUS_INSTANCE_ID` + pid).
+- Overlay: `docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d`
+
+## Success metric targets (measurement, not hard fail)
+
+| Signal                                          | Target                                    |
+| ----------------------------------------------- | ----------------------------------------- |
+| `codasaurus_review_latency_ms{quantile="0.95"}` | under 60000 ms for ≤200-file PRs          |
+| `codasaurus_fp_proxy_ratio`                     | under 0.05 (dismissals / Tier-1 findings) |
+| `codasaurus_queue_depth`                        | alert if pending grows without completing |
 
 ## Health checks
 
@@ -69,6 +67,3 @@ docker compose start
 curl -sf http://localhost:3000/health
 curl -sf http://localhost:3000/metrics | head
 ```
-
-`codasaurus_review_latency_ms`, `codasaurus_github_429_total`, and
-`codasaurus_queue_*` counters are useful for capacity alerts.

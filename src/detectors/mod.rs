@@ -9,6 +9,7 @@ use std::sync::{LazyLock, Mutex};
 pub mod graph;
 pub mod guidelines;
 pub mod hallucinated_imports;
+pub mod iac;
 pub mod phantom_deps;
 pub mod security;
 pub mod slop;
@@ -133,6 +134,10 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
 
     if config.checks.graph {
         all.extend(graph::detect(parsed_files));
+    }
+
+    if config.checks.iac {
+        all.extend(iac::detect(parsed_files));
     }
 
     // Guidelines run via detect_remote on the bot path (GitHub Contents), not local git.

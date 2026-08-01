@@ -45,11 +45,11 @@ async fn manage_url(State(state): State<AppState>) -> Result<Json<serde_json::Va
         .flatten();
 
     if let Some(slug) = slug {
-        let install_id: Option<i64> = sqlx::query_scalar(
-            "SELECT installation_id FROM repos WHERE installation_id IS NOT NULL LIMIT 1",
+        let install_id: Option<i64> = crate::db::db_scalar_optional!(
+            &state.pool,
+            i64,
+            "SELECT installation_id FROM repos WHERE installation_id IS NOT NULL LIMIT 1"
         )
-        .fetch_optional(&state.pool.0)
-        .await
         .ok()
         .flatten();
 

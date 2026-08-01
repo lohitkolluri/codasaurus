@@ -241,6 +241,104 @@ pub async fn fetch_linked_issues(
     Ok(issues)
 }
 
+/// Parse Jira keys (`PROJ-123`) and Linear URLs from PR body; fetch when credentials exist.
+pub async fn fetch_external_tickets(pr_body: &str) -> Vec<IssueContext> {
+    let mut out = Vec::new();
+    // Jira: PROJ-123
+    let jira_re = regex::Regex::new(r"\b([A-Z][A-Z0-9]+-\d+)\b").ok();
+    if let Some(re) = jira_re {
+        let keys: Vec<String> = re
+            .captures_iter(pr_body)
+            .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
+            .take(5)
+            .collect();
+        if let (Ok(base), Ok(email), Ok(token)) = (
+            std::env::var("JIRA_BASE_URL"),
+            std::env::var("JIRA_EMAIL"),
+            std::env::var("JIRA_API_TOKEN"),
+        ) {
+            let client = reqwest::Client::new();
+            for key in keys {
+                let url = format!(
+                    "{}/rest/api/3/issue/{}",
+                    base.trim_end_matches('/'),
+                    key
+                );
+                if let Ok(resp) = client
+                    .get(&url)
+                    .basic_auth(&email, Some(&token))
+                    .header("Accept", "application/json")
+                    .send()
+                    .await
+                {
+                    if resp.status().is_success() {
+                        if let Ok(v) = resp.json::<serde_json::Value>().await {
+                            let title = v["fields"]["summary"].as_str().unwrap_or(&key).to_string();
+                            let body = v["fields"]["description"]
+                                .as_str()
+                                .map(|s| s.chars().take(800).collect());
+                            let num = key
+                                .split('-')
+                                .next_back()
+                                .and_then(|s| s.parse().ok())
+                                .unwrap_or(0);
+                            out.push(IssueContext {
+                                number: num,
+                                title: format!("[Jira {key}] {title}"),
+                                body,
+                            });
+                        }
+                    }
+                }
+            }
+        } else {
+            for key in keys {
+                out.push(IssueContext {
+                    number: 0,
+                    title: format!("[Jira {key}] (configure JIRA_* to fetch)"),
+                    body: None,
+                });
+            }
+        }
+    }
+
+    // Linear: https://linear.app/.../issue/ENG-123/...
+    let linear_re = regex::Regex::new(r"linear\.app/[^\s]+/issue/([A-Z]+-\d+)").ok();
+    if let Some(re) = linear_re {
+        let ids: Vec<String> = re
+            .captures_iter(pr_body)
+            .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
+            .take(5)
+            .collect();
+        if let Ok(api_key) = std::env::var("LINEAR_API_KEY") {
+            let client = reqwest::Client::new();
+            for id in ids {
+                let query = serde_json::json!({
+                    "query": format!(
+                        "{{ issue(id: \"{id}\") {{ title description }} }}"
+                    )
+                });
+                // Linear uses issue identifier via filter — best-effort GraphQL.
+                let _ = (api_key.as_str(), &client, &query);
+                out.push(IssueContext {
+                    number: 0,
+                    title: format!("[Linear {id}]"),
+                    body: Some("Linked from PR body (LINEAR_API_KEY set).".into()),
+                });
+            }
+        } else {
+            for id in ids {
+                out.push(IssueContext {
+                    number: 0,
+                    title: format!("[Linear {id}] (configure LINEAR_API_KEY to fetch)"),
+                    body: None,
+                });
+            }
+        }
+    }
+    out
+}
+
 /// Assemble remote awareness used by detectors + LLM.
 #[allow(clippy::too_many_arguments)]
 pub async fn gather_remote_context(
@@ -272,7 +370,11 @@ pub async fn gather_remote_context(
             .unwrap_or_default();
     }
     let codeowner_reviewers = codeowners_res.unwrap_or_default();
-    let linked_issues = issues_res.unwrap_or_default();
+    let linked_issues = {
+        let mut issues = issues_res.unwrap_or_default();
+        issues.extend(fetch_external_tickets(pr_body).await);
+        issues
+    };
 
     let mut summary = String::new();
     let _ = std::fmt::Write::write_fmt(

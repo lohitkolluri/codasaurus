@@ -1,5 +1,6 @@
 pub mod audit;
 pub mod config;
+pub mod dialect;
 pub mod migrations;
 pub mod models;
 pub mod repos;
@@ -9,14 +10,55 @@ pub mod users;
 
 pub use models::*;
 
+use sqlx::postgres::PgPoolOptions;
+use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::{PgPool, SqlitePool};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    Sqlite,
+    Postgres,
+}
+
+/// Dual-backend pool: SQLite (default) or Postgres (production HA).
 #[derive(Clone)]
-pub struct DbPool(pub sqlx::Pool<sqlx::Sqlite>);
+pub enum DbPool {
+    Sqlite(SqlitePool),
+    Postgres(PgPool),
+}
 
-impl std::ops::Deref for DbPool {
-    type Target = sqlx::Pool<sqlx::Sqlite>;
+impl DbPool {
+    pub fn backend(&self) -> Backend {
+        match self {
+            Self::Sqlite(_) => Backend::Sqlite,
+            Self::Postgres(_) => Backend::Postgres,
+        }
+    }
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    pub fn is_postgres(&self) -> bool {
+        matches!(self, Self::Postgres(_))
+    }
+
+    pub fn prepare_sql(&self, sql: &str) -> String {
+        dialect::prepare(sql, self.backend())
+    }
+
+    /// Lightweight connectivity probe.
+    pub async fn ping(&self) -> Result<(), sqlx::Error> {
+        match self {
+            Self::Sqlite(p) => {
+                sqlx::query_scalar::<_, i64>("SELECT 1")
+                    .fetch_one(p)
+                    .await
+                    .map(|_| ())
+            }
+            Self::Postgres(p) => {
+                sqlx::query_scalar::<_, i64>("SELECT 1")
+                    .fetch_one(p)
+                    .await
+                    .map(|_| ())
+            }
+        }
     }
 }
 
@@ -51,18 +93,28 @@ pub fn normalize_database_url(raw: &str) -> String {
     raw.to_string()
 }
 
-/// Create a SQLite pool from a database URL, run migrations, and return a `DbPool`.
-///
-/// Runtime storage is SQLite-only in this release. Postgres URLs are rejected with a
-/// clear error (wizard connection tests may still validate Postgres separately).
+/// Create a pool from `DATABASE_URL` (sqlite:// or postgres://), run migrations.
 pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
     let normalized = normalize_database_url(database_url);
     if normalized.starts_with("postgres://") || normalized.starts_with("postgresql://") {
-        return Err(sqlx::Error::Configuration(
-            "PostgreSQL runtime is not enabled yet — set DATABASE_URL to sqlite://… (e.g. sqlite:///data/codasaurus.db?mode=rwc)".into(),
-        ));
+        let pool = PgPoolOptions::new()
+            .max_connections(20)
+            .connect(&normalized)
+            .await?;
+        migrations::run_migrations_postgres(&pool).await?;
+        Ok(DbPool::Postgres(pool))
+    } else {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(8)
+            .connect(&normalized)
+            .await?;
+        migrations::run_migrations_sqlite(&pool).await?;
+        Ok(DbPool::Sqlite(pool))
     }
-    let pool = sqlx::SqlitePool::connect(&normalized).await?;
-    migrations::run_migrations(&pool).await?;
-    Ok(DbPool(pool))
 }
+
+mod macros;
+
+pub(crate) use macros::{
+    db_execute, db_fetch_all, db_fetch_one, db_fetch_optional, db_scalar, db_scalar_optional,
+};

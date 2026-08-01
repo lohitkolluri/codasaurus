@@ -1,7 +1,4 @@
-/// Cross-database compatible schema for both SQLite and PostgreSQL.
-/// The SQLite schema is active; PostgreSQL schema is defined as a constant
-/// for future use once the runtime driver registration is resolved.
-use sqlx::SqlitePool;
+use sqlx::{PgPool, SqlitePool};
 
 /// Active SQLite schema.
 const SQLITE_SCHEMA: &str = "
@@ -200,7 +197,7 @@ CREATE INDEX IF NOT EXISTS idx_dismissed_fingerprint ON dismissed_findings(finge
 CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector);
 ";
 
-pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+pub async fn run_migrations_sqlite(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS schema_version (
             version BIGINT PRIMARY KEY,
@@ -350,6 +347,213 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .await?;
     }
 
+    if current < 8 {
+        let _ = sqlx::query(
+            "ALTER TABLE users ADD COLUMN auth_provider TEXT NOT NULL DEFAULT 'local'",
+        )
+        .execute(pool)
+        .await;
+        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (8)")
+            .execute(pool)
+            .await?;
+    }
+
+    Ok(())
+}
+
+const PG_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS schema_version (
+    version BIGINT PRIMARY KEY,
+    applied_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE TABLE IF NOT EXISTS app_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE TABLE IF NOT EXISTS repos (
+    id BIGSERIAL PRIMARY KEY,
+    github_id BIGINT UNIQUE,
+    full_name TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    name TEXT NOT NULL,
+    default_branch TEXT,
+    installation_id BIGINT NOT NULL,
+    private BOOLEAN NOT NULL DEFAULT FALSE,
+    active BOOLEAN NOT NULL DEFAULT FALSE,
+    config_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (NOW()::text),
+    updated_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE INDEX IF NOT EXISTS idx_repos_owner ON repos(owner);
+CREATE INDEX IF NOT EXISTS idx_repos_active ON repos(active);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_repos_full_name ON repos(full_name);
+
+CREATE TABLE IF NOT EXISTS reviews (
+    id BIGSERIAL PRIMARY KEY,
+    repo_id BIGINT NOT NULL REFERENCES repos(id),
+    pr_number BIGINT NOT NULL,
+    pr_title TEXT,
+    pr_author TEXT,
+    pr_base_branch TEXT,
+    pr_head_branch TEXT,
+    pr_head_sha TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'running', 'passed', 'failed', 'error')),
+    summary_json TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE INDEX IF NOT EXISTS idx_reviews_repo ON reviews(repo_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status);
+CREATE INDEX IF NOT EXISTS idx_reviews_created ON reviews(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reviews_repo_created ON reviews(repo_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reviews_repo_status ON reviews(repo_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_repo_pr_sha
+    ON reviews(repo_id, pr_number, pr_head_sha);
+
+CREATE TABLE IF NOT EXISTS findings (
+    id BIGSERIAL PRIMARY KEY,
+    review_id BIGINT NOT NULL REFERENCES reviews(id),
+    fingerprint TEXT UNIQUE,
+    file_path TEXT NOT NULL,
+    line_start INTEGER,
+    line_end INTEGER,
+    column_start INTEGER,
+    column_end INTEGER,
+    severity TEXT NOT NULL CHECK (severity IN ('blocking', 'warning', 'info')),
+    detector TEXT NOT NULL,
+    rule_id TEXT,
+    message TEXT NOT NULL,
+    suggested_fix TEXT,
+    code_snippet TEXT,
+    context TEXT,
+    category TEXT,
+    created_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE INDEX IF NOT EXISTS idx_findings_review ON findings(review_id);
+CREATE INDEX IF NOT EXISTS idx_findings_file ON findings(file_path);
+CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
+CREATE INDEX IF NOT EXISTS idx_findings_fingerprint ON findings(fingerprint);
+
+CREATE TABLE IF NOT EXISTS dismissals (
+    id BIGSERIAL PRIMARY KEY,
+    fingerprint TEXT NOT NULL,
+    dismissed_by TEXT,
+    reason TEXT,
+    created_at TEXT NOT NULL DEFAULT (NOW()::text),
+    UNIQUE(fingerprint)
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id BIGSERIAL PRIMARY KEY,
+    event_type TEXT NOT NULL,
+    actor TEXT,
+    target_type TEXT,
+    target_id BIGINT,
+    metadata_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_log(event_type);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS users (
+    id BIGSERIAL PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin', 'viewer')),
+    auth_provider TEXT NOT NULL DEFAULT 'local',
+    created_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (NOW()::text),
+    expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+    delivery_id TEXT PRIMARY KEY,
+    received_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE TABLE IF NOT EXISTS review_comments (
+    repo_pr TEXT PRIMARY KEY,
+    comment_id BIGINT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE TABLE IF NOT EXISTS reviewed_commits (
+    repo_pr TEXT PRIMARY KEY,
+    head_sha TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'completed'
+        CHECK (status IN ('in_progress', 'completed')),
+    lease_owner TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE TABLE IF NOT EXISTS dismissed_findings (
+    fingerprint TEXT PRIMARY KEY,
+    detector TEXT NOT NULL,
+    file TEXT NOT NULL,
+    line INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    dismissed_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE TABLE IF NOT EXISTS learned_rules (
+    id TEXT PRIMARY KEY,
+    detector TEXT NOT NULL,
+    file_pattern TEXT,
+    message_pattern TEXT,
+    action TEXT NOT NULL DEFAULT 'ignore',
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dismissed_fingerprint ON dismissed_findings(fingerprint);
+CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector);
+
+CREATE TABLE IF NOT EXISTS review_jobs (
+    id BIGSERIAL PRIMARY KEY,
+    repo TEXT NOT NULL,
+    pr_number BIGINT NOT NULL,
+    head_sha TEXT NOT NULL,
+    installation_id BIGINT,
+    action TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'running', 'done', 'failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (NOW()::text),
+    updated_at TEXT NOT NULL DEFAULT (NOW()::text)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_review_jobs_repo_pr_sha
+    ON review_jobs(repo, pr_number, head_sha);
+CREATE INDEX IF NOT EXISTS idx_review_jobs_status_created
+    ON review_jobs(status, created_at);
+"#;
+
+pub async fn run_migrations_postgres(pool: &PgPool) -> Result<(), sqlx::Error> {
+    for statement in split_sql(PG_SCHEMA) {
+        sqlx::query(&statement).execute(pool).await?;
+    }
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (8) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

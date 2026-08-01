@@ -51,6 +51,9 @@ pub fn router() -> Router<AppState> {
         .route("/login", post(login))
         .route("/me", get(me))
         .route("/logout", post(logout))
+        .route("/oidc/status", get(oidc_status))
+        .route("/oidc/login", get(oidc_login))
+        .route("/oidc/callback", get(oidc_callback))
 }
 
 // ---------------------------------------------------------------------------
@@ -156,11 +159,13 @@ async fn login(
 async fn me(State(state): State<AppState>, headers: axum::http::HeaderMap) -> Json<MeResponse> {
     if let Some(token) = extract_token(&headers) {
         if let Ok(Some(email)) = db::sessions::get_session(&state.pool, &token).await {
-            let role: String = sqlx::query_scalar("SELECT role FROM users WHERE email = ?")
-                .bind(&email)
-                .fetch_one(&state.pool.0)
-                .await
-                .unwrap_or_else(|_| "admin".into());
+            let role: String = crate::db::db_scalar!(
+                &state.pool,
+                String,
+                "SELECT role FROM users WHERE email = ?",
+                &email
+            )
+            .unwrap_or_else(|_| "admin".into());
 
             return Json(MeResponse {
                 authenticated: true,
@@ -187,6 +192,63 @@ async fn logout(
         [(header::SET_COOKIE, clear_cookie())],
         Json(json!({ "status": "ok" })),
     )
+}
+
+async fn oidc_status() -> Json<serde_json::Value> {
+    Json(json!({ "enabled": crate::oidc::OidcConfig::enabled() }))
+}
+
+async fn oidc_login() -> Result<impl IntoResponse, ApiError> {
+    let cfg = crate::oidc::OidcConfig::from_env()
+        .ok_or_else(|| ApiError::bad_request("OIDC is not configured"))?;
+    let (url, _state) = crate::oidc::authorization_url(&cfg)
+        .await
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    Ok(axum::response::Redirect::temporary(&url))
+}
+
+#[derive(Deserialize)]
+struct OidcCallbackParams {
+    code: Option<String>,
+    state: Option<String>,
+    error: Option<String>,
+}
+
+async fn oidc_callback(
+    State(state): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<OidcCallbackParams>,
+) -> Result<impl IntoResponse, ApiError> {
+    if let Some(err) = params.error {
+        return Err(ApiError::bad_request(format!("OIDC error: {err}")));
+    }
+    let code = params
+        .code
+        .ok_or_else(|| ApiError::bad_request("missing code"))?;
+    let state_param = params
+        .state
+        .ok_or_else(|| ApiError::bad_request("missing state"))?;
+    if !crate::oidc::take_state(&state_param) {
+        return Err(ApiError::bad_request("invalid or expired OIDC state"));
+    }
+    let cfg = crate::oidc::OidcConfig::from_env()
+        .ok_or_else(|| ApiError::bad_request("OIDC is not configured"))?;
+    let email = crate::oidc::exchange_code(&cfg, &code)
+        .await
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let _user = db::users::upsert_oidc_user(&state.pool, &email, "admin")
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let token = db::sessions::create_session(&state.pool, &email)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let cookie = set_cookie(&token);
+    Ok((
+        StatusCode::SEE_OTHER,
+        [
+            (header::SET_COOKIE, cookie),
+            (header::LOCATION, "/#/app/dashboard".into()),
+        ],
+    ))
 }
 
 #[cfg(test)]

@@ -45,17 +45,13 @@ async fn list_audit(
 
     // Total count (matching filter)
     let total: i64 = match event_type {
-        Some(et) => {
-            sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE event_type = ?")
-                .bind(et)
-                .fetch_one(&state.pool.0)
-                .await?
-        }
-        None => {
-            sqlx::query_scalar("SELECT COUNT(*) FROM audit_log")
-                .fetch_one(&state.pool.0)
-                .await?
-        }
+        Some(et) => crate::db::db_scalar!(
+            &state.pool,
+            i64,
+            "SELECT COUNT(*) FROM audit_log WHERE event_type = ?",
+            et
+        )?,
+        None => crate::db::db_scalar!(&state.pool, i64, "SELECT COUNT(*) FROM audit_log")?,
     };
 
     Ok(Json(json!({

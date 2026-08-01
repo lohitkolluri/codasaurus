@@ -36,15 +36,15 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
         created_at: String,
     }
 
-    let recent_activity = sqlx::query_as::<_, RecentReview>(
+    let recent_activity = crate::db::db_fetch_all!(
+        &state.pool,
+        RecentReview,
         "SELECT r.id, COALESCE(repo.full_name, '') AS repo_name, r.pr_number, r.pr_title, r.status, r.created_at
          FROM reviews r
          LEFT JOIN repos repo ON repo.id = r.repo_id
          ORDER BY r.created_at DESC
-         LIMIT 10",
-    )
-    .fetch_all(&state.pool.0)
-    .await?;
+         LIMIT 10"
+    )?;
 
     let activity: Vec<serde_json::Value> = recent_activity
         .into_iter()

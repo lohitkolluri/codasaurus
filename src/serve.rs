@@ -207,10 +207,7 @@ async fn resolve_bot_config(
 
 async fn health_handler() -> impl IntoResponse {
     let db_ok = if let Some(pool) = crate::bot::CONFIG_POOL.get() {
-        sqlx::query_scalar::<_, i64>("SELECT 1")
-            .fetch_one(&pool.0)
-            .await
-            .is_ok()
+        pool.ping().await.is_ok()
     } else {
         false
     };
@@ -233,6 +230,9 @@ async fn health_handler() -> impl IntoResponse {
 }
 
 async fn metrics_handler() -> impl IntoResponse {
+    if let Some(pool) = crate::bot::CONFIG_POOL.get() {
+        crate::metrics::refresh_from_db(pool).await;
+    }
     let body = crate::metrics::render_prometheus();
     (
         StatusCode::OK,

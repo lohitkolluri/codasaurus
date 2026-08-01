@@ -15,6 +15,10 @@ static LLM_ERRORS: AtomicU64 = AtomicU64::new(0);
 static LLM_PROMPT_CHARS: AtomicU64 = AtomicU64::new(0);
 static QUEUE_ENQUEUED: AtomicU64 = AtomicU64::new(0);
 static QUEUE_COMPLETED: AtomicU64 = AtomicU64::new(0);
+static DISMISSALS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static TIER1_FINDINGS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static QUEUE_PENDING: AtomicU64 = AtomicU64::new(0);
+static QUEUE_RUNNING: AtomicU64 = AtomicU64::new(0);
 
 /// Rolling latency samples (milliseconds) for approximate p50/p95.
 static LATENCIES_MS: OnceLock<Mutex<VecDeque<u64>>> = OnceLock::new();
@@ -68,6 +72,32 @@ pub fn record_queue_completed() {
     QUEUE_COMPLETED.fetch_add(1, Ordering::Relaxed);
 }
 
+pub fn record_tier1_findings(n: usize) {
+    TIER1_FINDINGS_TOTAL.fetch_add(n as u64, Ordering::Relaxed);
+}
+
+pub fn record_dismissal() {
+    DISMISSALS_TOTAL.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Refresh DB-backed gauges (queue depth, dismissals) before scrape.
+pub async fn refresh_from_db(pool: &crate::db::DbPool) {
+    if let Ok((pending, running)) = crate::bot::queue::queue_depth(pool).await {
+        QUEUE_PENDING.store(pending as u64, Ordering::Relaxed);
+        QUEUE_RUNNING.store(running as u64, Ordering::Relaxed);
+    }
+    if let Ok(n) = crate::db::db_scalar!(pool, i64, "SELECT COUNT(*) FROM dismissed_findings") {
+        DISMISSALS_TOTAL.store(n as u64, Ordering::Relaxed);
+    }
+    if let Ok(n) = crate::db::db_scalar!(
+        pool,
+        i64,
+        "SELECT COUNT(*) FROM findings WHERE detector IN ('secrets', 'vulnerabilities', 'iac')"
+    ) {
+        TIER1_FINDINGS_TOTAL.store(n as u64, Ordering::Relaxed);
+    }
+}
+
 fn percentile(sorted: &[u64], p: f64) -> u64 {
     if sorted.is_empty() {
         return 0;
@@ -86,6 +116,15 @@ pub fn render_prometheus() -> String {
     let p50 = percentile(&samples, 50.0);
     let p95 = percentile(&samples, 95.0);
     let count = samples.len() as u64;
+    let dismissals = DISMISSALS_TOTAL.load(Ordering::Relaxed);
+    let tier1 = TIER1_FINDINGS_TOTAL.load(Ordering::Relaxed);
+    let fp_ratio = if tier1 == 0 {
+        0.0
+    } else {
+        dismissals as f64 / tier1 as f64
+    };
+    let q_pending = QUEUE_PENDING.load(Ordering::Relaxed);
+    let q_running = QUEUE_RUNNING.load(Ordering::Relaxed);
 
     format!(
         "# HELP codasaurus_up Codasaurus process is up\n\
@@ -130,7 +169,20 @@ pub fn render_prometheus() -> String {
          codasaurus_queue_enqueued_total {}\n\
          # HELP codasaurus_queue_completed_total Review jobs completed\n\
          # TYPE codasaurus_queue_completed_total counter\n\
-         codasaurus_queue_completed_total {}\n",
+         codasaurus_queue_completed_total {}\n\
+         # HELP codasaurus_queue_depth Review jobs by status\n\
+         # TYPE codasaurus_queue_depth gauge\n\
+         codasaurus_queue_depth{{status=\"pending\"}} {q_pending}\n\
+         codasaurus_queue_depth{{status=\"running\"}} {q_running}\n\
+         # HELP codasaurus_dismissals_total Dismissed findings (FP proxy numerator)\n\
+         # TYPE codasaurus_dismissals_total gauge\n\
+         codasaurus_dismissals_total {dismissals}\n\
+         # HELP codasaurus_tier1_findings_total Tier-1 findings stored\n\
+         # TYPE codasaurus_tier1_findings_total gauge\n\
+         codasaurus_tier1_findings_total {tier1}\n\
+         # HELP codasaurus_fp_proxy_ratio dismissals / tier1 findings\n\
+         # TYPE codasaurus_fp_proxy_ratio gauge\n\
+         codasaurus_fp_proxy_ratio {fp_ratio:.6}\n",
         env!("CARGO_PKG_VERSION"),
         REVIEWS_TOTAL.load(Ordering::Relaxed),
         REVIEWS_FAILED.load(Ordering::Relaxed),
@@ -161,5 +213,7 @@ mod tests {
         assert!(body.contains("codasaurus_up 1"));
         assert!(body.contains("codasaurus_reviews_total"));
         assert!(body.contains("codasaurus_github_429_total"));
+        assert!(body.contains("codasaurus_queue_depth"));
+        assert!(body.contains("codasaurus_fp_proxy_ratio"));
     }
 }

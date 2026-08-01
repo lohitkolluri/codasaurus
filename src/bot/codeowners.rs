@@ -99,7 +99,7 @@ docs/ @docs
         assert_eq!(rules.len(), 3);
         let owners = owners_for_paths(
             &rules,
-            &["src/bot/review.rs".into(), "lib.rs".into()],
+            &["src/bot/review/pipeline.rs".into(), "lib.rs".into()],
         );
         assert!(owners.iter().any(|o| o == "bot-owners" || o == "alice"));
         assert!(owners.iter().any(|o| o == "rust-team"));

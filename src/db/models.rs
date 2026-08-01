@@ -121,7 +121,13 @@ pub struct User {
     #[serde(skip_serializing)]
     pub password_hash: String,
     pub role: String,
+    #[serde(default = "default_auth_provider")]
+    pub auth_provider: String,
     pub created_at: String,
+}
+
+fn default_auth_provider() -> String {
+    "local".into()
 }
 
 /// Public-facing user data — never contains the password hash.

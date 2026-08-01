@@ -146,10 +146,7 @@ async fn delete_github_settings(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     for key in GITHUB_KEYS {
-        sqlx::query("DELETE FROM app_config WHERE key = ?")
-            .bind(key)
-            .execute(&state.pool.0)
-            .await?;
+        crate::db::db_execute!(&state.pool, "DELETE FROM app_config WHERE key = ?", key)?;
     }
     Ok(Json(
         json!({ "status": "ok", "message": "GitHub App configuration removed" }),
@@ -160,10 +157,7 @@ async fn rotate_github_credentials(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     for key in GITHUB_KEYS {
-        sqlx::query("DELETE FROM app_config WHERE key = ?")
-            .bind(key)
-            .execute(&state.pool.0)
-            .await?;
+        crate::db::db_execute!(&state.pool, "DELETE FROM app_config WHERE key = ?", key)?;
     }
     Ok(Json(
         json!({ "status": "ok", "message": "Credentials cleared. Re-run the manifest flow to set up a new GitHub App." }),

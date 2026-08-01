@@ -1,29 +1,23 @@
 use crate::db::models::*;
-use crate::db::DbPool;
+use crate::db::{db_execute, db_fetch_all, db_fetch_optional, DbPool};
 
 pub async fn get_config(pool: &DbPool, key: &str) -> Result<Option<String>, sqlx::Error> {
     let result: Option<AppConfig> =
-        sqlx::query_as::<_, AppConfig>("SELECT * FROM app_config WHERE key = ?")
-            .bind(key)
-            .fetch_optional(&pool.0)
-            .await?;
+        db_fetch_optional!(pool, AppConfig, "SELECT * FROM app_config WHERE key = ?", key)?;
     Ok(result.map(|c| c.value))
 }
 
 pub async fn set_config(pool: &DbPool, key: &str, value: &str) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    db_execute!(
+        pool,
         "INSERT INTO app_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
-    )
-    .bind(key)
-    .bind(value)
-    .execute(&pool.0)
-    .await?;
+        key,
+        value
+    )?;
     Ok(())
 }
 
 pub async fn get_all_config(pool: &DbPool) -> Result<Vec<AppConfig>, sqlx::Error> {
-    sqlx::query_as::<_, AppConfig>("SELECT * FROM app_config ORDER BY key")
-        .fetch_all(&pool.0)
-        .await
+    db_fetch_all!(pool, AppConfig, "SELECT * FROM app_config ORDER BY key")
 }

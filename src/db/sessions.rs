@@ -1,47 +1,42 @@
-use crate::db::DbPool;
+use crate::db::{db_execute, db_scalar_optional, DbPool};
 use argon2::password_hash::rand_core::{OsRng, RngCore};
 
 /// Create a session for the given email. Returns the session token.
 /// Sessions expire after 7 days.
 pub async fn create_session(pool: &DbPool, email: &str) -> Result<String, sqlx::Error> {
-    // Cryptographically random 32-byte token, stored as hex (64 chars).
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
     let token = hex::encode(bytes);
 
-    sqlx::query(
+    db_execute!(
+        pool,
         "INSERT INTO sessions (token, email, expires_at)
          VALUES (?, ?, datetime('now', '+7 days'))",
-    )
-    .bind(&token)
-    .bind(email)
-    .execute(&pool.0)
-    .await?;
+        &token,
+        email
+    )?;
 
     Ok(token)
 }
 
 /// Look up a session by token. Returns the email if valid and not expired.
-/// Cleans expired sessions on each call.
 pub async fn get_session(pool: &DbPool, token: &str) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query("DELETE FROM sessions WHERE expires_at < datetime('now')")
-        .execute(&pool.0)
-        .await?;
+    db_execute!(
+        pool,
+        "DELETE FROM sessions WHERE expires_at < datetime('now')"
+    )?;
 
-    sqlx::query_scalar::<_, String>(
+    db_scalar_optional!(
+        pool,
+        String,
         "SELECT email FROM sessions WHERE token = ? AND expires_at > datetime('now')",
+        token
     )
-    .bind(token)
-    .fetch_optional(&pool.0)
-    .await
 }
 
 /// Delete a session (logout).
 pub async fn delete_session(pool: &DbPool, token: &str) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM sessions WHERE token = ?")
-        .bind(token)
-        .execute(&pool.0)
-        .await?;
+    db_execute!(pool, "DELETE FROM sessions WHERE token = ?", token)?;
     Ok(())
 }
 

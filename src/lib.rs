@@ -11,6 +11,7 @@ pub mod graph;
 pub mod learning;
 pub mod llm;
 pub mod metrics;
+pub mod oidc;
 pub mod parser;
 pub mod registry;
 pub mod retry;

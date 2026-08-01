@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from "svelte";
   import { push } from "svelte-spa-router";
   import { login } from "../stores/auth.js";
 
@@ -6,6 +7,19 @@
   let password = $state("");
   let error = $state("");
   let submitting = $state(false);
+  let oidcEnabled = $state(false);
+
+  onMount(async () => {
+    try {
+      const r = await fetch("/api/auth/oidc/status");
+      if (r.ok) {
+        const j = await r.json();
+        oidcEnabled = !!j.enabled;
+      }
+    } catch {
+      /* ignore */
+    }
+  });
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -20,6 +34,10 @@
       submitting = false;
     }
   }
+
+  function ssoLogin() {
+    window.location.href = "/api/auth/oidc/login";
+  }
 </script>
 
 <div class="login-page">
@@ -29,6 +47,13 @@
 
     {#if error}
       <div class="login-error">{error}</div>
+    {/if}
+
+    {#if oidcEnabled}
+      <button type="button" class="primary" style="width:100%;margin-bottom:16px" onclick={ssoLogin}>
+        Sign in with SSO
+      </button>
+      <p class="subtitle" style="margin-bottom:12px">or use email / password</p>
     {/if}
 
     <form onsubmit={handleSubmit}>
