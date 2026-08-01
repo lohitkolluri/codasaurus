@@ -2,8 +2,8 @@
 //!
 //! Set `CODASAURUS_TEST_DATABASE_URL=postgres://…` to run. Skipped otherwise.
 
-use codasaurus::db::{self, DbPool};
 use codasaurus::bot::queue;
+use codasaurus::db::{self, DbPool};
 
 fn pg_url() -> Option<String> {
     std::env::var("CODASAURUS_TEST_DATABASE_URL")
@@ -25,16 +25,9 @@ async fn postgres_migrations_enqueue_and_claim() {
 
     pool.ping().await.expect("ping");
 
-    let id = queue::enqueue(
-        &pool,
-        "acme/demo",
-        42,
-        "deadbeef",
-        Some(1),
-        "opened",
-    )
-    .await
-    .expect("enqueue");
+    let id = queue::enqueue(&pool, "acme/demo", 42, "deadbeef", Some(1), "opened")
+        .await
+        .expect("enqueue");
     assert!(id > 0);
 
     let job = queue::claim_next(&pool, 600)
@@ -47,7 +40,10 @@ async fn postgres_migrations_enqueue_and_claim() {
     queue::mark_done(&pool, job.id).await.expect("mark_done");
 
     // Session / user path
-    let email = format!("pg-smoke-{}@example.com", chrono::Utc::now().timestamp_millis());
+    let email = format!(
+        "pg-smoke-{}@example.com",
+        chrono::Utc::now().timestamp_millis()
+    );
     let user = db::users::create_user(&pool, &email, "test-pass-123!", "admin")
         .await
         .expect("create_user");

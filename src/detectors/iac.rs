@@ -34,8 +34,7 @@ fn scan_terraform(file: &ParsedFile) -> Vec<Finding> {
                 file: file.path.clone(),
                 line: line_no,
                 column: 0,
-                message: "Open CIDR `0.0.0.0/0` (or `::/0`) in Terraform — review exposure"
-                    .into(),
+                message: "Open CIDR `0.0.0.0/0` (or `::/0`) in Terraform — review exposure".into(),
                 suggestion: Some("Restrict ingress to known CIDRs or security groups.".into()),
                 evidence: Some(line.trim().chars().take(120).collect()),
                 codemod: None,

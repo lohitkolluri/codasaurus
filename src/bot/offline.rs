@@ -27,7 +27,11 @@ impl EgressProfile {
 /// - `Offline` — fail-closed; no LLM / registry / OSV network
 /// - `ByokOnly` — LLM configured (BYOK base URL or API key); registries allowed
 /// - `Full` — not offline, no LLM configured (Tier-1 network only)
-pub fn resolve_egress_profile(offline_mode: bool, llm_disabled: bool, has_llm_endpoint: bool) -> EgressProfile {
+pub fn resolve_egress_profile(
+    offline_mode: bool,
+    llm_disabled: bool,
+    has_llm_endpoint: bool,
+) -> EgressProfile {
     if offline_mode {
         return EgressProfile::Offline;
     }

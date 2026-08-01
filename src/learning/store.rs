@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::db::{db_execute, db_fetch_all, db_scalar, DbPool};
+use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 use tokio::runtime::{Handle, Runtime};
@@ -23,9 +23,7 @@ pub struct LearningStore {
 
 impl LearningStore {
     pub fn from_pool(pool: &DbPool) -> Self {
-        Self {
-            pool: pool.clone(),
-        }
+        Self { pool: pool.clone() }
     }
 
     pub fn open() -> Result<Self> {
@@ -91,8 +89,8 @@ impl LearningStore {
             message
         )?;
         crate::metrics::record_dismissal();
-        let _ = crate::learning::mine::promote_dismissal_to_rule(self, detector, file, message)
-            .await;
+        let _ =
+            crate::learning::mine::promote_dismissal_to_rule(self, detector, file, message).await;
         Ok(())
     }
 

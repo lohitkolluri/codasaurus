@@ -74,7 +74,10 @@ fn path_matches(pattern: &str, path: &str) -> bool {
     }
     if let Some(suffix) = pat.strip_prefix("*.") {
         return path.ends_with(&format!(".{suffix}"))
-            || path.rsplit('/').next().is_some_and(|f| f.ends_with(&format!(".{suffix}")));
+            || path
+                .rsplit('/')
+                .next()
+                .is_some_and(|f| f.ends_with(&format!(".{suffix}")));
     }
     if pat.ends_with('/') {
         return path.starts_with(pat) || path.starts_with(pat.trim_end_matches('/'));
@@ -107,9 +110,7 @@ docs/ @docs
 
     #[test]
     fn last_match_wins_per_path() {
-        let rules = parse_codeowners(
-            "* @everyone\nsrc/ @src-team\nsrc/bot/ @bot-team\n",
-        );
+        let rules = parse_codeowners("* @everyone\nsrc/ @src-team\nsrc/bot/ @bot-team\n");
         let owners = owners_for_paths(&rules, &["src/bot/mod.rs".into()]);
         assert_eq!(owners, vec!["bot-team".to_string()]);
     }

@@ -186,7 +186,10 @@ impl Default for Config {
 
 /// Map dashboard setting key `*_enabled` → CheckConfig field.
 fn apply_enabled_flag(checks: &mut CheckConfig, key: &str, value: &str) {
-    let enabled = matches!(value.to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on");
+    let enabled = matches!(
+        value.to_ascii_lowercase().as_str(),
+        "true" | "1" | "yes" | "on"
+    );
     match key {
         "hallucinated_imports_enabled" => checks.hallucinated_imports = enabled,
         "phantom_deps_enabled" => checks.phantom_deps = enabled,

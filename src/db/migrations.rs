@@ -209,8 +209,9 @@ pub async fn run_migrations_sqlite(pool: &SqlitePool) -> Result<(), sqlx::Error>
     .execute(pool)
     .await?;
 
-    let current: Option<i64> =
-        sqlx::query_scalar("SELECT MAX(version) FROM schema_version").fetch_one(pool).await?;
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
 
     let current = current.unwrap_or(0);
 
@@ -350,11 +351,10 @@ pub async fn run_migrations_sqlite(pool: &SqlitePool) -> Result<(), sqlx::Error>
     }
 
     if current < 8 {
-        let _ = sqlx::query(
-            "ALTER TABLE users ADD COLUMN auth_provider TEXT NOT NULL DEFAULT 'local'",
-        )
-        .execute(pool)
-        .await;
+        let _ =
+            sqlx::query("ALTER TABLE users ADD COLUMN auth_provider TEXT NOT NULL DEFAULT 'local'")
+                .execute(pool)
+                .await;
         sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (8)")
             .execute(pool)
             .await?;
@@ -392,11 +392,9 @@ pub async fn run_migrations_sqlite(pool: &SqlitePool) -> Result<(), sqlx::Error>
         )
         .execute(pool)
         .await?;
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_agent_events_ts ON agent_events(ts)",
-        )
-        .execute(pool)
-        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_agent_events_ts ON agent_events(ts)")
+            .execute(pool)
+            .await?;
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_agent_events_type_ts ON agent_events(event_type, ts)",
         )
@@ -621,11 +619,9 @@ pub async fn run_migrations_postgres(pool: &PgPool) -> Result<(), sqlx::Error> {
     for statement in split_sql(PG_SCHEMA) {
         sqlx::query(&statement).execute(pool).await?;
     }
-    sqlx::query(
-        "INSERT INTO schema_version (version) VALUES (8) ON CONFLICT (version) DO NOTHING",
-    )
-    .execute(pool)
-    .await?;
+    sqlx::query("INSERT INTO schema_version (version) VALUES (8) ON CONFLICT (version) DO NOTHING")
+        .execute(pool)
+        .await?;
 
     for stmt in [
         "CREATE INDEX IF NOT EXISTS idx_findings_detector ON findings(detector)",
@@ -650,11 +646,9 @@ pub async fn run_migrations_postgres(pool: &PgPool) -> Result<(), sqlx::Error> {
     ] {
         sqlx::query(stmt).execute(pool).await?;
     }
-    sqlx::query(
-        "INSERT INTO schema_version (version) VALUES (9) ON CONFLICT (version) DO NOTHING",
-    )
-    .execute(pool)
-    .await?;
+    sqlx::query("INSERT INTO schema_version (version) VALUES (9) ON CONFLICT (version) DO NOTHING")
+        .execute(pool)
+        .await?;
     sqlx::query(
         "INSERT INTO schema_version (version) VALUES (10) ON CONFLICT (version) DO NOTHING",
     )

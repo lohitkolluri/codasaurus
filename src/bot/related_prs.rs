@@ -21,7 +21,11 @@ pub async fn find_related_prs(
     let mut related: BTreeSet<(i64, String)> = BTreeSet::new();
     let mut seen_shas = BTreeSet::new();
 
-    for path in changed_paths.iter().filter(|p| !p.is_empty()).take(MAX_PATHS) {
+    for path in changed_paths
+        .iter()
+        .filter(|p| !p.is_empty())
+        .take(MAX_PATHS)
+    {
         let encoded = encode_path_query(path);
         let url = format!(
             "https://api.github.com/repos/{repo}/commits?path={encoded}&per_page={MAX_COMMITS_PER_PATH}"
@@ -132,7 +136,9 @@ fn extract_pr_numbers(msg: &str) -> Vec<u64> {
             let mut j = i + 1;
             let mut n: u64 = 0;
             while j < bytes.len() && bytes[j].is_ascii_digit() {
-                n = n.saturating_mul(10).saturating_add((bytes[j] - b'0') as u64);
+                n = n
+                    .saturating_mul(10)
+                    .saturating_add((bytes[j] - b'0') as u64);
                 j += 1;
             }
             if j > i + 1 && n > 0 {

@@ -309,10 +309,8 @@ async fn check_osv_async(ecosystem: &str, package: &str) -> Result<Vec<OsvVulner
             cache.retain(|_, (_, time)| now.duration_since(*time) < ttl);
             if cache.len() > CACHE_MAX_SIZE {
                 let target = CACHE_MAX_SIZE / 2;
-                let mut keys: Vec<(String, Instant)> = cache
-                    .iter()
-                    .map(|(k, (_, t))| (k.clone(), *t))
-                    .collect();
+                let mut keys: Vec<(String, Instant)> =
+                    cache.iter().map(|(k, (_, t))| (k.clone(), *t)).collect();
                 keys.sort_unstable_by_key(|(_, t)| *t);
                 for (k, _) in keys.into_iter().take(cache.len().saturating_sub(target)) {
                     cache.remove(&k);

@@ -264,7 +264,10 @@ pub fn suggest_labels(paths: &[String], detectors: &[String]) -> Vec<String> {
     let joined = paths.join("\n").to_lowercase();
     if paths.iter().any(|p| {
         let l = p.to_lowercase();
-        l.contains("test") || l.ends_with("_test.rs") || l.contains("spec.") || l.contains("__tests__")
+        l.contains("test")
+            || l.ends_with("_test.rs")
+            || l.contains("spec.")
+            || l.contains("__tests__")
     }) {
         labels.push("tests".into());
     }
@@ -286,9 +289,10 @@ pub fn suggest_labels(paths: &[String], detectors: &[String]) -> Vec<String> {
     }) {
         labels.push("infrastructure".into());
     }
-    if paths.iter().any(|p| {
-        p.ends_with(".md") || p.contains("docs/") || p.eq_ignore_ascii_case("readme.md")
-    }) {
+    if paths
+        .iter()
+        .any(|p| p.ends_with(".md") || p.contains("docs/") || p.eq_ignore_ascii_case("readme.md"))
+    {
         labels.push("documentation".into());
     }
     if detectors
@@ -326,19 +330,13 @@ mod tests {
 
     #[test]
     fn suggests_security_label() {
-        let labels = suggest_labels(
-            &["src/auth.rs".into()],
-            &["secrets".into()],
-        );
+        let labels = suggest_labels(&["src/auth.rs".into()], &["secrets".into()]);
         assert!(labels.contains(&"security".into()));
     }
 
     #[test]
     fn suggests_iac_and_infra_labels() {
-        let labels = suggest_labels(
-            &["infra/main.tf".into()],
-            &["iac".into()],
-        );
+        let labels = suggest_labels(&["infra/main.tf".into()], &["iac".into()]);
         assert!(labels.contains(&"security".into()));
         assert!(labels.contains(&"infrastructure".into()));
     }

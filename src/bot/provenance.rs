@@ -136,7 +136,9 @@ pub fn reverify_llm_issues(
                     .find(|w| w.len() >= 6)
                     .unwrap_or("");
                 if !needle.is_empty()
-                    && !content.to_ascii_lowercase().contains(&needle.to_ascii_lowercase())
+                    && !content
+                        .to_ascii_lowercase()
+                        .contains(&needle.to_ascii_lowercase())
                     && issue.line == 0
                 {
                     return None;

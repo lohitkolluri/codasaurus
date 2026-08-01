@@ -1,7 +1,5 @@
 use crate::db::models::*;
-use crate::db::{
-    db_execute, db_fetch_all, db_fetch_one, db_fetch_optional, db_scalar, DbPool,
-};
+use crate::db::{db_execute, db_fetch_all, db_fetch_one, db_fetch_optional, db_scalar, DbPool};
 
 pub async fn list_reviews(
     pool: &DbPool,
@@ -77,10 +75,7 @@ pub async fn create_review(pool: &DbPool, review: &ReviewCreate) -> Result<Revie
     )
 }
 
-pub async fn delete_findings_for_review(
-    pool: &DbPool,
-    review_id: i64,
-) -> Result<(), sqlx::Error> {
+pub async fn delete_findings_for_review(pool: &DbPool, review_id: i64) -> Result<(), sqlx::Error> {
     db_execute!(pool, "DELETE FROM findings WHERE review_id = ?", review_id)?;
     Ok(())
 }
@@ -124,7 +119,12 @@ pub async fn update_review(
             )?;
         }
         (Some(status), None, None) => {
-            db_execute!(pool, "UPDATE reviews SET status = ? WHERE id = ?", status, id)?;
+            db_execute!(
+                pool,
+                "UPDATE reviews SET status = ? WHERE id = ?",
+                status,
+                id
+            )?;
         }
         (None, Some(sj), Some(ca)) => {
             db_execute!(

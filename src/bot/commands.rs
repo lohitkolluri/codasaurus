@@ -49,7 +49,8 @@ pub(crate) fn parse_bot_command(body: &str) -> Option<BotCommand> {
     if lower.contains("similar") || lower.contains("related_prs") || lower.contains("related-prs") {
         return Some(BotCommand::Similar);
     }
-    if lower.contains("impact") || lower.contains("blast-radius") || lower.contains("blast_radius") {
+    if lower.contains("impact") || lower.contains("blast-radius") || lower.contains("blast_radius")
+    {
         return Some(BotCommand::Impact);
     }
     if lower.contains("@codasaurus fix")
@@ -162,14 +163,18 @@ async fn post_issue_comment(token: &str, repo: &str, pr: i64, body: &str) -> any
         .timeout(Duration::from_secs(30))
         .build()?;
     let url = format!("https://api.github.com/repos/{repo}/issues/{pr}/comments");
-    crate::retry::github_request(&crate::retry::RetryConfig::api_default(), "post_comment", || {
-        client
-            .post(&url)
-            .header("Authorization", format!("Bearer {token}"))
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", USER_AGENT)
-            .json(&serde_json::json!({"body": body}))
-    })
+    crate::retry::github_request(
+        &crate::retry::RetryConfig::api_default(),
+        "post_comment",
+        || {
+            client
+                .post(&url)
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", USER_AGENT)
+                .json(&serde_json::json!({"body": body}))
+        },
+    )
     .await?;
     Ok(())
 }
@@ -464,7 +469,8 @@ async fn fetch_changed_paths_hint(
         .timeout(Duration::from_secs(30))
         .build()?;
     let auth = format!("Bearer {token}");
-    let files_url = format!("https://api.github.com/repos/{repo}/pulls/{pr_number}/files?per_page=100");
+    let files_url =
+        format!("https://api.github.com/repos/{repo}/pulls/{pr_number}/files?per_page=100");
     let files: Vec<serde_json::Value> = client
         .get(&files_url)
         .header("Authorization", &auth)
@@ -825,9 +831,16 @@ async fn spawn_security(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) 
                 "> **Clean** — no secrets or known vulnerability signals in the scanned diff.\n",
             );
         } else {
-            text.push_str("| Severity | Detector | Location | Message |\n| --- | --- | --- | --- |\n");
+            text.push_str(
+                "| Severity | Detector | Location | Message |\n| --- | --- | --- | --- |\n",
+            );
             for f in findings.iter().take(25) {
-                let msg = f.message.replace('|', "\\|").chars().take(120).collect::<String>();
+                let msg = f
+                    .message
+                    .replace('|', "\\|")
+                    .chars()
+                    .take(120)
+                    .collect::<String>();
                 let _ = std::fmt::Write::write_fmt(
                     &mut text,
                     format_args!(
@@ -1296,7 +1309,6 @@ async fn spawn_fix(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
     })
     .await;
 }
-
 
 #[cfg(test)]
 mod tests {

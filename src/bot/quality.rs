@@ -112,10 +112,7 @@ mod tests {
             },
         );
         assert!(findings.iter().any(|f| f.detector == "secrets"));
-        assert_eq!(
-            findings.iter().filter(|f| f.severity == "info").count(),
-            1
-        );
+        assert_eq!(findings.iter().filter(|f| f.severity == "info").count(), 1);
         assert!(findings.iter().filter(|f| f.severity == "warning").count() <= 3);
     }
 }

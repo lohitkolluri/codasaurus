@@ -61,9 +61,32 @@ fn score_issue(pr_title: &str, paths: &[String], issue: &IssueContext) -> IssueV
 
 fn significant_tokens(s: &str) -> Vec<String> {
     const STOP: &[&str] = &[
-        "the", "a", "an", "and", "or", "to", "for", "of", "in", "on", "with", "from", "by", "is",
-        "are", "be", "this", "that", "fix", "add", "update", "implement", "support", "issue",
-        "jira", "linear",
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "to",
+        "for",
+        "of",
+        "in",
+        "on",
+        "with",
+        "from",
+        "by",
+        "is",
+        "are",
+        "be",
+        "this",
+        "that",
+        "fix",
+        "add",
+        "update",
+        "implement",
+        "support",
+        "issue",
+        "jira",
+        "linear",
     ];
     s.split(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
         .map(|t| t.to_ascii_lowercase())
@@ -86,10 +109,7 @@ pub fn assessment_markdown(rows: &[(IssueContext, IssueVerdict)]) -> String {
             issue.title.clone()
         };
         let chip = format!("`{}`", verdict.as_str());
-        out.push_str(&format!(
-            "| {} | {chip} |\n",
-            label.replace('|', "\\|"),
-        ));
+        out.push_str(&format!("| {} | {chip} |\n", label.replace('|', "\\|"),));
     }
     out.push('\n');
     out

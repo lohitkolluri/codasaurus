@@ -1,7 +1,7 @@
 //! Review comment IDs and commit SHA tracking (multi-replica safe leases).
 
-use anyhow::Result;
 use crate::db::{db_execute, db_fetch_optional, db_scalar_optional, DbPool};
+use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::{LazyLock, OnceLock};
 use tokio::runtime::{Handle, Runtime};
@@ -34,9 +34,7 @@ pub struct ReviewState {
 
 impl ReviewState {
     pub fn from_pool(pool: &DbPool) -> Self {
-        Self {
-            pool: pool.clone(),
-        }
+        Self { pool: pool.clone() }
     }
 
     pub fn open() -> Result<Self> {
@@ -113,7 +111,11 @@ impl ReviewState {
         Ok(())
     }
 
-    pub async fn get_reviewed_sha_async(&self, repo: &str, pr_number: i64) -> Result<Option<String>> {
+    pub async fn get_reviewed_sha_async(
+        &self,
+        repo: &str,
+        pr_number: i64,
+    ) -> Result<Option<String>> {
         let key = format!("{repo}/{pr_number}");
         Ok(db_scalar_optional!(
             &self.pool,
@@ -173,7 +175,12 @@ impl ReviewState {
         Ok(result > 0)
     }
 
-    pub async fn set_reviewed_sha_async(&self, repo: &str, pr_number: i64, sha: &str) -> Result<()> {
+    pub async fn set_reviewed_sha_async(
+        &self,
+        repo: &str,
+        pr_number: i64,
+        sha: &str,
+    ) -> Result<()> {
         let key = format!("{repo}/{pr_number}");
         let owner = lease_owner_id();
         db_execute!(

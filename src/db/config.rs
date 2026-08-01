@@ -2,8 +2,12 @@ use crate::db::models::*;
 use crate::db::{db_execute, db_fetch_all, db_fetch_optional, DbPool};
 
 pub async fn get_config(pool: &DbPool, key: &str) -> Result<Option<String>, sqlx::Error> {
-    let result: Option<AppConfig> =
-        db_fetch_optional!(pool, AppConfig, "SELECT * FROM app_config WHERE key = ?", key)?;
+    let result: Option<AppConfig> = db_fetch_optional!(
+        pool,
+        AppConfig,
+        "SELECT * FROM app_config WHERE key = ?",
+        key
+    )?;
     Ok(result.map(|c| c.value))
 }
 

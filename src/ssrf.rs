@@ -12,7 +12,11 @@ pub fn validate_llm_base_url(raw: &str, allow_loopback: bool) -> Result<(), Stri
 
     match url.scheme() {
         "http" | "https" => {}
-        other => return Err(format!("Unsupported URL scheme '{other}' — use http or https")),
+        other => {
+            return Err(format!(
+                "Unsupported URL scheme '{other}' — use http or https"
+            ))
+        }
     }
 
     let host = url
@@ -43,7 +47,9 @@ pub fn validate_llm_base_url(raw: &str, allow_loopback: bool) -> Result<(), Stri
 
     if let Ok(ip) = host.parse::<IpAddr>() {
         if is_blocked_ip(ip, allow_loopback) {
-            return Err(format!("IP address '{ip}' is not allowed (SSRF protection)"));
+            return Err(format!(
+                "IP address '{ip}' is not allowed (SSRF protection)"
+            ));
         }
     }
 
@@ -52,10 +58,7 @@ pub fn validate_llm_base_url(raw: &str, allow_loopback: bool) -> Result<(), Stri
 
 /// Like [`validate_llm_base_url`], then resolve DNS and reject private/metadata answers
 /// (mitigates DNS rebinding to link-local / RFC1918).
-pub async fn validate_llm_base_url_resolved(
-    raw: &str,
-    allow_loopback: bool,
-) -> Result<(), String> {
+pub async fn validate_llm_base_url_resolved(raw: &str, allow_loopback: bool) -> Result<(), String> {
     validate_llm_base_url(raw, allow_loopback)?;
     let url = Url::parse(raw).map_err(|e| format!("Invalid URL: {e}"))?;
     let host = url

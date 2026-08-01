@@ -152,10 +152,7 @@ pub(crate) async fn run_webhook_review_inline(
     let _guard = lock.lock().await;
     let started = std::time::Instant::now();
     let opts = ReviewOptions {
-        auto_describe: matches!(
-            action.as_str(),
-            "opened" | "reopened" | "ready_for_review"
-        ),
+        auto_describe: matches!(action.as_str(), "opened" | "reopened" | "ready_for_review"),
         auto_review_diff: true,
     };
     let repo_for_claim = repo_full_name.clone();

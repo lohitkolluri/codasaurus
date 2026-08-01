@@ -13,8 +13,7 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 static ISSUE_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(?:fixes|closes|resolves|fix(?:es)?)\s+#(\d+)\b")
-        .expect("issue ref regex")
+    Regex::new(r"(?i)\b(?:fixes|closes|resolves|fix(?:es)?)\s+#(\d+)\b").expect("issue ref regex")
 });
 
 const GUIDELINE_PATHS: &[&str] = &[
@@ -25,11 +24,7 @@ const GUIDELINE_PATHS: &[&str] = &[
     "docs/CONTRIBUTING.md",
 ];
 
-const CODEOWNERS_PATHS: &[&str] = &[
-    "CODEOWNERS",
-    ".github/CODEOWNERS",
-    "docs/CODEOWNERS",
-];
+const CODEOWNERS_PATHS: &[&str] = &["CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS"];
 
 /// Remote context gathered for one PR review.
 #[derive(Debug, Default)]
@@ -259,11 +254,7 @@ pub async fn fetch_external_tickets(pr_body: &str) -> Vec<IssueContext> {
         ) {
             let client = reqwest::Client::new();
             for key in keys {
-                let url = format!(
-                    "{}/rest/api/3/issue/{}",
-                    base.trim_end_matches('/'),
-                    key
-                );
+                let url = format!("{}/rest/api/3/issue/{}", base.trim_end_matches('/'), key);
                 if let Ok(resp) = client
                     .get(&url)
                     .basic_auth(&email, Some(&token))
@@ -387,11 +378,26 @@ pub async fn gather_remote_context(
     changed_paths: &[String],
     already_have_paths: &HashSet<String>,
 ) -> Result<(RemoteRepoContext, Vec<ParsedFile>)> {
-    let git_ref = if base_sha.is_empty() { "HEAD" } else { base_sha };
-    let head_ref = if head_ref.is_empty() { git_ref } else { head_ref };
+    let git_ref = if base_sha.is_empty() {
+        "HEAD"
+    } else {
+        base_sha
+    };
+    let head_ref = if head_ref.is_empty() {
+        git_ref
+    } else {
+        head_ref
+    };
 
     let (manifests_res, guidelines_res, codeowners_res, issues_res) = tokio::join!(
-        bootstrap_manifests(client, headers, repo, git_ref, changed_paths, already_have_paths),
+        bootstrap_manifests(
+            client,
+            headers,
+            repo,
+            git_ref,
+            changed_paths,
+            already_have_paths
+        ),
         fetch_guidelines(client, headers, repo, head_ref),
         fetch_codeowner_reviewers(client, headers, repo, git_ref, changed_paths),
         fetch_linked_issues(client, headers, repo, pr_body),

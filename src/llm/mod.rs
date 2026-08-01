@@ -1,5 +1,5 @@
-mod cost;
 pub mod budget;
+mod cost;
 
 pub use cost::{
     all_paths_low_signal, default_cheap_model, estimate_spend_microdollars, filter_llm_files,

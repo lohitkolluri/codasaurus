@@ -125,11 +125,7 @@ fn load_guideline_file(path: &Path, source: &str) -> Option<GuidelineFile> {
 
 impl GuidelineFile {
     /// Build a guideline file from in-memory content (GitHub Contents API / tests).
-    pub fn from_content(
-        path: impl Into<PathBuf>,
-        source: &str,
-        content: String,
-    ) -> Option<Self> {
+    pub fn from_content(path: impl Into<PathBuf>, source: &str, content: String) -> Option<Self> {
         if content.trim().is_empty() {
             return None;
         }

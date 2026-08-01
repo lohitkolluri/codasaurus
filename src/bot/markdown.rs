@@ -62,11 +62,7 @@ pub fn inline_finding_comment(f: &Finding) -> String {
     );
 
     if let Some(ref code) = f.codemod {
-        let _ = write!(
-            body,
-            "\n\n```suggestion\n{}\n```",
-            code.trim_end()
-        );
+        let _ = write!(body, "\n\n```suggestion\n{}\n```", code.trim_end());
     }
 
     body
@@ -135,11 +131,7 @@ fn finding_action(f: &Finding) -> String {
 }
 
 fn pkg(f: &Finding) -> String {
-    f.message
-        .split('`')
-        .nth(1)
-        .unwrap_or("package")
-        .to_string()
+    f.message.split('`').nth(1).unwrap_or("package").to_string()
 }
 
 fn pkg_from_suggestion(f: &Finding) -> String {
@@ -154,13 +146,7 @@ fn pkg_from_suggestion(f: &Finding) -> String {
 pub fn redact_secrets(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for token in s.split_whitespace() {
-        if token.len() >= 24
-            && token
-                .chars()
-                .filter(|c| c.is_ascii_alphanumeric())
-                .count()
-                >= 20
-        {
+        if token.len() >= 24 && token.chars().filter(|c| c.is_ascii_alphanumeric()).count() >= 20 {
             let keep = token.chars().take(4).collect::<String>();
             out.push_str(&format!("{keep}…[redacted]"));
         } else {
@@ -235,7 +221,10 @@ pub fn walkthrough_body_ext(
     } else if has_blocking {
         ("hold", "Blocking findings must be fixed or dismissed.")
     } else {
-        ("fix-before-ship", "Non-blocking findings remain — review before merge.")
+        (
+            "fix-before-ship",
+            "Non-blocking findings remain — review before merge.",
+        )
     };
 
     let mut body = String::with_capacity(2048);
@@ -301,11 +290,7 @@ pub fn walkthrough_body_ext(
         let _ = writeln!(body, "| `{name}` | `{status}` |");
     }
     if files.len() > 40 {
-        let _ = writeln!(
-            body,
-            "| _…_ | _{} more_ |",
-            files.len() - 40
-        );
+        let _ = writeln!(body, "| _…_ | _{} more_ |", files.len() - 40);
     }
     let _ = writeln!(body);
 

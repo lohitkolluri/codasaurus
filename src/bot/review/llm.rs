@@ -57,11 +57,8 @@ pub(crate) async fn maybe_post_auto_improve(
             }
         })
         .collect();
-    let issues = crate::bot::provenance::reverify_llm_issues(
-        &output.issues,
-        &known_paths,
-        &file_contents,
-    );
+    let issues =
+        crate::bot::provenance::reverify_llm_issues(&output.issues, &known_paths, &file_contents);
     if issues.is_empty() {
         return Ok(());
     }

@@ -40,11 +40,7 @@ pub async fn create_user(
     )
 }
 
-pub async fn upsert_oidc_user(
-    pool: &DbPool,
-    email: &str,
-    role: &str,
-) -> Result<User, sqlx::Error> {
+pub async fn upsert_oidc_user(pool: &DbPool, email: &str, role: &str) -> Result<User, sqlx::Error> {
     if let Some(u) = db_fetch_optional!(pool, User, "SELECT * FROM users WHERE email = ?", email)? {
         return Ok(u);
     }

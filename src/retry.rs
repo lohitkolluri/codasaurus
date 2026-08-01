@@ -154,7 +154,11 @@ pub async fn github_request(
 }
 
 fn parse_retry_after(resp: &reqwest::Response) -> Option<Duration> {
-    if let Some(v) = resp.headers().get("retry-after").and_then(|h| h.to_str().ok()) {
+    if let Some(v) = resp
+        .headers()
+        .get("retry-after")
+        .and_then(|h| h.to_str().ok())
+    {
         if let Ok(secs) = v.parse::<u64>() {
             return Some(Duration::from_secs(secs.min(60)));
         }

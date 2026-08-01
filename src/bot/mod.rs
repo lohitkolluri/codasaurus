@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-mod auth;
 pub(crate) mod agent_mode;
+mod auth;
 pub(crate) mod blast;
 mod codeowners;
 mod commands;
@@ -271,10 +271,7 @@ pub(crate) async fn handle_webhook(
                 .to_string();
             let inst_id = payload.installation.as_ref().map(|i| i.id);
             let pr = payload.pull_request.as_ref().cloned();
-            let pr_number = pr
-                .as_ref()
-                .and_then(|p| p["number"].as_i64())
-                .unwrap_or(0);
+            let pr_number = pr.as_ref().and_then(|p| p["number"].as_i64()).unwrap_or(0);
             let cfg = config.clone();
             let delivery = delivery_id.to_string();
             let timeout_secs = runtime.review_timeout_secs;
@@ -390,7 +387,6 @@ pub(crate) async fn handle_webhook(
     Ok(Json(serde_json::json!({"status": "ok"})))
 }
 
-
 /// Global concurrency limit for reviews (org-scale safety).
 pub(crate) static REVIEW_PERMITS: std::sync::LazyLock<tokio::sync::Semaphore> =
     std::sync::LazyLock::new(|| {
@@ -481,11 +477,7 @@ async fn handle_installation_deleted(installation: Option<InstallationInfo>) {
         inst_id
     ) {
         Ok(r) => {
-            tracing::info!(
-                deactivated = r,
-                installation = inst_id,
-                "deactivated repos"
-            );
+            tracing::info!(deactivated = r, installation = inst_id, "deactivated repos");
             crate::db::audit::log_event(
                 pool,
                 "installation.deleted",

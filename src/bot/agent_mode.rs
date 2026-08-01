@@ -9,7 +9,12 @@ pub struct AgentSignal {
 }
 
 /// Heuristic detection of agent-authored PRs (Cursor, Claude, Copilot, Devin, etc.).
-pub fn detect_agent_pr(pr_title: &str, pr_body: &str, commit_messages: &[String], author: &str) -> AgentSignal {
+pub fn detect_agent_pr(
+    pr_title: &str,
+    pr_body: &str,
+    commit_messages: &[String],
+    author: &str,
+) -> AgentSignal {
     let mut reasons = Vec::new();
     let blob = format!(
         "{}\n{}\n{}\n{}",

@@ -59,7 +59,5 @@ pub fn build_router(state: AppState) -> Router {
         ))
         .with_state(state.clone());
 
-    public_router()
-        .with_state(state)
-        .merge(protected)
+    public_router().with_state(state).merge(protected)
 }

@@ -8,9 +8,7 @@ use super::findings::{
     collect_registry_pairs, is_critical_full_file_path, merge_vulnerability_findings,
     severity_at_least,
 };
-use super::github::{
-    fetch_pr_files, github_api_headers, post_or_update_comment, GITHUB_CLIENT,
-};
+use super::github::{fetch_pr_files, github_api_headers, post_or_update_comment, GITHUB_CLIENT};
 use super::llm::{generate_and_post_summary, maybe_post_auto_improve};
 use super::persist::save_review_to_db;
 use super::reviewers::{suggest_reviewers, MAX_REVIEWER_FILES};
@@ -72,7 +70,12 @@ pub async fn review_pr_with_options(
         if let Some(ref s) = state {
             match s.try_claim_sha(repo_name, pr_number, head_sha).await {
                 Ok(false) => {
-                    tracing::info!(repo = repo_name, pr = pr_number, sha = head_sha, "skipping already-claimed SHA");
+                    tracing::info!(
+                        repo = repo_name,
+                        pr = pr_number,
+                        sha = head_sha,
+                        "skipping already-claimed SHA"
+                    );
                     return Ok(());
                 }
                 Ok(true) => {}
@@ -94,7 +97,10 @@ pub async fn review_pr_with_options(
             }
         }
         if let Ok(Some(v)) = crate::db::config::get_config(pool, "auto_labels_enabled").await {
-            if matches!(v.to_ascii_lowercase().as_str(), "false" | "0" | "no" | "off") {
+            if matches!(
+                v.to_ascii_lowercase().as_str(),
+                "false" | "0" | "no" | "off"
+            ) {
                 repo_flags.auto_labels = false;
             }
         }
@@ -127,7 +133,10 @@ pub async fn review_pr_with_options(
     if offline_mode {
         repo_llm_enabled = false;
         options.auto_review_diff = false;
-        tracing::info!(repo = repo_name, "offline_mode enabled — LLM disabled, registry cache-only");
+        tracing::info!(
+            repo = repo_name,
+            "offline_mode enabled — LLM disabled, registry cache-only"
+        );
     }
     crate::registry::set_offline_mode(offline_mode);
 
@@ -177,7 +186,11 @@ pub async fn review_pr_with_options(
         })
         .collect();
     if files.is_empty() {
-        tracing::info!(repo = repo_name, pr = pr_number, "all PR files excluded by patterns");
+        tracing::info!(
+            repo = repo_name,
+            pr = pr_number,
+            "all PR files excluded by patterns"
+        );
         return Ok(());
     }
 
@@ -215,7 +228,11 @@ pub async fn review_pr_with_options(
     }
 
     // Full-file fetch for critical paths (auth/crypto/IaC/Docker) when under size budget.
-    let head_for_files = if head_sha.is_empty() { head_ref } else { head_sha };
+    let head_for_files = if head_sha.is_empty() {
+        head_ref
+    } else {
+        head_sha
+    };
     if !low_signal_only {
         for path in &changed_paths {
             if !is_critical_full_file_path(path) {
@@ -227,8 +244,14 @@ pub async fn review_pr_with_options(
             {
                 continue;
             }
-            match crate::bot::github_files::fetch_repo_file(client, &headers, repo_name, path, head_for_files)
-                .await
+            match crate::bot::github_files::fetch_repo_file(
+                client,
+                &headers,
+                repo_name,
+                path,
+                head_for_files,
+            )
+            .await
             {
                 Ok(Some(content)) if !content.is_empty() => {
                     if let Ok(parsed) = crate::parser::parse_file(path, &content) {
@@ -277,7 +300,11 @@ pub async fn review_pr_with_options(
             head_manifests.insert(p.path.clone(), p.raw_content.clone());
         }
     }
-    let head_for_manifest = if head_sha.is_empty() { head_ref } else { head_sha };
+    let head_for_manifest = if head_sha.is_empty() {
+        head_ref
+    } else {
+        head_sha
+    };
     if !low_signal_only {
         for path in changed_paths
             .iter()
@@ -343,17 +370,12 @@ pub async fn review_pr_with_options(
         if !changed_paths.iter().any(|p| p == path) {
             continue;
         }
-        let old_content = crate::bot::github_files::fetch_repo_file(
-            client,
-            &headers,
-            repo_name,
-            path,
-            base_sha,
-        )
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_default();
+        let old_content =
+            crate::bot::github_files::fetch_repo_file(client, &headers, repo_name, path, base_sha)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or_default();
         if let Some(d) = crate::bot::dep_delta::diff_manifest(path, &old_content, new_content) {
             dep_deltas.push(d);
         }
@@ -498,12 +520,8 @@ pub async fn review_pr_with_options(
     );
     findings.findings.extend(slop_findings);
 
-    let agent_signal = crate::bot::agent_mode::detect_agent_pr(
-        &pr_title,
-        &pr_body,
-        &commit_messages,
-        pr_author,
-    );
+    let agent_signal =
+        crate::bot::agent_mode::detect_agent_pr(&pr_title, &pr_body, &commit_messages, pr_author);
     let mut budget = crate::bot::SignalBudget::default();
     if agent_signal.is_agent {
         budget = crate::bot::agent_mode::agent_signal_budget(budget);
@@ -516,10 +534,8 @@ pub async fn review_pr_with_options(
     // Org-scale: severity budgets + noise ranking (high-signal only).
     crate::bot::apply_signal_budget(&mut findings.findings, &budget);
 
-    let blast_report = crate::bot::blast::estimate_blast_radius(
-        &parsed_files_collected,
-        &changed_paths,
-    );
+    let blast_report =
+        crate::bot::blast::estimate_blast_radius(&parsed_files_collected, &changed_paths);
     let blast_md = crate::bot::blast::blast_markdown(&blast_report);
     let vuln_pkgs: Vec<String> = findings
         .findings
@@ -536,10 +552,12 @@ pub async fn review_pr_with_options(
     let agent_badge_owned = crate::bot::agent_mode::agent_badge(&agent_signal);
 
     // Policy pack: forbidden paths + count caps.
-    findings.findings.extend(crate::bot::policy::forbidden_path_findings(
-        &changed_paths,
-        &policy_pack.forbidden_paths,
-    ));
+    findings
+        .findings
+        .extend(crate::bot::policy::forbidden_path_findings(
+            &changed_paths,
+            &policy_pack.forbidden_paths,
+        ));
     crate::bot::policy::enforce_count_caps(&mut findings.findings, &policy_pack);
 
     let mut reviewers = suggest_reviewers(
@@ -562,12 +580,7 @@ pub async fn review_pr_with_options(
     // Request CODEOWNERS / suggested reviewers via GitHub API (not just suggest in markdown).
     if policy_pack.request_reviewers && !reviewers.is_empty() {
         if let Err(e) = crate::bot::github_extra::request_pull_reviewers(
-            client,
-            &headers,
-            repo_name,
-            pr_number,
-            &reviewers,
-            pr_author,
+            client, &headers, repo_name, pr_number, &reviewers, pr_author,
         )
         .await
         {
@@ -587,9 +600,8 @@ pub async fn review_pr_with_options(
         if let Ok(Some(instr)) = crate::db::config::get_config(pool, "custom_instructions").await {
             if !instr.trim().is_empty() {
                 let existing = review_ctx.repo_context.take().unwrap_or_default();
-                review_ctx.repo_context = Some(format!(
-                    "Org custom instructions:\n{instr}\n\n{existing}"
-                ));
+                review_ctx.repo_context =
+                    Some(format!("Org custom instructions:\n{instr}\n\n{existing}"));
             }
         }
     }
@@ -598,8 +610,7 @@ pub async fn review_pr_with_options(
         &changed_paths,
         &review_ctx.linked_issues,
     );
-    let issue_assessment_md =
-        crate::bot::issue_assessment::assessment_markdown(&issue_assessment);
+    let issue_assessment_md = crate::bot::issue_assessment::assessment_markdown(&issue_assessment);
 
     let mut review_comments: Vec<serde_json::Value> = Vec::new();
     let mut has_blocking = false;
@@ -680,7 +691,10 @@ pub async fn review_pr_with_options(
         .await?;
         if !head_sha.is_empty() {
             if let Some(ref s) = state {
-                if let Err(e) = s.set_reviewed_sha_async(repo_name, pr_number, head_sha).await {
+                if let Err(e) = s
+                    .set_reviewed_sha_async(repo_name, pr_number, head_sha)
+                    .await
+                {
                     eprintln!("Warning: failed to store reviewed SHA: {e}");
                 };
             }
@@ -719,9 +733,10 @@ pub async fn review_pr_with_options(
                 .filter_map(|f| f["filename"].as_str().map(str::to_string))
                 .collect();
             let labels = crate::bot::github_extra::suggest_labels(&paths, &[]);
-            if let Err(e) =
-                crate::bot::github_extra::apply_labels(client, &headers, repo_name, pr_number, &labels)
-                    .await
+            if let Err(e) = crate::bot::github_extra::apply_labels(
+                client, &headers, repo_name, pr_number, &labels,
+            )
+            .await
             {
                 tracing::warn!(error = %e, "auto-apply labels failed");
             }
@@ -797,7 +812,10 @@ pub async fn review_pr_with_options(
     // Record the reviewed commit SHA for incremental review
     if !head_sha.is_empty() {
         if let Some(ref s) = state {
-            if let Err(e) = s.set_reviewed_sha_async(repo_name, pr_number, head_sha).await {
+            if let Err(e) = s
+                .set_reviewed_sha_async(repo_name, pr_number, head_sha)
+                .await
+            {
                 eprintln!("Warning: failed to store reviewed SHA: {e}");
             };
         }
@@ -846,7 +864,8 @@ pub async fn review_pr_with_options(
             .collect();
         let labels = crate::bot::github_extra::suggest_labels(&paths, &detectors);
         if let Err(e) =
-            crate::bot::github_extra::apply_labels(client, &headers, repo_name, pr_number, &labels).await
+            crate::bot::github_extra::apply_labels(client, &headers, repo_name, pr_number, &labels)
+                .await
         {
             tracing::warn!(error = %e, "auto-apply labels failed");
         }
@@ -920,11 +939,8 @@ pub async fn review_pr_with_options(
                 dep_delta_md: &dep_delta_md,
             },
         );
-        let describe_body = describe.replacen(
-            "### Codasaurus review",
-            "### Codasaurus describe",
-            1,
-        );
+        let describe_body =
+            describe.replacen("### Codasaurus review", "### Codasaurus describe", 1);
         if let Err(e) = post_or_update_comment(
             client,
             &auth_header,

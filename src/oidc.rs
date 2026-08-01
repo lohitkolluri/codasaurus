@@ -26,14 +26,18 @@ pub struct OidcConfig {
 impl OidcConfig {
     /// Load from env. Returns None if issuer/client_id missing (OIDC disabled).
     pub fn from_env() -> Option<Self> {
-        let issuer = std::env::var("OIDC_ISSUER").ok()?.trim_end_matches('/').to_string();
+        let issuer = std::env::var("OIDC_ISSUER")
+            .ok()?
+            .trim_end_matches('/')
+            .to_string();
         let client_id = std::env::var("OIDC_CLIENT_ID").ok()?;
         if issuer.is_empty() || client_id.is_empty() {
             return None;
         }
         let client_secret = std::env::var("OIDC_CLIENT_SECRET").unwrap_or_default();
         let redirect_uri = std::env::var("OIDC_REDIRECT_URI").unwrap_or_else(|_| {
-            let base = std::env::var("PUBLIC_URL").unwrap_or_else(|_| "http://localhost:3000".into());
+            let base =
+                std::env::var("PUBLIC_URL").unwrap_or_else(|_| "http://localhost:3000".into());
             format!("{}/api/auth/oidc/callback", base.trim_end_matches('/'))
         });
         let scopes = std::env::var("OIDC_SCOPES").unwrap_or_else(|_| "openid email profile".into());
@@ -138,7 +142,9 @@ pub async fn exchange_code(cfg: &OidcConfig, code: &str) -> Result<String> {
     let email = if let Some(jwks_uri) = disc.jwks_uri.as_deref() {
         email_from_verified_jwt(cfg, &id_token, jwks_uri).await?
     } else {
-        tracing::warn!("OIDC discovery missing jwks_uri; decoding payload without signature verify");
+        tracing::warn!(
+            "OIDC discovery missing jwks_uri; decoding payload without signature verify"
+        );
         email_from_jwt_unverified(&id_token)?
     };
     Ok(email)
@@ -218,14 +224,9 @@ fn email_from_jwt_unverified(token: &str) -> Result<String> {
         3 => format!("{payload}="),
         _ => payload.to_string(),
     };
-    let bytes = base64::Engine::decode(
-        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-        payload,
-    )
-    .or_else(|_| {
-        base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE, &padded)
-    })
-    .context("JWT payload base64")?;
+    let bytes = base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, payload)
+        .or_else(|_| base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE, &padded))
+        .context("JWT payload base64")?;
     let v: serde_json::Value = serde_json::from_slice(&bytes)?;
     if let Some(email) = v.get("email").and_then(|e| e.as_str()) {
         if !email.is_empty() {

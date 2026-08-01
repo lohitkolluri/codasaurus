@@ -20,7 +20,8 @@ pub fn create_app_jwt(app_id: &str, private_key_pem: &str) -> Result<String> {
     let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
         .context("Failed to parse GitHub App private key PEM")?;
 
-    encode(&Header::new(Algorithm::RS256), &payload, &key).context("Failed to create GitHub App JWT")
+    encode(&Header::new(Algorithm::RS256), &payload, &key)
+        .context("Failed to create GitHub App JWT")
 }
 
 #[cfg(test)]
@@ -36,7 +37,11 @@ PLACEHOLDER
     #[test]
     fn rejects_invalid_pem() {
         let err = create_app_jwt("123", "not-a-pem").unwrap_err();
-        assert!(err.to_string().contains("private key") || err.to_string().contains("PEM") || err.to_string().contains("key"));
+        assert!(
+            err.to_string().contains("private key")
+                || err.to_string().contains("PEM")
+                || err.to_string().contains("key")
+        );
     }
 
     #[test]

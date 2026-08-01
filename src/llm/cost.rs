@@ -98,7 +98,9 @@ pub fn filter_llm_files(files: &[serde_json::Value]) -> Vec<&serde_json::Value> 
         .iter()
         .filter(|f| {
             let name = f["filename"].as_str().unwrap_or("");
-            !name.is_empty() && !is_low_signal_path(name) && !f["patch"].as_str().unwrap_or("").is_empty()
+            !name.is_empty()
+                && !is_low_signal_path(name)
+                && !f["patch"].as_str().unwrap_or("").is_empty()
         })
         .collect()
 }

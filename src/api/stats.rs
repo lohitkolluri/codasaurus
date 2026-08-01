@@ -66,20 +66,17 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
 
     // Trust panel: FP proxy + accept rate from dismissals vs Tier-1 findings.
     crate::metrics::refresh_from_db(&state.pool).await;
-    let dismissals = crate::db::db_scalar!(
-        &state.pool,
-        i64,
-        "SELECT COUNT(*) FROM dismissed_findings"
-    )
-    .unwrap_or(0);
+    let dismissals =
+        crate::db::db_scalar!(&state.pool, i64, "SELECT COUNT(*) FROM dismissed_findings")
+            .unwrap_or(0);
     let tier1 = crate::db::db_scalar!(
         &state.pool,
         i64,
         "SELECT COUNT(*) FROM findings WHERE detector IN ('secrets','vulnerabilities','iac','hallucinated-imports','phantom-deps')"
     )
     .unwrap_or(0);
-    let total_findings = crate::db::db_scalar!(&state.pool, i64, "SELECT COUNT(*) FROM findings")
-        .unwrap_or(0);
+    let total_findings =
+        crate::db::db_scalar!(&state.pool, i64, "SELECT COUNT(*) FROM findings").unwrap_or(0);
     let fp_proxy = if tier1 == 0 {
         0.0
     } else {

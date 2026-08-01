@@ -282,7 +282,10 @@ async fn metrics_handler() -> impl IntoResponse {
     let body = crate::metrics::render_prometheus();
     (
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
         body,
     )
 }

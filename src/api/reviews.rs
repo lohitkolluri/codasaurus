@@ -138,12 +138,18 @@ async fn count_reviews(
             rid,
             st
         )?,
-        (Some(rid), None) => {
-            crate::db::db_scalar!(pool, i64, "SELECT COUNT(*) FROM reviews WHERE repo_id = ?", rid)?
-        }
-        (None, Some(st)) => {
-            crate::db::db_scalar!(pool, i64, "SELECT COUNT(*) FROM reviews WHERE status = ?", st)?
-        }
+        (Some(rid), None) => crate::db::db_scalar!(
+            pool,
+            i64,
+            "SELECT COUNT(*) FROM reviews WHERE repo_id = ?",
+            rid
+        )?,
+        (None, Some(st)) => crate::db::db_scalar!(
+            pool,
+            i64,
+            "SELECT COUNT(*) FROM reviews WHERE status = ?",
+            st
+        )?,
         (None, None) => crate::db::db_scalar!(pool, i64, "SELECT COUNT(*) FROM reviews")?,
     };
     Ok(count)

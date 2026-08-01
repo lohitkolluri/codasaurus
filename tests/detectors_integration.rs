@@ -18,9 +18,11 @@ fn all_checks_config() -> Config {
             over_engineering: true,
             boilerplate: true,
             stale_api: true,
+            risky_patterns: true,
             todo_leaks: true,
             guidelines: true,
             graph: true,
+            iac: true,
             exclude_patterns: vec![],
         },
         ..Config::default()

@@ -47,18 +47,14 @@ impl DbPool {
     /// Lightweight connectivity probe.
     pub async fn ping(&self) -> Result<(), sqlx::Error> {
         match self {
-            Self::Sqlite(p) => {
-                sqlx::query_scalar::<_, i64>("SELECT 1")
-                    .fetch_one(p)
-                    .await
-                    .map(|_| ())
-            }
-            Self::Postgres(p) => {
-                sqlx::query_scalar::<_, i64>("SELECT 1")
-                    .fetch_one(p)
-                    .await
-                    .map(|_| ())
-            }
+            Self::Sqlite(p) => sqlx::query_scalar::<_, i64>("SELECT 1")
+                .fetch_one(p)
+                .await
+                .map(|_| ()),
+            Self::Postgres(p) => sqlx::query_scalar::<_, i64>("SELECT 1")
+                .fetch_one(p)
+                .await
+                .map(|_| ()),
         }
     }
 }

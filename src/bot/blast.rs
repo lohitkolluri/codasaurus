@@ -19,10 +19,7 @@ pub fn estimate_blast_radius(files: &[ParsedFile], changed_paths: &[String]) -> 
             if target.is_empty() {
                 continue;
             }
-            importers
-                .entry(target)
-                .or_default()
-                .insert(f.path.clone());
+            importers.entry(target).or_default().insert(f.path.clone());
         }
     }
 
@@ -114,9 +111,7 @@ pub fn blast_markdown(report: &BlastReport) -> String {
         }
         out.push('\n');
     }
-    out.push_str(
-        "<sub>Bounded estimate from PR imports only — not a full-repo index.</sub>\n\n",
-    );
+    out.push_str("<sub>Bounded estimate from PR imports only — not a full-repo index.</sub>\n\n");
     out
 }
 

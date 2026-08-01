@@ -274,8 +274,8 @@ mod tests {
             path: "CHANGELOG.md".into(),
         }];
         let findings = detect_remote(&[gf], "feat/x", &[], &[], &["src/a.rs".into()]);
-        assert!(findings.iter().any(|f| {
-            f.severity == "blocking" && f.message.contains("CHANGELOG.md")
-        }));
+        assert!(findings
+            .iter()
+            .any(|f| { f.severity == "blocking" && f.message.contains("CHANGELOG.md") }));
     }
 }

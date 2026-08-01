@@ -9,9 +9,7 @@ use codasaurus::serve;
 
 #[derive(Parser)]
 #[command(name = "codasaurus")]
-#[command(
-    about = "Self-hosted GitHub App PR review agent — Tier-1 detectors + optional BYOK LLM"
-)]
+#[command(about = "Self-hosted GitHub App PR review agent — Tier-1 detectors + optional BYOK LLM")]
 #[command(version, long_about = None)]
 struct Cli {
     #[command(subcommand)]
