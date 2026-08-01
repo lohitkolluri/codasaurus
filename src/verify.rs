@@ -201,7 +201,7 @@ fn extract_changed_symbols<'a>(
                 symbols.push(ChangedSymbol {
                     name: sym_name.to_string(),
                     file: file.clone(),
-                    line: 0, // Line-level tracking todo: extract from graph
+                    line: lookup_symbol_line(file, sym_name).unwrap_or(1),
                     kind: kind.to_string(),
                 });
             }
@@ -209,6 +209,32 @@ fn extract_changed_symbols<'a>(
     }
 
     symbols
+}
+
+/// Best-effort line lookup: scan the file for the symbol's base name.
+fn lookup_symbol_line(file: &str, symbol: &str) -> Option<usize> {
+    let base = symbol.rsplit("::").next().unwrap_or(symbol);
+    let contents = std::fs::read_to_string(file).ok()?;
+    for (idx, line) in contents.lines().enumerate() {
+        if line.contains(base)
+            && (line.contains("fn ")
+                || line.contains("def ")
+                || line.contains("class ")
+                || line.contains("function ")
+                || line.contains("const ")
+                || line.contains("let ")
+                || line.contains("pub "))
+        {
+            return Some(idx + 1);
+        }
+    }
+    // Fallback: first occurrence of the name
+    for (idx, line) in contents.lines().enumerate() {
+        if line.contains(base) {
+            return Some(idx + 1);
+        }
+    }
+    None
 }
 
 /// Trace blast radius for a set of symbols.
@@ -393,7 +419,7 @@ fn build_fix_packets(
 
             let mut fp = FixPacket {
                 file: String::new(),
-                line: 0,
+                line: 1,
                 severity: "info",
                 title: format!("Symbol `{sym}` is in the blast radius"),
                 description: format!(

@@ -94,6 +94,16 @@ async fn set_setting(
     if !ALLOWED_KEYS.contains(&key.as_str()) {
         return Err(ApiError::bad_request(format!("Unknown setting: {key}")));
     }
+    if key == "llm_base_url" && !body.value.is_empty() {
+        let provider = db::config::get_config(&state.pool, "llm_provider")
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let allow_loopback = provider == "ollama";
+        crate::ssrf::validate_llm_base_url(&body.value, allow_loopback)
+            .map_err(ApiError::bad_request)?;
+    }
     db::config::set_config(&state.pool, &key, &body.value).await?;
 
     Ok(Json(json!({ "status": "ok", "key": key })))
@@ -128,11 +138,7 @@ async fn get_github_settings(
 
 async fn delete_github_settings(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    crate::api::auth::require_session(&state.pool, &headers)
-        .await
-        .map_err(|_| ApiError::unauthorized("Authentication required"))?;
     for key in GITHUB_KEYS {
         sqlx::query("DELETE FROM app_config WHERE key = ?")
             .bind(key)
@@ -146,11 +152,7 @@ async fn delete_github_settings(
 
 async fn rotate_github_credentials(
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    crate::api::auth::require_session(&state.pool, &headers)
-        .await
-        .map_err(|_| ApiError::unauthorized("Authentication required"))?;
     for key in GITHUB_KEYS {
         sqlx::query("DELETE FROM app_config WHERE key = ?")
             .bind(key)

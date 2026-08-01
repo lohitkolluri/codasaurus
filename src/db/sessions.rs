@@ -1,18 +1,13 @@
 use crate::db::DbPool;
-use sha2::{Digest, Sha256};
-use std::time::{SystemTime, UNIX_EPOCH};
+use argon2::password_hash::rand_core::{OsRng, RngCore};
 
 /// Create a session for the given email. Returns the session token.
 /// Sessions expire after 7 days.
 pub async fn create_session(pool: &DbPool, email: &str) -> Result<String, sqlx::Error> {
-    // Generate a token from sha256(email + timestamp + stack entropy).
-    // Uses existing deps (sha2, hex) — no rand needed.
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let input = format!("{email}:{now}");
-    let token = hex::encode(Sha256::digest(input.as_bytes()));
+    // Cryptographically random 32-byte token, stored as hex (64 chars).
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    let token = hex::encode(bytes);
 
     sqlx::query(
         "INSERT INTO sessions (token, email, expires_at)
@@ -48,4 +43,19 @@ pub async fn delete_session(pool: &DbPool, token: &str) -> Result<(), sqlx::Erro
         .execute(&pool.0)
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn session_tokens_are_hex_of_32_bytes() {
+        let mut bytes = [0u8; 32];
+        argon2::password_hash::rand_core::RngCore::fill_bytes(
+            &mut argon2::password_hash::rand_core::OsRng,
+            &mut bytes,
+        );
+        let token = hex::encode(bytes);
+        assert_eq!(token.len(), 64);
+        assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
+    }
 }

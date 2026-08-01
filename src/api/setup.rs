@@ -6,9 +6,28 @@ use serde_json::json;
 
 use crate::bot;
 use crate::db;
+use crate::github_jwt;
+use crate::ssrf;
 
 use super::errors::ApiError;
 use super::AppState;
+
+/// Reject mutating setup routes once an admin exists, unless the caller is authenticated.
+async fn require_setup_open_or_admin(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+) -> Result<(), ApiError> {
+    let admin_exists = db::users::admin_exists(&state.pool)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    if !admin_exists {
+        return Ok(());
+    }
+    super::auth::require_session(&state.pool, headers)
+        .await
+        .map_err(|_| ApiError::unauthorized("Setup is complete — authentication required"))?;
+    Ok(())
+}
 
 // ---------------------------------------------------------------------------
 // Request / response types
@@ -153,8 +172,10 @@ async fn setup_status(State(state): State<AppState>) -> Result<Json<SetupStatus>
 /// POST /api/v1/setup/database
 async fn setup_database(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<DatabaseBody>,
 ) -> Result<Json<SetupResponse>, ApiError> {
+    require_setup_open_or_admin(&state, &headers).await?;
     let provider = body.provider.to_lowercase();
 
     match provider.as_str() {
@@ -269,11 +290,20 @@ async fn get_llm_config(
 /// POST /api/v1/setup/llm?test=true
 async fn setup_llm(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Query(params): Query<LlmTestParams>,
     Json(body): Json<LlmBody>,
 ) -> Result<Json<SetupResponse>, ApiError> {
+    require_setup_open_or_admin(&state, &headers).await?;
     let base_url = body.base_url.as_deref().unwrap_or("");
     let api_key = body.api_key.as_deref().unwrap_or("");
+
+    // SSRF guard for user-supplied endpoints
+    if !base_url.is_empty() {
+        let allow_loopback = body.provider == "ollama";
+        ssrf::validate_llm_base_url(base_url, allow_loopback)
+            .map_err(ApiError::bad_request)?;
+    }
 
     // Always store the config
     db::config::set_config(&state.pool, "llm_provider", &body.provider).await?;
@@ -337,6 +367,7 @@ async fn test_llm_connection(
             if base_url.is_empty() {
                 return Ok(Some(false));
             }
+            ssrf::validate_llm_base_url(base_url, false).map_err(ApiError::bad_request)?;
             let base = base_url.trim_end_matches('/');
             (
                 format!("{base}/chat/completions"),
@@ -497,24 +528,14 @@ async fn github_manifest_url(
 /// POST /api/v1/setup/github
 async fn setup_github(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<GithubBody>,
 ) -> Result<Json<SetupResponse>, ApiError> {
-    // Validate credentials by generating a JWT and hitting the GitHub API
-    let now = chrono::Utc::now();
-    let claims = jsonwebtoken::Header::default();
-    let payload = jsonwebtoken::EncodingKey::from_rsa_pem(body.private_key.as_bytes())
-        .map_err(|e| ApiError::bad_request(format!("Invalid private key PEM: {e}")))?;
+    require_setup_open_or_admin(&state, &headers).await?;
 
-    let token = jsonwebtoken::encode(
-        &claims,
-        &json!({
-            "iat": now.timestamp(),
-            "exp": (now + chrono::Duration::minutes(5)).timestamp(),
-            "iss": body.app_id,
-        }),
-        &payload,
-    )
-    .map_err(|e| ApiError::bad_request(format!("Failed to encode JWT: {e}")))?;
+    // Validate credentials by generating an RS256 JWT and hitting the GitHub API
+    let token = github_jwt::create_app_jwt(&body.app_id, &body.private_key)
+        .map_err(|e| ApiError::bad_request(format!("Invalid GitHub App credentials: {e}")))?;
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -650,8 +671,11 @@ async fn github_callback_page(
 /// POST /api/v1/setup/github/callback
 async fn github_callback(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<GithubCallbackBody>,
 ) -> Result<Json<GithubCallbackResponse>, ApiError> {
+    require_setup_open_or_admin(&state, &headers).await?;
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -734,8 +758,19 @@ async fn github_callback(
 /// POST /api/v1/setup/admin
 async fn setup_admin(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<AdminBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    // Only allow first admin without auth; subsequent creates require session.
+    let admin_exists = db::users::admin_exists(&state.pool)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    if admin_exists {
+        super::auth::require_session(&state.pool, &headers)
+            .await
+            .map_err(|_| ApiError::unauthorized("Authentication required"))?;
+    }
+
     if !body.email.contains('@') {
         return Err(ApiError::bad_request("Invalid email address"));
     }

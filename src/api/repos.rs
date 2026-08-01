@@ -191,24 +191,7 @@ async fn sync_repos(
 }
 
 fn create_jwt(app_id: &str, private_key_pem: &str) -> Result<String, ApiError> {
-    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    let payload = serde_json::json!({
-        "iat": now.saturating_sub(60),
-        "exp": now + 600,
-        "iss": app_id,
-    });
-
-    let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
-        .map_err(|e| ApiError::internal(format!("Invalid PEM: {e}")))?;
-
-    encode(&Header::new(Algorithm::RS256), &payload, &key)
+    crate::github_jwt::create_app_jwt(app_id, private_key_pem)
         .map_err(|e| ApiError::internal(format!("JWT error: {e}")))
 }
 

@@ -185,6 +185,38 @@ impl Default for Config {
     }
 }
 
+/// Map dashboard setting key `*_enabled` → CheckConfig field.
+fn apply_enabled_flag(checks: &mut CheckConfig, key: &str, value: &str) {
+    let enabled = matches!(value.to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on");
+    match key {
+        "hallucinated_imports_enabled" => checks.hallucinated_imports = enabled,
+        "phantom_deps_enabled" => checks.phantom_deps = enabled,
+        "vulnerabilities_enabled" => checks.vulnerabilities = enabled,
+        "secrets_enabled" => checks.secrets = enabled,
+        "over_engineering_enabled" => checks.over_engineering = enabled,
+        "boilerplate_enabled" => checks.boilerplate = enabled,
+        "todo_leaks_enabled" => checks.todo_leaks = enabled,
+        "stale_api_enabled" => checks.stale_api = enabled,
+        "guidelines_enabled" => checks.guidelines = enabled,
+        _ => {}
+    }
+}
+
+impl Config {
+    /// Load file/env config, then overlay dashboard DB detector toggles when a pool is available.
+    pub async fn load_for_bot(pool: Option<&crate::db::DbPool>) -> Self {
+        let mut config = load(None).unwrap_or_default();
+        if let Some(pool) = pool {
+            if let Ok(entries) = crate::db::config::get_all_config(pool).await {
+                for entry in entries {
+                    apply_enabled_flag(&mut config.checks, &entry.key, &entry.value);
+                }
+            }
+        }
+        config
+    }
+}
+
 /// Load config from specified path or auto-discover from parent directories.
 ///
 /// Pass `Some("/path/to/config.toml")` to load from an explicit path, or

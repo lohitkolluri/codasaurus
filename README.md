@@ -86,19 +86,19 @@ flowchart TB
 
 ## Detectors
 
-| Detector | Catches | Method | Cost | False Positives |
-|----------|---------|--------|------|-----------------|
-| **hallucinated-imports** | Imports absent from npm/PyPI/crates.io | Live HEAD request to registry API | Free | **Zero** — deterministic |
-| **phantom-deps** | Packages used but missing from the manifest | Cross-references imports vs dependency files | Free | **Zero** — deterministic |
-| **secrets** | API keys, tokens, passwords, JWTs, connection strings | Regex for 15+ credential formats | Free | **~2%** — known patterns only |
-| **todo-leaks** | `TODO`, `FIXME`, `XXX`, `HACK` in changes | Line scan of staged diff | Free | **Zero** — exact match |
-| **over-engineering** | Factory patterns for 1–2 variants, unnecessary interfaces | AST heuristics | Free | **~5%** — heuristic |
-| **boilerplate** | 200+ line functions, repeated blocks | Pattern matching | Free | **~5%** — heuristic |
-| **vulnerabilities** | Known package vulnerabilities | OSV.dev API query | Free | **Zero** — database-backed |
-| **stale-api** | Deprecated methods and outdated API patterns | Pattern matching against known migrations | Free | **~5%** — heuristic |
-| **graph** | Dead code and unused exports via call-graph analysis | Builds a code graph, checks reachability | Free | **~5%** — heuristic |
-| **guidelines** | Branch naming, commit conventions, DCO sign-off, required files | Parses `CONTRIBUTING`/guidelines into checkable rules | Free | **Zero** — exact match |
-| **LLM review** | Security flaws, logic bugs, API misuse | OpenRouter → any model | BYOK | **~5%** — model-dependent |
+| Detector                 | Catches                                                         | Method                                                | Cost | False Positives               |
+| ------------------------ | --------------------------------------------------------------- | ----------------------------------------------------- | ---- | ----------------------------- |
+| **hallucinated-imports** | Imports absent from npm/PyPI/crates.io                          | Live HEAD request to registry API                     | Free | **Zero** — deterministic      |
+| **phantom-deps**         | Packages used but missing from the manifest                     | Cross-references imports vs dependency files          | Free | **Zero** — deterministic      |
+| **secrets**              | API keys, tokens, passwords, JWTs, connection strings           | Regex for 15+ credential formats                      | Free | **~2%** — known patterns only |
+| **todo-leaks**           | `TODO`, `FIXME`, `XXX`, `HACK` in changes                       | Line scan of staged diff                              | Free | **Zero** — exact match        |
+| **over-engineering**     | Factory patterns for 1–2 variants, unnecessary interfaces       | AST heuristics                                        | Free | **~5%** — heuristic           |
+| **boilerplate**          | 200+ line functions, repeated blocks                            | Pattern matching                                      | Free | **~5%** — heuristic           |
+| **vulnerabilities**      | Known package vulnerabilities                                   | OSV.dev API query                                     | Free | **Zero** — database-backed    |
+| **stale-api**            | Deprecated methods and outdated API patterns                    | Pattern matching against known migrations             | Free | **~5%** — heuristic           |
+| **graph**                | Dead code and unused exports via call-graph analysis            | Builds a code graph, checks reachability              | Free | **~5%** — heuristic           |
+| **guidelines**           | Branch naming, commit conventions, DCO sign-off, required files | Parses `CONTRIBUTING`/guidelines into checkable rules | Free | **Zero** — exact match        |
+| **LLM review**           | Security flaws, logic bugs, API misuse                          | OpenRouter → any model                                | BYOK | **~5%** — model-dependent     |
 
 ## Quick Start
 
@@ -194,7 +194,7 @@ codasaurus check --staged --llm
 
 The LLM pass provides context-aware analysis that static detectors cannot:
 
-- Explains *why* a change fails — e.g. *"The app will crash at startup with a module-not-found error"* rather than *"Package not found"*
+- Explains _why_ a change fails — e.g. _"The app will crash at startup with a module-not-found error"_ rather than _"Package not found"_
 - Flags **mixed module systems** (ESM `import` + CJS `require`)
 - Detects **missing error handling** around risky operations
 - Catches **logical inconsistencies** across multiple changes
@@ -224,17 +224,17 @@ flowchart LR
 
 ## Comparison
 
-| | CodeRabbit | Greptile | Hawk / Duck | **Codasaurus** |
-|---|---|---|---|---|
-| **Price** | $24/seat/mo | $15+/seat/mo | Free/BYOK | **Free, open source** |
-| **Local checks** | Cloud only | Cloud only | Partial | **Pre-commit + CLI** |
-| **AI-specific detectors** | Generic | Generic | Some | **Hallucinated imports, phantom deps** |
-| **Multi-language** | JS/TS heavy | Limited | Varies | **10+ languages** |
-| **Security (free)** | Paid tier | Yes | No | **OSV.dev + secrets** |
-| **LLM review** | Built-in | Built-in | No | **BYOK via OpenRouter** |
-| **Deterministic** | Partial | No | No | **Zero false positives on Tier 1** |
-| **PR context** | Linked issues | No | No | **Linked issues + related PRs** |
-| **Install** | SaaS signup | SaaS signup | `npm install` | **`cargo install`** |
+|                           | CodeRabbit    | Greptile     | Hawk / Duck   | **Codasaurus**                         |
+| ------------------------- | ------------- | ------------ | ------------- | -------------------------------------- |
+| **Price**                 | $24/seat/mo   | $15+/seat/mo | Free/BYOK     | **Free, open source**                  |
+| **Local checks**          | Cloud only    | Cloud only   | Partial       | **Pre-commit + CLI**                   |
+| **AI-specific detectors** | Generic       | Generic      | Some          | **Hallucinated imports, phantom deps** |
+| **Multi-language**        | JS/TS heavy   | Limited      | Varies        | **10+ languages**                      |
+| **Security (free)**       | Paid tier     | Yes          | No            | **OSV.dev + secrets**                  |
+| **LLM review**            | Built-in      | Built-in     | No            | **BYOK via OpenRouter**                |
+| **Deterministic**         | Partial       | No           | No            | **Zero false positives on Tier 1**     |
+| **PR context**            | Linked issues | No           | No            | **Linked issues + related PRs**        |
+| **Install**               | SaaS signup   | SaaS signup  | `npm install` | **`cargo install`**                    |
 
 ## CI Integration
 
@@ -243,16 +243,16 @@ The repository ships with a [CI workflow](.github/workflows/ci.yml) that runs fo
 ```yaml
 # .github/workflows/ci.yml (check, test, build, and self-review)
 codasaurus-self:
-  steps:
-    - uses: actions/checkout@v4
-    - name: Download built binary
-      uses: actions/download-artifact@v4
-      with:
-        name: codasaurus
-    - name: Make executable
-      run: chmod +x codasaurus
-    - name: Run self-review
-      run: ./codasaurus check --diff origin/main --ci
+    steps:
+        - uses: actions/checkout@v4
+        - name: Download built binary
+          uses: actions/download-artifact@v4
+          with:
+              name: codasaurus
+        - name: Make executable
+          run: chmod +x codasaurus
+        - name: Run self-review
+          run: ./codasaurus check --diff origin/main --ci
 ```
 
 For your own projects, use the check command directly:
@@ -277,6 +277,10 @@ codasaurus check --staged
 export OPENROUTER_API_KEY="sk-or-..."
 codasaurus check --staged --llm
 ```
+
+## Self-hosted dashboard
+
+`codasaurus serve` runs the GitHub App webhook bot and web dashboard. Persistence is **SQLite-only** (`DATABASE_URL=sqlite:/data/codasaurus.db`). Postgres URLs are accepted in the setup wizard for future use but are not used as the runtime database today.
 
 ## Architecture Detail
 

@@ -47,6 +47,7 @@ pub async fn fetch_pull_request(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("GitHub API client not available (failed to initialize)"))?;
     let auth_header = format!("Bearer {token}");
+    let headers = github_api_headers(&auth_header)?;
     let url = format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}");
     retry_async(
         &RetryConfig::api_default(),
@@ -55,7 +56,7 @@ pub async fn fetch_pull_request(
         || async {
             client
                 .get(&url)
-                .headers(github_api_headers(&auth_header))
+                .headers(headers.clone())
                 .send()
                 .await?
                 .error_for_status()?
@@ -68,12 +69,12 @@ pub async fn fetch_pull_request(
 }
 
 /// Same auth/User-Agent headers reused across all GitHub API calls.
-fn github_api_headers(auth_header: &str) -> reqwest::header::HeaderMap {
+fn github_api_headers(auth_header: &str) -> Result<reqwest::header::HeaderMap> {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::AUTHORIZATION,
         reqwest::header::HeaderValue::from_str(auth_header)
-            .expect("Invalid GitHub auth token — contains non-ASCII or control characters"),
+            .map_err(|e| anyhow::anyhow!("Invalid GitHub auth token: {e}"))?,
     );
     headers.insert(
         reqwest::header::ACCEPT,
@@ -86,7 +87,7 @@ fn github_api_headers(auth_header: &str) -> reqwest::header::HeaderMap {
             env!("CARGO_PKG_VERSION")
         )),
     );
-    headers
+    Ok(headers)
 }
 
 /// Truncate a string to fit within `max_bytes` at a UTF-8 boundary.
@@ -118,9 +119,10 @@ async fn fetch_pr_files(
             "fetch_pr_files_page",
             &is_reqwest_error_retryable,
             || async {
+                let headers = github_api_headers(auth_header)?;
                 client
                     .get(&url)
-                    .headers(github_api_headers(auth_header))
+                    .headers(headers)
                     .send()
                     .await?
                     .error_for_status()?
@@ -151,7 +153,7 @@ async fn post_or_update_comment(
 ) -> Result<i64> {
     let url = format!("https://api.github.com/repos/{repo_name}/issues/{pr_number}/comments");
 
-    let headers = github_api_headers(auth_header);
+    let headers = github_api_headers(auth_header)?;
 
     if let Some(ref s) = state {
         if let Ok(Some(comment_id)) = s.get_comment_id(repo_name, pr_number) {
@@ -250,8 +252,10 @@ async fn suggest_reviewers(
                 }
             };
 
-            let commits_url =
-                format!("https://api.github.com/repos/{repo}/commits?path={filename}&per_page=3");
+            let encoded_path = urlencoding_encode(&filename);
+            let commits_url = format!(
+                "https://api.github.com/repos/{repo}/commits?path={encoded_path}&per_page=3"
+            );
             let commits: Vec<serde_json::Value> = match crate::retry::retry_async(
                 &crate::retry::RetryConfig::quick(),
                 "suggest_reviewer_commits",
@@ -316,31 +320,42 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     let pr_body = pr["body"].as_str().unwrap_or("").to_string();
     let head_sha = pr["head"]["sha"].as_str().unwrap_or("");
 
-    // Incremental: skip if we've already reviewed this commit SHA
-    let state = ReviewState::open().ok();
-    if let Some(ref s) = state {
-        if let Ok(Some(prev_sha)) = s.get_reviewed_sha(repo_name, pr_number) {
-            if prev_sha == head_sha {
-                return Ok(());
+    let pool = crate::bot::CONFIG_POOL.get();
+    let state = pool
+        .map(ReviewState::from_pool)
+        .or_else(|| ReviewState::open().ok());
+
+    // Claim SHA at start to close TOCTOU race between concurrent workers
+    if !head_sha.is_empty() {
+        if let Some(ref s) = state {
+            match s.try_claim_sha(repo_name, pr_number, head_sha).await {
+                Ok(false) => {
+                    tracing::info!(repo = repo_name, pr = pr_number, sha = head_sha, "skipping already-claimed SHA");
+                    return Ok(());
+                }
+                Ok(true) => {}
+                Err(e) => tracing::warn!(error = %e, "SHA claim failed; continuing"),
             }
         }
     }
 
-    let config = crate::config::load(None).unwrap_or_default();
+    let config = crate::config::Config::load_for_bot(pool).await;
 
     let client = GITHUB_CLIENT
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("GitHub API client not available (failed to initialize)"))?;
     let auth_header = format!("Bearer {token}");
 
-    let files = match fetch_pr_files(client, repo_name, pr_number, &auth_header).await {
-        Ok(f) if !f.is_empty() => f,
-        Ok(_) => return Ok(()),
-        Err(e) => {
-            eprintln!("Warning: failed to fetch PR files: {e}");
-            return Ok(());
-        }
-    };
+    let files = fetch_pr_files(client, repo_name, pr_number, &auth_header)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "failed to fetch PR files");
+            e
+        })?;
+    if files.is_empty() {
+        tracing::info!(repo = repo_name, pr = pr_number, "no files in PR");
+        return Ok(());
+    }
 
     let mut parsed_files_collected: Vec<crate::parser::ParsedFile> = Vec::new();
     for file in &files {
@@ -587,7 +602,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     .await;
 
     // Generate and post LLM summary if API key is available
-    if let Some(llm_cfg) = crate::llm::LlmConfig::from_env() {
+    if let Some(llm_cfg) = crate::llm::LlmConfig::from_db_or_env(pool).await {
         if let Err(e) = generate_and_post_summary(
             client,
             &auth_header,
@@ -601,7 +616,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         )
         .await
         {
-            eprintln!("Warning: failed to generate LLM summary: {e}");
+            tracing::warn!(error = %e, "failed to generate LLM summary");
         }
     }
 
@@ -1042,12 +1057,25 @@ fn build_unverified_list(findings: &Findings) -> Vec<String> {
 }
 
 fn summarize_message(msg: &str, max_len: usize) -> String {
-    if msg.len() <= max_len {
+    if msg.chars().count() <= max_len {
         return msg.to_string();
     }
-    let truncated = &msg[..max_len.min(msg.len())];
-    let last_space = truncated.rfind(' ').unwrap_or(max_len);
-    format!("{}…", &msg[..last_space])
+    let truncated: String = msg.chars().take(max_len).collect();
+    let last_space = truncated.rfind(' ').unwrap_or(truncated.len());
+    format!("{}…", &truncated[..last_space])
+}
+
+fn urlencoding_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                out.push(b as char);
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1071,30 +1099,12 @@ async fn generate_and_post_summary(
         );
     }
 
-    let prompt = format!(
-        r#"Generate a concise PR review summary (2-3 paragraphs) for the following code review results.
-
-PR Title: {pr_title}
-PR Description: {pr_body}
-
-Findings:
-{findings_text}
-
-Write a helpful summary that:
-1. Gives an overall assessment
-2. Highlights the most critical issues
-3. Provides actionable advice
-Keep it under 200 words and professional in tone."#
-    );
-
-    let output = crate::llm::review_diff(&prompt, llm_cfg, None).await?;
+    let summary = crate::llm::summarize_pr(pr_title, pr_body, &findings_text, llm_cfg).await?;
 
     let summary_body = format!(
-        "## 📋 AI Review Summary\n\n{}\n\n---\n_Generated by Codasaurus LLM review_",
-        output.summary.as_deref().unwrap_or(&output.verdict)
+        "## 📋 AI Review Summary\n\n{summary}\n\n---\n_Generated by Codasaurus LLM review_"
     );
 
-    // Use state store for comment editing to prevent duplicates
     post_or_update_comment(
         client,
         auth_header,

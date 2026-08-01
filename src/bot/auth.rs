@@ -1,8 +1,9 @@
 use crate::bot::BotConfig;
+use crate::github_jwt;
 use crate::retry::{is_reqwest_error_retryable, retry_async, RetryConfig};
 use anyhow::{Context, Result};
 use std::sync::LazyLock;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 /// Reusable HTTP client with timeouts and connection pooling.
 /// Created once and shared across all invocations to avoid socket exhaustion.
@@ -20,23 +21,7 @@ pub async fn get_installation_token(
     config: &BotConfig,
     installation_id: Option<i64>,
 ) -> Result<String> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    let jwt_header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256);
-    let jwt_payload = serde_json::json!({
-        "iat": now.saturating_sub(60),
-        "exp": now + 600,
-        "iss": config.app_id,
-    });
-
-    let key = jsonwebtoken::EncodingKey::from_rsa_pem(config.private_key.as_bytes())
-        .context("Failed to parse GitHub App private key")?;
-
-    let jwt =
-        jsonwebtoken::encode(&jwt_header, &jwt_payload, &key).context("Failed to create JWT")?;
+    let jwt = github_jwt::create_app_jwt(&config.app_id, &config.private_key)?;
 
     let client = GITHUB_CLIENT
         .as_ref()
@@ -63,6 +48,7 @@ pub async fn get_installation_token(
                     .send()
                     .await
                     .context("Failed to get installations")?
+                    .error_for_status()?
                     .json()
                     .await
                     .map_err(Into::into)
@@ -96,6 +82,7 @@ pub async fn get_installation_token(
             .send()
             .await
             .context("Failed to get access token")?
+            .error_for_status()?
             .json()
             .await
             .map_err(Into::into)

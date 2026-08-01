@@ -1,6 +1,7 @@
 use axum::extract::State;
 use axum::http::{header, StatusCode};
-use axum::response::IntoResponse;
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -68,12 +69,32 @@ fn extract_token(headers: &axum::http::HeaderMap) -> Option<String> {
     None
 }
 
+fn cookie_should_be_secure() -> bool {
+    std::env::var("PUBLIC_URL")
+        .ok()
+        .filter(|u| u.starts_with("https://"))
+        .is_some()
+        || std::env::var("CODASAURUS_SECURE_COOKIES")
+            .ok()
+            .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
 fn set_cookie(token: &str) -> String {
-    format!("{SESSION_COOKIE}={token}; HttpOnly; Path=/; Max-Age={SESSION_MAX_AGE}; SameSite=Lax")
+    let mut cookie = format!(
+        "{SESSION_COOKIE}={token}; HttpOnly; Path=/; Max-Age={SESSION_MAX_AGE}; SameSite=Lax"
+    );
+    if cookie_should_be_secure() {
+        cookie.push_str("; Secure");
+    }
+    cookie
 }
 
 fn clear_cookie() -> String {
-    format!("{SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0")
+    let mut cookie = format!("{SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax");
+    if cookie_should_be_secure() {
+        cookie.push_str("; Secure");
+    }
+    cookie
 }
 
 pub(crate) async fn require_session(
@@ -88,21 +109,32 @@ pub(crate) async fn require_session(
     Ok(email)
 }
 
+/// Axum middleware that requires a valid session cookie.
+pub async fn auth_middleware(
+    State(state): State<AppState>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    require_session(&state.pool, req.headers())
+        .await
+        .map_err(|_| ApiError::unauthorized("Authentication required"))?;
+    Ok(next.run(req).await)
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
-/// POST /api/v1/auth/login
+/// POST /api/auth/login
 async fn login(
     State(state): State<AppState>,
     Json(body): Json<LoginBody>,
 ) -> Result<impl IntoResponse, ApiError> {
     let user = db::users::verify_password(&state.pool, &body.email, &body.password)
         .await
-        .map_err(|e| ApiError::unauthorized(format!("Authentication failed: {e}")))?
+        .map_err(|_| ApiError::unauthorized("Invalid email or password"))?
         .ok_or_else(|| ApiError::unauthorized("Invalid email or password"))?;
 
-    // Create session (non-fatal if fails — user still authenticated for this request)
     let cookie = if let Ok(token) = db::sessions::create_session(&state.pool, &user.email).await {
         set_cookie(&token)
     } else {
@@ -120,9 +152,8 @@ async fn login(
     ))
 }
 
-/// GET /api/v1/auth/me
+/// GET /api/auth/me
 async fn me(State(state): State<AppState>, headers: axum::http::HeaderMap) -> Json<MeResponse> {
-    // Try session-cookie auth first
     if let Some(token) = extract_token(&headers) {
         if let Ok(Some(email)) = db::sessions::get_session(&state.pool, &token).await {
             let role: String = sqlx::query_scalar("SELECT role FROM users WHERE email = ?")
@@ -138,36 +169,13 @@ async fn me(State(state): State<AppState>, headers: axum::http::HeaderMap) -> Js
         }
     }
 
-    // Fall back to Phase-1 behavior: check if any admin exists (used by setup wizard)
-    let any_admin: bool = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'")
-        .fetch_one(&state.pool.0)
-        .await
-        .map(|c: i64| c > 0)
-        .unwrap_or(false);
-
-    if any_admin {
-        let email: String =
-            sqlx::query_scalar("SELECT email FROM users WHERE role = 'admin' ORDER BY id LIMIT 1")
-                .fetch_one(&state.pool.0)
-                .await
-                .unwrap_or_default();
-
-        Json(MeResponse {
-            authenticated: false,
-            user: Some(UserInfo {
-                email,
-                role: "admin".into(),
-            }),
-        })
-    } else {
-        Json(MeResponse {
-            authenticated: false,
-            user: None,
-        })
-    }
+    Json(MeResponse {
+        authenticated: false,
+        user: None,
+    })
 }
 
-/// POST /api/v1/auth/logout
+/// POST /api/auth/logout
 async fn logout(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -179,4 +187,16 @@ async fn logout(
         [(header::SET_COOKIE, clear_cookie())],
         Json(json!({ "status": "ok" })),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_cookie_includes_httponly() {
+        let c = set_cookie("abc");
+        assert!(c.contains("HttpOnly"));
+        assert!(c.contains("SameSite=Lax"));
+    }
 }

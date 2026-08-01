@@ -13,6 +13,7 @@ pub mod settings;
 pub mod setup;
 pub mod stats;
 
+use axum::middleware;
 use axum::Router;
 
 use crate::db::DbPool;
@@ -23,25 +24,40 @@ pub struct AppState {
     pub pool: DbPool,
 }
 
-/// Build the full API route tree with full path prefixes.
-///
-/// Returns `Router<AppState>` — merge this into the top-level server
-/// router and call `.with_state(state)` at the outermost level:
-/// ```ignore
-/// let app = Router::new().merge(api::router()).with_state(state);
-/// ```
+/// Public routes (setup wizard + auth). No session required.
+pub fn public_router() -> Router<AppState> {
+    Router::new()
+        .nest("/api/setup", setup::router())
+        .nest("/api/auth", auth::router())
+}
+
+/// Authenticated dashboard routes.
+pub fn protected_router() -> Router<AppState> {
+    Router::new()
+        .nest("/api/stats", stats::router())
+        .nest("/api/repos", repos::router())
+        .nest("/api/reviews", reviews::router())
+        .nest("/api/settings", settings::router())
+        .nest("/api/github", github::router())
+        .nest("/api/audit", audit::router())
+}
+
+/// Build the full API route tree. Prefer [`build_router`] when you have state
+/// so auth middleware can be applied correctly.
 pub fn router() -> Router<AppState> {
-    let mut r = Router::new();
-    // Each sub-router uses relative paths (e.g. "/login", "/repos/{id}").
-    // We nest them under the full API prefix here so the server can merge
-    // these routes at the root level.
-    r = r.nest("/api/setup", setup::router());
-    r = r.nest("/api/auth", auth::router());
-    r = r.nest("/api/stats", stats::router());
-    r = r.nest("/api/repos", repos::router());
-    r = r.nest("/api/reviews", reviews::router());
-    r = r.nest("/api/settings", settings::router());
-    r = r.nest("/api/github", github::router());
-    r = r.nest("/api/audit", audit::router());
-    r
+    public_router().merge(protected_router())
+}
+
+/// Build API router with auth middleware bound to `state`.
+pub fn build_router(state: AppState) -> Router {
+    let protected = protected_router()
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::auth_middleware,
+        ))
+        .with_state(state.clone());
+
+    public_router()
+        .with_state(state)
+        .merge(protected)
 }

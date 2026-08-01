@@ -113,9 +113,91 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+    delivery_id TEXT PRIMARY KEY,
+    received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS review_comments (
+    repo_pr TEXT PRIMARY KEY,
+    comment_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS reviewed_commits (
+    repo_pr TEXT PRIMARY KEY,
+    head_sha TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'completed'
+        CHECK (status IN ('in_progress', 'completed')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dismissed_findings (
+    fingerprint TEXT PRIMARY KEY,
+    detector TEXT NOT NULL,
+    file TEXT NOT NULL,
+    line INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    dismissed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS learned_rules (
+    id TEXT PRIMARY KEY,
+    detector TEXT NOT NULL,
+    file_pattern TEXT,
+    message_pattern TEXT,
+    action TEXT NOT NULL DEFAULT 'ignore',
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_dismissed_fingerprint ON dismissed_findings(fingerprint);
+CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector);
 ";
 
-const MIGRATION_VERSION: i64 = 2;
+const SQLITE_SCHEMA_V3: &str = "
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+    delivery_id TEXT PRIMARY KEY,
+    received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS review_comments (
+    repo_pr TEXT PRIMARY KEY,
+    comment_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS reviewed_commits (
+    repo_pr TEXT PRIMARY KEY,
+    head_sha TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'completed'
+        CHECK (status IN ('in_progress', 'completed')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS dismissed_findings (
+    fingerprint TEXT PRIMARY KEY,
+    detector TEXT NOT NULL,
+    file TEXT NOT NULL,
+    line INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    dismissed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS learned_rules (
+    id TEXT PRIMARY KEY,
+    detector TEXT NOT NULL,
+    file_pattern TEXT,
+    message_pattern TEXT,
+    action TEXT NOT NULL DEFAULT 'ignore',
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_dismissed_fingerprint ON dismissed_findings(fingerprint);
+CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector);
+";
 
 pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
@@ -127,36 +209,39 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    let exists: bool =
-        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM schema_version WHERE version = ?")
-            .bind(MIGRATION_VERSION)
-            .fetch_one(pool)
-            .await?
-            > 0;
+    let current: Option<i64> =
+        sqlx::query_scalar("SELECT MAX(version) FROM schema_version").fetch_one(pool).await?;
 
-    if exists {
-        return Ok(());
+    let current = current.unwrap_or(0);
+
+    if current < 2 {
+        for statement in split_sql(SQLITE_SCHEMA) {
+            sqlx::query(&statement).execute(pool).await?;
+        }
+        for pragma in [
+            "PRAGMA journal_mode = WAL",
+            "PRAGMA synchronous = NORMAL",
+            "PRAGMA cache_size = -8000",
+            "PRAGMA busy_timeout = 5000",
+            "PRAGMA foreign_keys = ON",
+        ] {
+            let _ = sqlx::query(pragma).execute(pool).await;
+        }
+        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (2)")
+            .execute(pool)
+            .await?;
     }
 
-    for statement in split_sql(SQLITE_SCHEMA) {
-        sqlx::query(&statement).execute(pool).await?;
+    if current < 3 {
+        for statement in split_sql(SQLITE_SCHEMA_V3) {
+            sqlx::query(&statement).execute(pool).await?;
+        }
+        // Migrate reviewed_commits: add status column if upgrading from old side DB isn't needed;
+        // main-DB table is created fresh above.
+        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (3)")
+            .execute(pool)
+            .await?;
     }
-
-    // SQLite optimizations
-    for pragma in [
-        "PRAGMA journal_mode = WAL",
-        "PRAGMA synchronous = NORMAL",
-        "PRAGMA cache_size = -8000",
-        "PRAGMA busy_timeout = 5000",
-        "PRAGMA foreign_keys = ON",
-    ] {
-        let _ = sqlx::query(pragma).execute(pool).await;
-    }
-
-    sqlx::query("INSERT INTO schema_version (version) VALUES (?)")
-        .bind(MIGRATION_VERSION)
-        .execute(pool)
-        .await?;
 
     Ok(())
 }

@@ -35,7 +35,22 @@ async function request(method, path, body) {
     }
 
     if (!res.ok) {
-      const err = new Error(data.error || data.message || `Request failed: ${res.status}`);
+      if (
+        res.status === 401 &&
+        !path.startsWith("/api/auth/") &&
+        !path.startsWith("/api/setup/")
+      ) {
+        // Session expired / unauthenticated — send user to login
+        if (
+          typeof window !== "undefined" &&
+          !window.location.hash.includes("/login")
+        ) {
+          window.location.hash = "#/login";
+        }
+      }
+      const err = new Error(
+        data.error || data.message || `Request failed: ${res.status}`,
+      );
       err.status = res.status;
       throw err;
     }

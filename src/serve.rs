@@ -18,6 +18,16 @@ use crate::api::{self, AppState};
 use crate::bot;
 use crate::db;
 
+fn init_tracing() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with_target(false)
+        .try_init();
+}
+
 const SYNC_KEYS: &[(&str, &str)] = &[
     ("GITHUB_APP_ID", "github_app_id"),
     // Private key is NOT synced here — the env var GITHUB_APP_PRIVATE_KEY_B64
@@ -36,12 +46,15 @@ pub async fn serve(
     database_url: &str,
     env_bot_config: Option<bot::BotConfig>,
 ) -> Result<()> {
+    init_tracing();
+
     let pool = crate::db::create_pool(database_url).await?;
 
     // Sync env vars → DB config so the setup wizard detects them even
     // after ephemeral storage is wiped (Render free tier, Docker restarts).
     sync_env_to_db(&pool).await;
 
+    tracing::info!("Database connected (SQLite)");
     println!("  Database connected (SQLite)");
 
     // Try loading bot config from DB (setup wizard may have stored it),
@@ -64,7 +77,8 @@ pub async fn serve(
 }
 
 fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> Router {
-    let api = api::router().with_state(AppState { pool: pool.clone() });
+    let state = AppState { pool: pool.clone() };
+    let api = api::build_router(state);
 
     bot::set_config_pool(pool);
 

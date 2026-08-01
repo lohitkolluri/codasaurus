@@ -1,8 +1,9 @@
 use axum::{http::StatusCode, Json};
 use serde::Deserialize;
-use std::collections::HashSet;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::Mutex;
 use tokio::time::timeout;
 
 mod auth;
@@ -12,37 +13,45 @@ mod verify;
 use self::auth::get_installation_token;
 use self::review::{fetch_pull_request, review_pr};
 
+use crate::bot_runtime::BotRuntimeConfig;
 use crate::db::{self, models::RepoCreate};
+use crate::learning::store::LearningStore;
 
 static USER_AGENT: &str = concat!("codasaurus/", env!("CARGO_PKG_VERSION"));
 
-/// Tracks recently processed webhook delivery IDs to prevent replay attacks.
-/// Cleared every hour to bound memory use.
-struct DeliveryTracker {
-    seen: HashSet<String>,
-    last_cleanup: Instant,
+/// Per-PR locks to prevent concurrent duplicate reviews.
+static PR_LOCKS: std::sync::LazyLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+async fn pr_lock(repo: &str, pr_number: i64) -> Arc<Mutex<()>> {
+    let key = format!("{repo}:{pr_number}");
+    let mut map = PR_LOCKS.lock().await;
+    map.entry(key)
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
 }
 
-impl DeliveryTracker {
-    fn new() -> Self {
-        Self {
-            seen: HashSet::new(),
-            last_cleanup: Instant::now(),
-        }
-    }
+/// Persist delivery ID; returns true if this delivery was already seen.
+async fn is_duplicate_delivery(delivery_id: &str) -> bool {
+    let Some(pool) = CONFIG_POOL.get() else {
+        // No DB — fall back to in-memory only for this process
+        return false;
+    };
+    let result = sqlx::query(
+        "INSERT OR IGNORE INTO webhook_deliveries (delivery_id) VALUES (?)",
+    )
+    .bind(delivery_id)
+    .execute(&pool.0)
+    .await;
 
-    /// Returns `true` if this delivery ID has already been processed.
-    fn is_duplicate(&mut self, id: &str) -> bool {
-        if self.last_cleanup.elapsed() > Duration::from_secs(3600) {
-            self.seen.clear();
-            self.last_cleanup = Instant::now();
+    match result {
+        Ok(r) => r.rows_affected() == 0,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to record webhook delivery");
+            false
         }
-        !self.seen.insert(id.to_string())
     }
 }
-
-static DELIVERY_TRACKER: std::sync::LazyLock<Mutex<DeliveryTracker>> =
-    std::sync::LazyLock::new(|| Mutex::new(DeliveryTracker::new()));
 
 #[derive(Clone)]
 pub struct BotConfig {
@@ -130,7 +139,7 @@ struct InstallationInfo {
 }
 
 #[derive(Deserialize)]
-struct WebhookPayload {
+pub(crate) struct WebhookPayload {
     #[serde(rename = "action")]
     action: String,
     #[serde(rename = "pull_request")]
@@ -149,16 +158,26 @@ struct WebhookPayload {
     repositories_added: Option<Vec<serde_json::Value>>,
 }
 
+/// Comment author association from GitHub payload.
+fn author_can_command(payload: &WebhookPayload) -> bool {
+    let association = payload
+        .comment
+        .as_ref()
+        .and_then(|c| c.get("author_association"))
+        .and_then(|a| a.as_str())
+        .unwrap_or("");
+    matches!(
+        association,
+        "OWNER" | "MEMBER" | "COLLABORATOR" | "CONTRIBUTOR"
+    )
+}
+
 pub(crate) async fn handle_webhook(
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let mut config = BOT_CONFIG.read().expect("BOT_CONFIG lock poisoned").clone();
 
-    // If the in-memory config has no secret (startup before wizard, or
-    // first deploy on ephemeral storage), try reloading from the DB.
-    // The manifest flow stores credentials there, but the startup cache
-    // was populated before the wizard ran.
     if config
         .as_ref()
         .map(|c| c.webhook_secret.is_empty())
@@ -166,7 +185,6 @@ pub(crate) async fn handle_webhook(
     {
         if let Some(reloaded) = reload_bot_config().await {
             if !reloaded.webhook_secret.is_empty() {
-                // Cache the reloaded config so subsequent requests skip the DB.
                 set_bot_config(reloaded.clone());
                 config = Some(reloaded);
             }
@@ -175,8 +193,6 @@ pub(crate) async fn handle_webhook(
 
     let config = config.ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Signature verification MUST come before delivery dedup — otherwise an
-    // attacker who reuses a captured delivery ID bypasses HMAC auth entirely.
     let sig = headers
         .get("x-hub-signature-256")
         .and_then(|v| v.to_str().ok())
@@ -185,24 +201,26 @@ pub(crate) async fn handle_webhook(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // Replay attack protection: check X-GitHub-Delivery
     let delivery_id = headers
         .get("x-github-delivery")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if !delivery_id.is_empty() {
-        if let Ok(mut tracker) = DELIVERY_TRACKER.lock() {
-            if tracker.is_duplicate(delivery_id) {
-                return Ok(Json(serde_json::json!({"status": "ok", "duplicate": true})));
-            }
-        }
+    if delivery_id.is_empty() {
+        tracing::warn!("rejecting webhook without X-GitHub-Delivery");
+        return Err(StatusCode::BAD_REQUEST);
     }
+    if is_duplicate_delivery(delivery_id).await {
+        return Ok(Json(serde_json::json!({"status": "ok", "duplicate": true})));
+    }
+
     let event = headers
         .get("x-github-event")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
     let payload: WebhookPayload =
         serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    let runtime = BotRuntimeConfig::default();
 
     if event == "pull_request"
         && matches!(
@@ -220,20 +238,31 @@ pub(crate) async fn handle_webhook(
                 .to_string();
             let inst_id = payload.installation.as_ref().map(|i| i.id);
             let pr = payload.pull_request.as_ref().cloned();
+            let pr_number = pr
+                .as_ref()
+                .and_then(|p| p["number"].as_i64())
+                .unwrap_or(0);
             let cfg = config.clone();
+            let delivery = delivery_id.to_string();
+            let timeout_secs = runtime.review_timeout_secs;
             tokio::spawn(async move {
-                // Auto-add the repo if it doesn't exist (industry standard pattern)
+                let span = tracing::info_span!(
+                    "review_pr_webhook",
+                    delivery_id = %delivery,
+                    repo = %repo_full_name,
+                    pr = pr_number
+                );
+                let _enter = span.enter();
+
                 if repo_full_name != "unknown" {
                     ensure_repo_exists(&repo_full_name, inst_id, &repo_val).await;
                 }
-                let _ = timeout(Duration::from_secs(300), async move {
-                    let token = match get_installation_token(&cfg, inst_id).await {
-                        Ok(t) => t,
-                        Err(e) => {
-                            eprintln!("  Auth error: {e}");
-                            return;
-                        }
-                    };
+
+                let lock = pr_lock(&repo_full_name, pr_number).await;
+                let _guard = lock.lock().await;
+
+                match timeout(Duration::from_secs(timeout_secs), async move {
+                    let token = get_installation_token(&cfg, inst_id).await?;
                     let wrapped = WebhookPayload {
                         action: String::new(),
                         pull_request: pr,
@@ -244,11 +273,14 @@ pub(crate) async fn handle_webhook(
                         repositories: None,
                         repositories_added: None,
                     };
-                    if let Err(e) = review_pr(&token, &repo_full_name, &wrapped).await {
-                        eprintln!("  Review error: {e}");
-                    }
+                    review_pr(&token, &repo_full_name, &wrapped).await
                 })
-                .await;
+                .await
+                {
+                    Ok(Ok(())) => tracing::info!("review completed"),
+                    Ok(Err(e)) => tracing::error!(error = %e, "review failed"),
+                    Err(_) => tracing::error!("review timed out"),
+                }
             });
         }
     } else if event == "issue_comment" && payload.action == "created" {
@@ -262,9 +294,11 @@ pub(crate) async fn handle_webhook(
             || comment_body.contains("@codasaurus-bot review")
             || comment_body.contains("@codasaurus-bot full review");
         let is_ignore_cmd = comment_body.contains("@codasaurus-bot ignore")
-            || comment_body.contains("@codasaurus ignore");
+            || comment_body.contains("@codasaurus ignore")
+            || comment_body.contains("@codasaurus-bot dismiss")
+            || comment_body.contains("@codasaurus dismiss");
 
-        if is_review_cmd || is_ignore_cmd {
+        if (is_review_cmd || is_ignore_cmd) && author_can_command(&payload) {
             let is_pr = payload
                 .issue
                 .as_ref()
@@ -279,11 +313,19 @@ pub(crate) async fn handle_webhook(
                     .unwrap_or(0);
                 let ctx = WebhookContext::from_payload(config.clone(), &payload);
                 if is_review_cmd {
-                    tokio::spawn(spawn_review(ctx, pr_number));
+                    let timeout_secs = runtime.review_timeout_secs;
+                    tokio::spawn(async move {
+                        spawn_review(ctx, pr_number, timeout_secs).await;
+                    });
                 } else {
-                    tokio::spawn(spawn_ignore_comment(ctx, pr_number));
+                    let fingerprint = extract_ignore_fingerprint(comment_body);
+                    tokio::spawn(async move {
+                        spawn_ignore_comment(ctx, pr_number, fingerprint).await;
+                    });
                 }
             }
+        } else if is_review_cmd || is_ignore_cmd {
+            tracing::info!("ignoring command from unauthorized commenter");
         }
     } else if event == "installation" && payload.action == "created" {
         tokio::spawn(handle_installation_created(
@@ -301,26 +343,34 @@ pub(crate) async fn handle_webhook(
     Ok(Json(serde_json::json!({"status": "ok"})))
 }
 
-async fn spawn_review(ctx: WebhookContext, pr_number: i64) {
-    let _ = timeout(Duration::from_secs(300), async move {
-        let token = match get_installation_token(&ctx.cfg, ctx.inst_id).await {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("  Auth error: {e}");
-                return;
+fn extract_ignore_fingerprint(body: &str) -> Option<String> {
+    // `@codasaurus ignore <fingerprint>` or `@codasaurus-bot dismiss <fingerprint>`
+    for prefix in [
+        "@codasaurus ignore ",
+        "@codasaurus-bot ignore ",
+        "@codasaurus dismiss ",
+        "@codasaurus-bot dismiss ",
+    ] {
+        if let Some(rest) = body.split(prefix).nth(1) {
+            let fp = rest.split_whitespace().next().unwrap_or("").trim();
+            if !fp.is_empty() && fp.len() >= 8 {
+                return Some(fp.to_string());
             }
-        };
-        if pr_number <= 0 || ctx.repo_full_name == "unknown" {
-            eprintln!("  Ignoring review command without a valid repository and PR number");
-            return;
         }
-        let pr_data = match fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await {
-            Ok(data) => data,
-            Err(e) => {
-                eprintln!("  Failed to fetch PR #{pr_number}: {e}");
-                return;
-            }
-        };
+    }
+    None
+}
+
+async fn spawn_review(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
+    let lock = pr_lock(&ctx.repo_full_name, pr_number).await;
+    let _guard = lock.lock().await;
+
+    match timeout(Duration::from_secs(timeout_secs), async move {
+        let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
+        if pr_number <= 0 || ctx.repo_full_name == "unknown" {
+            anyhow::bail!("invalid repository or PR number");
+        }
+        let pr_data = fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await?;
         let wrapped = WebhookPayload {
             action: String::new(),
             pull_request: Some(pr_data),
@@ -331,45 +381,65 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64) {
             repositories: None,
             repositories_added: None,
         };
-        if let Err(e) = review_pr(&token, &ctx.repo_full_name, &wrapped).await {
-            eprintln!("  Review error: {e}");
-        }
+        review_pr(&token, &ctx.repo_full_name, &wrapped).await
     })
-    .await;
+    .await
+    {
+        Ok(Ok(())) => tracing::info!(pr = pr_number, "comment-triggered review completed"),
+        Ok(Err(e)) => tracing::error!(pr = pr_number, error = %e, "comment-triggered review failed"),
+        Err(_) => tracing::error!(pr = pr_number, "comment-triggered review timed out"),
+    }
 }
 
-async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64) {
-    let _ = timeout(Duration::from_secs(120), async move {
-        let token = match get_installation_token(&ctx.cfg, ctx.inst_id).await {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("  Auth error: {e}");
-                return;
-            }
-        };
+async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64, fingerprint: Option<String>) {
+    match timeout(Duration::from_secs(120), async move {
+        let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .timeout(Duration::from_secs(30))
+            .connect_timeout(Duration::from_secs(10))
+            .build()?;
+
+        let body = if let Some(ref fp) = fingerprint {
+            if let Some(pool) = bot_db_pool() {
+                let store = LearningStore::from_pool(pool);
+                store
+                    .dismiss_fingerprint(fp, "manual", &ctx.repo_full_name, "dismissed via comment")
+                    .await?;
+                format!(
+                    "✅ Dismissed finding `{fp}`. Matching findings will be filtered on future reviews."
+                )
+            } else {
+                format!(
+                    "⚠️ Could not persist dismissal for `{fp}` (database unavailable)."
+                )
+            }
+        } else {
+            "To dismiss a finding, reply with `@codasaurus ignore <fingerprint>` \
+             (copy the fingerprint from the finding details)."
+                .to_string()
+        };
+
         let url = format!(
             "https://api.github.com/repos/{}/issues/{}/comments",
             ctx.repo_full_name, pr_number
         );
-        let body = "👋 Codasaurus ignore is now available as a placeholder. \
-        To dismiss specific findings, use `@codasaurus-bot dismiss <fingerprint>` \
-        or reply to an inline comment with `@codasaurus-bot ignore`. \
-        Full per-finding dismissal will be available in a future release.";
-        let _ = client
-            .post(&url)
-            .header("Authorization", format!("Bearer {token}"))
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", USER_AGENT)
-            .json(&serde_json::json!({"body": body}))
-            .send()
-            .await;
+        crate::retry::github_request(&crate::retry::RetryConfig::api_default(), "post_ignore_comment", || {
+            client
+                .post(&url)
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", USER_AGENT)
+                .json(&serde_json::json!({"body": body}))
+        })
+        .await?;
+        Ok::<_, anyhow::Error>(())
     })
-    .await;
+    .await
+    {
+        Ok(Ok(())) => tracing::info!(pr = pr_number, "ignore command handled"),
+        Ok(Err(e)) => tracing::error!(pr = pr_number, error = %e, "ignore command failed"),
+        Err(_) => tracing::error!(pr = pr_number, "ignore command timed out"),
+    }
 }
 
 async fn handle_installation_created(
@@ -383,7 +453,7 @@ async fn handle_installation_created(
     let pool = match bot_db_pool() {
         Some(p) => p,
         None => {
-            eprintln!("  [bot] DB pool not available, skipping repo sync");
+            tracing::warn!("DB pool not available, skipping repo sync");
             return;
         }
     };
@@ -416,7 +486,7 @@ async fn handle_installation_created(
         )
         .await
         {
-            eprintln!("  [bot] Failed to save repo: {e}");
+            tracing::error!(error = %e, "failed to save repo");
         }
     }
     let count = repos.len();
@@ -430,7 +500,7 @@ async fn handle_installation_created(
         )
         .await;
     }
-    println!("  [bot] Synced {count} repos from installation");
+    tracing::info!(count, "synced repos from installation");
 }
 
 async fn handle_installation_deleted(installation: Option<InstallationInfo>) {
@@ -441,7 +511,7 @@ async fn handle_installation_deleted(installation: Option<InstallationInfo>) {
     let pool = match bot_db_pool() {
         Some(p) => p,
         None => {
-            eprintln!("  [bot] Cannot deactivate repos: DB pool not available");
+            tracing::warn!("Cannot deactivate repos: DB pool not available");
             return;
         }
     };
@@ -451,10 +521,10 @@ async fn handle_installation_deleted(installation: Option<InstallationInfo>) {
         .await
     {
         Ok(r) => {
-            println!(
-                "  [bot] Deactivated {} repos from uninstalled app {}",
-                r.rows_affected(),
-                inst_id
+            tracing::info!(
+                deactivated = r.rows_affected(),
+                installation = inst_id,
+                "deactivated repos"
             );
             crate::db::audit::log_event(
                 pool,
@@ -465,7 +535,7 @@ async fn handle_installation_deleted(installation: Option<InstallationInfo>) {
             )
             .await;
         }
-        Err(e) => eprintln!("  [bot] Failed to deactivate repos: {e}"),
+        Err(e) => tracing::error!(error = %e, "failed to deactivate repos"),
     }
 }
 
@@ -507,14 +577,13 @@ async fn handle_repos_added(installation: Option<InstallationInfo>, repos: Vec<s
         )
         .await
         {
-            eprintln!("  [bot] Failed to save repo: {e}");
+            tracing::error!(error = %e, "failed to save repo");
         }
     }
-    println!("  [bot] Synced {} added repos", repos.len());
+    tracing::info!(count = repos.len(), "synced added repos");
 }
 
 /// Auto-register a repo when we receive a webhook event for it.
-/// This is the industry-standard pattern: don't require a separate sync step.
 async fn ensure_repo_exists(
     full_name: &str,
     inst_id: Option<i64>,
@@ -524,9 +593,8 @@ async fn ensure_repo_exists(
         Some(p) => p,
         None => return,
     };
-    // Check if repo already exists
     if let Ok(Some(_)) = db::repos::get_repo_by_full_name(pool, full_name).await {
-        return; // already exists
+        return;
     }
     let inst = inst_id.unwrap_or(0);
     let github_id = repo_val.as_ref().and_then(|r| r["id"].as_i64());
@@ -555,6 +623,6 @@ async fn ensure_repo_exists(
     )
     .await
     {
-        eprintln!("  [bot] Failed to auto-register repo {full_name}: {e}");
+        tracing::error!(repo = full_name, error = %e, "failed to auto-register repo");
     }
 }

@@ -1,17 +1,33 @@
 use anyhow::Result;
 use sqlx::SqlitePool;
 use std::path::PathBuf;
-use tokio::runtime::Runtime;
+use std::sync::LazyLock;
+use tokio::runtime::{Handle, Runtime};
 
 use crate::detectors::Finding;
+
+static FALLBACK_RT: LazyLock<Runtime> =
+    LazyLock::new(|| Runtime::new().expect("failed to create fallback tokio runtime"));
+
+fn block_on<F: std::future::Future>(fut: F) -> F::Output {
+    match Handle::try_current() {
+        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(fut)),
+        Err(_) => FALLBACK_RT.block_on(fut),
+    }
+}
 
 /// Persistent store for feedback learning
 pub struct LearningStore {
     pool: SqlitePool,
-    rt: Runtime,
 }
 
 impl LearningStore {
+    pub fn from_pool(pool: &crate::db::DbPool) -> Self {
+        Self {
+            pool: pool.0.clone(),
+        }
+    }
+
     pub fn open() -> Result<Self> {
         Self::open_at(Self::db_path()?)
     }
@@ -20,10 +36,9 @@ impl LearningStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let rt = Runtime::new()?;
         let url = format!("sqlite://{}?mode=rwc", path.display());
-        let pool = rt.block_on(SqlitePool::connect(&url))?;
-        let store = Self { pool, rt };
+        let pool = block_on(SqlitePool::connect(&url))?;
+        let store = Self { pool };
         store.initialize()?;
         Ok(store)
     }
@@ -33,29 +48,8 @@ impl LearningStore {
     }
 
     fn initialize(&self) -> Result<()> {
-        self.rt.block_on(async {
+        block_on(async {
             sqlx::query("PRAGMA journal_mode = WAL")
-                .execute(&self.pool)
-                .await?;
-            sqlx::query("PRAGMA synchronous = NORMAL")
-                .execute(&self.pool)
-                .await?;
-            sqlx::query("PRAGMA cache_size = -64000")
-                .execute(&self.pool)
-                .await?;
-            sqlx::query("PRAGMA mmap_size = 268435456")
-                .execute(&self.pool)
-                .await?;
-            sqlx::query("PRAGMA temp_store = MEMORY")
-                .execute(&self.pool)
-                .await?;
-            sqlx::query("PRAGMA busy_timeout = 5000")
-                .execute(&self.pool)
-                .await?;
-            sqlx::query("PRAGMA auto_vacuum = INCREMENTAL")
-                .execute(&self.pool)
-                .await?;
-            sqlx::query("PRAGMA foreign_keys = ON")
                 .execute(&self.pool)
                 .await?;
             sqlx::query(
@@ -83,40 +77,53 @@ impl LearningStore {
             )
             .execute(&self.pool)
             .await?;
-            sqlx::query(
-                "CREATE INDEX IF NOT EXISTS idx_dismissed_fingerprint ON dismissed_findings(fingerprint)",
-            )
-            .execute(&self.pool)
-            .await?;
-            sqlx::query(
-                "CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector)",
-            )
-            .execute(&self.pool)
-            .await
-        })?;
-        Ok(())
+            Ok::<_, anyhow::Error>(())
+        })
     }
 
     pub fn dismiss(&self, finding: &Finding) -> Result<()> {
+        block_on(self.dismiss_async(finding))
+    }
+
+    pub async fn dismiss_async(&self, finding: &Finding) -> Result<()> {
         let fingerprint = finding.fingerprint();
-        self.rt.block_on(async {
-            sqlx::query(
-                "INSERT OR IGNORE INTO dismissed_findings (fingerprint, detector, file, line, message)
-                 VALUES (?, ?, ?, ?, ?)",
-            )
-            .bind(&fingerprint)
-            .bind(&finding.detector)
-            .bind(&finding.file)
-            .bind(finding.line as i64)
-            .bind(&finding.message)
-            .execute(&self.pool)
-            .await
-        })?;
+        sqlx::query(
+            "INSERT OR IGNORE INTO dismissed_findings (fingerprint, detector, file, line, message)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&fingerprint)
+        .bind(&finding.detector)
+        .bind(&finding.file)
+        .bind(finding.line as i64)
+        .bind(&finding.message)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Dismiss by fingerprint string (used by bot `@codasaurus ignore <fp>`).
+    pub async fn dismiss_fingerprint(
+        &self,
+        fingerprint: &str,
+        detector: &str,
+        file: &str,
+        message: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT OR IGNORE INTO dismissed_findings (fingerprint, detector, file, line, message)
+             VALUES (?, ?, ?, 0, ?)",
+        )
+        .bind(fingerprint)
+        .bind(detector)
+        .bind(file)
+        .bind(message)
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
     pub fn add_rule(&self, rule: &crate::learning::LearnedRule) -> Result<()> {
-        self.rt.block_on(async {
+        block_on(async {
             sqlx::query(
                 "INSERT OR REPLACE INTO learned_rules (id, detector, file_pattern, message_pattern, action, reason)
                  VALUES (?, ?, ?, ?, ?, ?)",
@@ -135,7 +142,7 @@ impl LearningStore {
 
     #[cfg(test)]
     pub fn clear_for_test(&self) -> Result<()> {
-        self.rt.block_on(async {
+        block_on(async {
             sqlx::query("DELETE FROM dismissed_findings")
                 .execute(&self.pool)
                 .await?;
@@ -146,49 +153,43 @@ impl LearningStore {
         Ok(())
     }
 
-    /// Batch filter: loads all dismissed fingerprints + all learned rules into memory via 2 queries,
-    /// then checks each finding against the in-memory sets. Avoids 2N individual SQL queries.
     pub fn filter_findings(&self, findings: &[Finding]) -> Result<Vec<Finding>> {
+        block_on(self.filter_findings_async(findings))
+    }
+
+    pub async fn filter_findings_async(&self, findings: &[Finding]) -> Result<Vec<Finding>> {
         if findings.is_empty() {
             return Ok(Vec::new());
         }
 
-        let (dismissed_set, rules) = self.rt.block_on(async {
-            // Query 1: Load all dismissed fingerprints into a HashSet
-            let mut dismissed_set = std::collections::HashSet::new();
-            {
-                let rows: Vec<(String,)> =
-                    sqlx::query_as("SELECT fingerprint FROM dismissed_findings")
-                        .fetch_all(&self.pool)
-                        .await?;
-                for (fp,) in rows {
-                    dismissed_set.insert(fp);
-                }
+        let mut dismissed_set = std::collections::HashSet::new();
+        {
+            let rows: Vec<(String,)> = sqlx::query_as("SELECT fingerprint FROM dismissed_findings")
+                .fetch_all(&self.pool)
+                .await?;
+            for (fp,) in rows {
+                dismissed_set.insert(fp);
             }
+        }
 
-            // Query 2: Load all learned rules into memory
-            struct Rule {
-                detector: String,
-                file_pattern: Option<String>,
-                message_pattern: Option<String>,
-            }
-            let rules: Vec<Rule> = sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
-                "SELECT detector, file_pattern, message_pattern FROM learned_rules",
-            )
-            .fetch_all(&self.pool)
-            .await?
-            .into_iter()
-            .map(|(detector, file_pattern, message_pattern)| Rule {
-                detector,
-                file_pattern,
-                message_pattern,
-            })
-            .collect();
+        struct Rule {
+            detector: String,
+            file_pattern: Option<String>,
+            message_pattern: Option<String>,
+        }
+        let rules: Vec<Rule> = sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
+            "SELECT detector, file_pattern, message_pattern FROM learned_rules",
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|(detector, file_pattern, message_pattern)| Rule {
+            detector,
+            file_pattern,
+            message_pattern,
+        })
+        .collect();
 
-            Ok::<_, anyhow::Error>((dismissed_set, rules))
-        })?;
-
-        // In-memory batch check: HashSet membership + rule matching
         Ok(findings
             .iter()
             .filter(|f| {
@@ -248,17 +249,14 @@ mod tests {
             codemod: None,
         };
 
-        // Before dismissal, filter should include it
         let result = store
             .filter_findings(std::slice::from_ref(&finding))
             .unwrap();
-        assert_eq!(result.len(), 1, "should include finding before dismissal");
+        assert_eq!(result.len(), 1);
 
-        // Dismiss it
         store.dismiss(&finding).unwrap();
 
-        // After dismissal, filter should exclude it
         let result = store.filter_findings(&[finding]).unwrap();
-        assert_eq!(result.len(), 0, "should exclude dismissed finding");
+        assert_eq!(result.len(), 0);
     }
 }

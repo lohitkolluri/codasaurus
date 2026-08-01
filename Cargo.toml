@@ -60,6 +60,10 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "postgres", "mi
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
 # Password hashing
 argon2 = "0.5"
 
@@ -80,6 +84,8 @@ base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
 
 [profile.release]
 strip = true
