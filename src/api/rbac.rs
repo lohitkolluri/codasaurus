@@ -51,10 +51,7 @@ pub fn normalize_role(role: &str) -> &str {
 }
 
 /// Load the authenticated user (email + role) from the session cookie.
-pub async fn current_user(
-    pool: &db::DbPool,
-    headers: &HeaderMap,
-) -> Result<UserView, ApiError> {
+pub async fn current_user(pool: &db::DbPool, headers: &HeaderMap) -> Result<UserView, ApiError> {
     let email = auth::require_session(pool, headers)
         .await
         .map_err(|_| ApiError::unauthorized("Authentication required"))?;

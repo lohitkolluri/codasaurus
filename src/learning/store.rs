@@ -82,14 +82,8 @@ impl LearningStore {
         message: &str,
     ) -> Result<()> {
         let repo = filter_repo_scope();
-        self.dismiss_fingerprint_for_repo(
-            fingerprint,
-            detector,
-            file,
-            message,
-            repo.as_deref(),
-        )
-        .await
+        self.dismiss_fingerprint_for_repo(fingerprint, detector, file, message, repo.as_deref())
+            .await
     }
 
     pub async fn dismiss_fingerprint_for_repo(

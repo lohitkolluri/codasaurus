@@ -257,26 +257,22 @@ async fn migrate_v14_repo_scoped_learning(pool: &PgPool) -> Result<(), sqlx::Err
         return Ok(());
     }
 
-    let _ = sqlx::query(
-        "ALTER TABLE dismissed_findings ADD COLUMN IF NOT EXISTS repo_full_name TEXT",
-    )
-    .execute(pool)
-    .await;
-    let _ = sqlx::query(
-        "ALTER TABLE learned_rules ADD COLUMN IF NOT EXISTS repo_full_name TEXT",
-    )
-    .execute(pool)
-    .await;
+    let _ =
+        sqlx::query("ALTER TABLE dismissed_findings ADD COLUMN IF NOT EXISTS repo_full_name TEXT")
+            .execute(pool)
+            .await;
+    let _ = sqlx::query("ALTER TABLE learned_rules ADD COLUMN IF NOT EXISTS repo_full_name TEXT")
+        .execute(pool)
+        .await;
     let _ = sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_dismissed_repo ON dismissed_findings(repo_full_name)",
     )
     .execute(pool)
     .await;
-    let _ = sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_learned_repo ON learned_rules(repo_full_name)",
-    )
-    .execute(pool)
-    .await;
+    let _ =
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_learned_repo ON learned_rules(repo_full_name)")
+            .execute(pool)
+            .await;
 
     sqlx::query(
         "INSERT INTO schema_version (version) VALUES (14) ON CONFLICT (version) DO NOTHING",
@@ -335,11 +331,9 @@ async fn migrate_v12_roles_and_invites(pool: &PgPool) -> Result<(), sqlx::Error>
     }
 
     // Drop old CHECK, migrate roles, re-add CHECK for new role set.
-    let _ = sqlx::query(
-        "ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check",
-    )
-    .execute(pool)
-    .await;
+    let _ = sqlx::query("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check")
+        .execute(pool)
+        .await;
     sqlx::query("UPDATE users SET role = 'owner' WHERE role = 'admin'")
         .execute(pool)
         .await?;
@@ -349,11 +343,9 @@ async fn migrate_v12_roles_and_invites(pool: &PgPool) -> Result<(), sqlx::Error>
     )
     .execute(pool)
     .await?;
-    sqlx::query(
-        "ALTER TABLE users ALTER COLUMN role SET DEFAULT 'owner'",
-    )
-    .execute(pool)
-    .await?;
+    sqlx::query("ALTER TABLE users ALTER COLUMN role SET DEFAULT 'owner'")
+        .execute(pool)
+        .await?;
     let _ = sqlx::query(
         "ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('owner', 'maintainer', 'viewer'))",
     )

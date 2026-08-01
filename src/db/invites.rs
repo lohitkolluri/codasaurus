@@ -69,7 +69,10 @@ pub async fn list_pending(pool: &DbPool) -> Result<Vec<Invite>, sqlx::Error> {
     )
 }
 
-pub async fn get_pending_by_token(pool: &DbPool, raw_token: &str) -> Result<Option<Invite>, sqlx::Error> {
+pub async fn get_pending_by_token(
+    pool: &DbPool,
+    raw_token: &str,
+) -> Result<Option<Invite>, sqlx::Error> {
     let token_hash = hash_token(raw_token);
     db_fetch_optional!(
         pool,
@@ -80,7 +83,10 @@ pub async fn get_pending_by_token(pool: &DbPool, raw_token: &str) -> Result<Opti
     )
 }
 
-pub async fn get_pending_by_email(pool: &DbPool, email: &str) -> Result<Option<Invite>, sqlx::Error> {
+pub async fn get_pending_by_email(
+    pool: &DbPool,
+    email: &str,
+) -> Result<Option<Invite>, sqlx::Error> {
     db_fetch_optional!(
         pool,
         Invite,

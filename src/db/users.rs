@@ -158,7 +158,10 @@ pub async fn update_user_role(pool: &DbPool, id: i64, role: &str) -> Result<User
 
 /// Move the bootstrap flag to another user (must already be an owner).
 pub async fn transfer_bootstrap(pool: &DbPool, to_user_id: i64) -> Result<User, sqlx::Error> {
-    db_execute!(pool, "UPDATE users SET is_bootstrap = FALSE WHERE is_bootstrap = TRUE")?;
+    db_execute!(
+        pool,
+        "UPDATE users SET is_bootstrap = FALSE WHERE is_bootstrap = TRUE"
+    )?;
     db_fetch_one!(
         pool,
         User,

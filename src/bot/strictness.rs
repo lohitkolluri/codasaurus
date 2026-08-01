@@ -1,7 +1,7 @@
 //! Review strictness presets — maps to severity floor, signal budgets, and LLM tone.
 
-use crate::bot::quality::SignalBudget;
 use crate::bot::policy::PolicyPack;
+use crate::bot::quality::SignalBudget;
 
 /// Org-level review personality (Settings + `.codasaurus.toml`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -72,7 +72,7 @@ impl ReviewStrictness {
             Self::Strict => SignalBudget {
                 max_blocking: base.max_blocking,
                 max_warning: base.max_warning.max(12),
-                max_info: base.max_info.max(2).min(4),
+                max_info: base.max_info.clamp(2, 4),
             },
             Self::Nitpick => SignalBudget {
                 max_blocking: base.max_blocking,
@@ -129,7 +129,10 @@ mod tests {
 
     #[test]
     fn parse_aliases() {
-        assert_eq!(ReviewStrictness::parse("NITPICK"), ReviewStrictness::Nitpick);
+        assert_eq!(
+            ReviewStrictness::parse("NITPICK"),
+            ReviewStrictness::Nitpick
+        );
         assert_eq!(ReviewStrictness::parse("quiet"), ReviewStrictness::Lenient);
         assert_eq!(ReviewStrictness::parse(""), ReviewStrictness::Balanced);
     }

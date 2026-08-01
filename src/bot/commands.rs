@@ -1005,9 +1005,9 @@ async fn spawn_digest(ctx: WebhookContext, pr_number: i64) {
     match timeout(Duration::from_secs(60), async move {
         let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
         let body = if let Some(pool) = bot_db_pool() {
-            let stats = crate::db::reviews::get_stats(pool).await.unwrap_or_else(|_| {
-                serde_json::json!({})
-            });
+            let stats = crate::db::reviews::get_stats(pool)
+                .await
+                .unwrap_or_else(|_| serde_json::json!({}));
             let reviews = stats
                 .get("reviews_last_7_days")
                 .and_then(|v| v.as_i64())
@@ -1023,7 +1023,7 @@ async fn spawn_digest(ctx: WebhookContext, pr_number: i64) {
             let pass = stats
                 .get("pass_rate")
                 .and_then(|v| v.as_f64())
-                .map(|p| format!("{:.0}%", p))
+                .map(|p| format!("{p:.0}%"))
                 .unwrap_or_else(|| "-".into());
             format!(
                 "### Codasaurus digest (7 days)\n\n\

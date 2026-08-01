@@ -102,19 +102,16 @@ async fn create_invite(
             .await?
             .is_some()
         {
-            return Err(ApiError::bad_request("A user with that email already exists"));
+            return Err(ApiError::bad_request(
+                "A user with that email already exists",
+            ));
         }
     }
 
-    let (invite, raw) = db::invites::create_invite(
-        &state.pool,
-        email.as_deref(),
-        &body.role,
-        &actor.email,
-        7,
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let (invite, raw) =
+        db::invites::create_invite(&state.pool, email.as_deref(), &body.role, &actor.email, 7)
+            .await
+            .map_err(|e| ApiError::internal(e.to_string()))?;
 
     db::audit::log_event(
         &state.pool,
@@ -206,9 +203,7 @@ async fn update_user(
     if was_owner && !will_be_owner {
         let owners = db::users::owner_count(&state.pool).await?;
         if owners <= 1 {
-            return Err(ApiError::bad_request(
-                "Cannot demote the last owner",
-            ));
+            return Err(ApiError::bad_request("Cannot demote the last owner"));
         }
     }
     let updated = db::users::update_user_role(&state.pool, id, &body.role).await?;
