@@ -26,8 +26,8 @@ pub async fn get_repo_by_full_name(
 
 pub async fn create_repo(pool: &DbPool, repo: &RepoCreate) -> Result<Repo, sqlx::Error> {
     sqlx::query_as::<_, Repo>(
-        "INSERT INTO repos (github_id, full_name, owner, name, default_branch, installation_id, private)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+        "INSERT INTO repos (github_id, full_name, owner, name, default_branch, installation_id, private, active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1)
          RETURNING *",
     )
     .bind(repo.github_id)

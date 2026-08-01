@@ -52,8 +52,17 @@ pub fn normalize_database_url(raw: &str) -> String {
 }
 
 /// Create a SQLite pool from a database URL, run migrations, and return a `DbPool`.
+///
+/// Runtime storage is SQLite-only in this release. Postgres URLs are rejected with a
+/// clear error (wizard connection tests may still validate Postgres separately).
 pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
-    let pool = sqlx::SqlitePool::connect(database_url).await?;
+    let normalized = normalize_database_url(database_url);
+    if normalized.starts_with("postgres://") || normalized.starts_with("postgresql://") {
+        return Err(sqlx::Error::Configuration(
+            "PostgreSQL runtime is not enabled yet — set DATABASE_URL to sqlite://… (e.g. sqlite:///data/codasaurus.db?mode=rwc)".into(),
+        ));
+    }
+    let pool = sqlx::SqlitePool::connect(&normalized).await?;
     migrations::run_migrations(&pool).await?;
     Ok(DbPool(pool))
 }

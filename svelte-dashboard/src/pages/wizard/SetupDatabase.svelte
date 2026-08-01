@@ -49,20 +49,20 @@
         <input type="radio" name="provider" value="sqlite" bind:group={provider} />
         SQLite
       </label>
-      <div class="radio-hint">Embedded database, no setup required. Database path: codasaurus.db</div>
+      <div class="radio-hint">Embedded database — recommended for self-host. Path: /data/codasaurus.db</div>
     </div>
-    <div class="radio-card" class:selected={provider === "postgres"}>
+    <div class="radio-card" class:selected={provider === "postgres"} style="opacity:0.55">
       <label>
         <input type="radio" name="provider" value="postgres" bind:group={provider} />
         PostgreSQL
       </label>
-      <div class="radio-hint">Requires a running PostgreSQL instance</div>
+      <div class="radio-hint">Connection test only in this release — runtime remains SQLite. Prefer SQLite + volume for production.</div>
     </div>
   </div>
 
   {#if provider === "postgres"}
     <div class="form-group">
-      <label for="pgurl">Database URL</label>
+      <label for="pgurl">Database URL (validated, not used as runtime yet)</label>
       <input id="pgurl" type="text" bind:value={postgresUrl} placeholder="postgresql://user:pass@localhost:5432/codasaurus" />
     </div>
   {/if}

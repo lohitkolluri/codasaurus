@@ -62,6 +62,10 @@ pub struct CheckConfig {
     #[serde(default = "default_true")]
     pub guidelines: bool,
 
+    /// Graph / unused-code detector
+    #[serde(default = "default_true")]
+    pub graph: bool,
+
     /// Glob patterns for files/directories to skip during scanning
     #[serde(default = "default_exclude_patterns")]
     pub exclude_patterns: Vec<String>,
@@ -172,6 +176,7 @@ impl Default for Config {
                 stale_api: false,
                 todo_leaks: true,
                 guidelines: true,
+                graph: true,
                 exclude_patterns: default_exclude_patterns(),
             },
             behavior: BehaviorConfig { strict: false },
@@ -198,8 +203,24 @@ fn apply_enabled_flag(checks: &mut CheckConfig, key: &str, value: &str) {
         "todo_leaks_enabled" => checks.todo_leaks = enabled,
         "stale_api_enabled" => checks.stale_api = enabled,
         "guidelines_enabled" => checks.guidelines = enabled,
+        "graph_enabled" => checks.graph = enabled,
         _ => {}
     }
+}
+
+fn apply_behavior_flag(behavior: &mut BehaviorConfig, key: &str, value: &str) {
+    if key == "default_severity" {
+        // "blocking" means treat warnings as blocking (strict-ish); stored for bot policy
+        let _ = value;
+        let _ = behavior;
+    }
+}
+
+/// Bot policy knobs loaded from DB alongside checks.
+#[derive(Debug, Clone, Default)]
+pub struct BotPolicy {
+    /// Minimum severity to surface: blocking | warning | info
+    pub min_severity: String,
 }
 
 impl Config {
@@ -210,10 +231,62 @@ impl Config {
             if let Ok(entries) = crate::db::config::get_all_config(pool).await {
                 for entry in entries {
                     apply_enabled_flag(&mut config.checks, &entry.key, &entry.value);
+                    apply_behavior_flag(&mut config.behavior, &entry.key, &entry.value);
                 }
             }
         }
         config
+    }
+
+    pub async fn bot_policy(pool: Option<&crate::db::DbPool>) -> BotPolicy {
+        let mut policy = BotPolicy {
+            min_severity: "info".into(),
+        };
+        if let Some(pool) = pool {
+            if let Ok(Some(v)) = crate::db::config::get_config(pool, "default_severity").await {
+                if matches!(v.as_str(), "blocking" | "warning" | "info") {
+                    policy.min_severity = v;
+                }
+            }
+        }
+        policy
+    }
+
+    /// Overlay per-repo `config_json` from the dashboard (`{ "detectors": {...}, "llm_enabled": bool }`).
+    pub fn overlay_repo_config_json(&mut self, config_json: &str) -> Option<bool> {
+        let value: serde_json::Value = serde_json::from_str(config_json).ok()?;
+        if let Some(detectors) = value.get("detectors").and_then(|d| d.as_object()) {
+            for (key, raw) in detectors {
+                let enabled = match raw {
+                    serde_json::Value::Bool(b) => *b,
+                    serde_json::Value::String(s) => {
+                        matches!(s.to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on")
+                    }
+                    _ => continue,
+                };
+                apply_detector_key(&mut self.checks, key, enabled);
+            }
+        }
+        value
+            .get("llm_enabled")
+            .and_then(|v| v.as_bool())
+            .or(Some(true))
+    }
+}
+
+fn apply_detector_key(checks: &mut CheckConfig, key: &str, enabled: bool) {
+    match key {
+        "hallucinated_imports" => checks.hallucinated_imports = enabled,
+        "phantom_deps" => checks.phantom_deps = enabled,
+        "vulnerabilities" => checks.vulnerabilities = enabled,
+        "secrets" => checks.secrets = enabled,
+        "over_engineering" => checks.over_engineering = enabled,
+        "boilerplate" => checks.boilerplate = enabled,
+        "todo_leaks" => checks.todo_leaks = enabled,
+        "stale_api" => checks.stale_api = enabled,
+        "guidelines" => checks.guidelines = enabled,
+        "graph" => checks.graph = enabled,
+        _ => {}
     }
 }
 
@@ -284,3 +357,24 @@ fn find_config() -> Result<Option<PathBuf>> {
 
     Ok(resolved)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overlay_repo_detectors_and_llm_flag() {
+        let mut cfg = Config::default();
+        assert!(cfg.checks.secrets);
+        let llm = cfg
+            .overlay_repo_config_json(
+                r#"{"detectors":{"secrets":false,"graph":false},"llm_enabled":false}"#,
+            )
+            .unwrap();
+        assert!(!llm);
+        assert!(!cfg.checks.secrets);
+        assert!(!cfg.checks.graph);
+        assert!(cfg.checks.hallucinated_imports);
+    }
+}
+

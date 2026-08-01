@@ -131,18 +131,23 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
         all.extend(stale_api::detect(parsed_files));
     }
 
-    // Graph/blast radius detector (always on when graph module is enabled)
-    all.extend(graph::detect(parsed_files));
+    if config.checks.graph {
+        all.extend(graph::detect(parsed_files));
+    }
 
-    all.extend(guidelines::detect(config));
+    if config.checks.guidelines {
+        all.extend(guidelines::detect(config));
+    }
 
-    // Filter findings through cached learning store (user dismissals + learned rules).
-    // On error (poisoned lock, corrupt DB) we log and return all unfiltered findings
-    // rather than silently dropping. The store is opened once and cached.
+    // Prefer shared app DB pool (bot/serve) so dismissals stick; fall back to sidecar file for CLI.
     match LEARNING_STORE.lock() {
         Ok(mut guard) => {
             if guard.is_none() {
-                *guard = LearningStore::open().ok();
+                *guard = if let Some(pool) = crate::bot::CONFIG_POOL.get() {
+                    Some(LearningStore::from_pool(pool))
+                } else {
+                    LearningStore::open().ok()
+                };
             }
             if let Some(ref store) = *guard {
                 match store.filter_findings(&all.findings) {

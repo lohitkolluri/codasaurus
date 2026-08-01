@@ -34,9 +34,14 @@
         api.get("/api/settings"),
       ]);
       repo = data;
-      // Inherit global detector defaults when no per-repo override
-      if (data.detectors && Object.keys(data.detectors).length > 0) {
-        detectors = data.detectors;
+      let cfg = {};
+      try {
+        cfg = data.config_json ? JSON.parse(data.config_json) : {};
+      } catch {
+        cfg = {};
+      }
+      if (cfg.detectors && Object.keys(cfg.detectors).length > 0) {
+        detectors = cfg.detectors;
       } else {
         const DETECTOR_KEYS = [
           "hallucinated_imports", "phantom_deps", "vulnerabilities", "secrets",
@@ -48,7 +53,7 @@
         }
         detectors = defaults;
       }
-      llmEnabled = data.llm_enabled ?? true;
+      llmEnabled = cfg.llm_enabled ?? true;
     } catch (err) {
       error = err.message || "Failed to load repo";
     } finally {
@@ -63,8 +68,8 @@
       const id = $params?.id;
       if (!id) return;
       await api.put(`/api/repos/${id}`, {
-        detectors,
-        llm_enabled: llmEnabled,
+        config_json: JSON.stringify({ detectors, llm_enabled: llmEnabled }),
+        active: repo?.active ?? true,
       });
       saveMsg = "Saved";
       setTimeout(() => (saveMsg = ""), 2000);
