@@ -475,4 +475,3 @@ mod tests {
         assert!(findings.iter().any(|f| f.message.contains("checklist")));
     }
 }
-
