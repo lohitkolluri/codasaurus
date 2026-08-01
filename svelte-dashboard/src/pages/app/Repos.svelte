@@ -54,7 +54,11 @@
 
   async function toggleRepo(id, current) {
     try {
-      await api.put(`/api/repos/${id}`, { config_json: "", active: !current });
+      const repo = repos.find((r) => r.id === id);
+      await api.put(`/api/repos/${id}`, {
+        config_json: repo?.config_json ?? "{}",
+        active: !current,
+      });
       repos = await api.get("/api/repos");
     } catch (err) {
       syncMsg = "Toggle failed: " + (err.message || "unknown error");
@@ -72,7 +76,14 @@
         return result;
       };
       for (const batch of chunk(filtered, 20)) {
-        await Promise.all(batch.map(r => api.put(`/api/repos/${r.id}`, { config_json: "", active })));
+        await Promise.all(
+          batch.map((r) =>
+            api.put(`/api/repos/${r.id}`, {
+              config_json: r.config_json ?? "{}",
+              active,
+            }),
+          ),
+        );
       }
       repos = await api.get("/api/repos");
       syncMsg = `${filtered.length} repos ${active ? "enabled" : "disabled"}`;
@@ -303,8 +314,8 @@
     width: 100%;
   }
   .toggle-btn.active {
-    background: #cf222e;
+    background: var(--success);
     color: #fff;
-    border-color: #cf222e;
+    border-color: var(--success);
   }
 </style>

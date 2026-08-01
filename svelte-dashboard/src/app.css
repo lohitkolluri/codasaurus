@@ -350,11 +350,15 @@ tr:hover td {
 }
 
 .status-badge.passing,
+.status-badge.passed,
 .status-badge.success { border-color: var(--success); color: var(--success); }
-.status-badge.failing { border-color: var(--error); color: var(--error); }
+.status-badge.failing,
+.status-badge.failed,
+.status-badge.error { border-color: var(--error); color: var(--error); }
 .status-badge.warning { border-color: var(--warning); color: var(--warning); }
 .status-badge.pending { border-color: var(--text-muted); color: var(--text-muted); }
-.status-badge.in_progress { border-color: var(--info); color: var(--info); }
+.status-badge.in_progress,
+.status-badge.running { border-color: var(--info); color: var(--info); }
 
 /* Severity text colors */
 .severity-blocking { color: var(--error); font-weight: var(--weight-semibold); }

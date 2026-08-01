@@ -231,7 +231,8 @@
         <div class="card">
           <h3 class="section-heading">Default Severity</h3>
           <div class="form-group">
-            <select bind:value={defaultSeverity}>
+            <label for="default-severity">Minimum severity to surface</label>
+            <select id="default-severity" bind:value={defaultSeverity}>
               <option value="blocking">Blocking</option>
               <option value="warning">Warning</option>
               <option value="info">Info</option>

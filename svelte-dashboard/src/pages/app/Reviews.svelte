@@ -41,7 +41,15 @@
       params.set("offset", String((page - 1) * 20));
 
       const data = await api.get(`/api/reviews?${params.toString()}`);
-      reviews = data.reviews ?? data ?? [];
+      let list = data.reviews ?? data ?? [];
+      if (filterSeverity) {
+        // Client-side severity gate until API supports finding-level filters.
+        list = list.filter((r) => {
+          const sev = (r.max_severity || r.severity || "").toLowerCase();
+          return !sev || sev === filterSeverity;
+        });
+      }
+      reviews = list;
       totalPages = data.total_pages ?? 1;
     } catch (err) {
       error = err.message || "Failed to load reviews";
@@ -108,10 +116,26 @@
       {:else if loading}
         <!-- spinner shown -->
       {:else if reviews.length === 0}
-        <EmptyState message="No reviews found" />
+        <EmptyState
+          message="No reviews found"
+          actionLabel="Open dashboard"
+          onAction={() => push("/app/dashboard")}
+        />
       {:else}
         {#each reviews as review}
-          <div class="review-card" style="margin-bottom:8px" onclick={() => goToReview(review.id)} role="button" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter') goToReview(review.id); }}>
+          <div
+            class="review-card"
+            style="margin-bottom:8px;cursor:pointer"
+            onclick={() => goToReview(review.id)}
+            role="button"
+            tabindex="0"
+            onkeydown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                goToReview(review.id);
+              }
+            }}
+          >
             <h3>{review.pr_title ?? `PR #${review.pr_number}`}</h3>
             <div class="review-meta">
               <span>{review.repo_name ?? `Repo #${review.repo_id}`}</span>
