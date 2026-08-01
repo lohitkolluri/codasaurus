@@ -11,13 +11,13 @@
       const status = await fetch("/api/setup/status", { credentials: "same-origin" }).then((r) =>
         r.ok ? r.json() : null,
       );
-      setupComplete = !!status?.complete;
-      if (!setupComplete) {
+      if (status && !status.complete) {
         push("/setup");
         return;
       }
+      setupComplete = true;
     } catch {
-      /* stay on landing */
+      setupComplete = true;
     } finally {
       checking = false;
     }
@@ -26,51 +26,47 @@
 
 {#if !checking && setupComplete}
   <div class="landing">
-    <div class="landing-bg" aria-hidden="true"></div>
+    <div class="landing-stage" aria-hidden="true">
+      <div class="landing-glow landing-glow-a"></div>
+      <div class="landing-glow landing-glow-b"></div>
+      <div class="landing-grid"></div>
+      <p class="landing-wordmark">CODASAURUS</p>
+    </div>
+
     <header class="landing-nav">
       <a href="#/" class="landing-brand">
-        <BrandMark size={28} />
+        <BrandMark size={24} />
         <span>Codasaurus</span>
       </a>
-      <div class="landing-nav-actions">
-        <a href="https://github.com/lohitkolluri/codasaurus" target="_blank" rel="noopener noreferrer"
-          >GitHub</a
+      <nav class="landing-nav-actions">
+        <a
+          href="https://github.com/lohitkolluri/codasaurus"
+          target="_blank"
+          rel="noopener noreferrer">GitHub</a
         >
-        <a class="landing-cta-secondary" href="#/login">Sign in</a>
-      </div>
+        <a class="landing-nav-signin" href="#/login">Sign in</a>
+      </nav>
     </header>
 
     <main class="landing-hero">
-      <p class="landing-kicker">Self-hosted · Free forever · BYOK optional</p>
-      <h1 class="landing-title">Codasaurus</h1>
+      <p class="landing-eyebrow">Self-hosted GitHub App</p>
+      <h1>Codasaurus</h1>
       <p class="landing-lead">
-        A GitHub App that reviews PRs like a senior who actually reads the diff — on your Postgres,
-        with Tier-1 detectors first and your LLM keys only when you want them.
+        PR review that reads the diff — Tier-1 detectors first, your LLM only when you ask.
       </p>
       <div class="landing-ctas">
         <a class="landing-cta" href="#/login">Open dashboard</a>
         <a
-          class="landing-cta-secondary"
+          class="landing-ghost"
           href="https://github.com/lohitkolluri/codasaurus#readme"
           target="_blank"
-          rel="noopener noreferrer">Run for $0</a
+          rel="noopener noreferrer">Read the docs</a
         >
       </div>
     </main>
 
-    <section class="landing-points">
-      <article>
-        <h2>No seat tax</h2>
-        <p>One binary, invite links for your team, permanent free host + Postgres paths documented.</p>
-      </article>
-      <article>
-        <h2>Tier-1 first</h2>
-        <p>Secrets, phantom deps, OSV, IaC, and stale APIs work with the LLM off.</p>
-      </article>
-      <article>
-        <h2>Learns in-place</h2>
-        <p>Dismissals, comment mining, and 👎 reactions feed your Postgres learning store.</p>
-      </article>
-    </section>
+    <footer class="landing-foot">
+      <p>Free forever<span aria-hidden="true"> · </span>No seat tax<span aria-hidden="true"> · </span>Learns in your Postgres</p>
+    </footer>
   </div>
 {/if}
