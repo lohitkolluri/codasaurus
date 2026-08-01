@@ -260,9 +260,7 @@ pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
             .after_connect(|conn, _meta| {
                 Box::pin(async move {
                     use sqlx::Executor;
-                    let _ = conn
-                        .execute("SET application_name = 'codasaurus'")
-                        .await;
+                    let _ = conn.execute("SET application_name = 'codasaurus'").await;
                     let _ = conn.execute("SET statement_timeout = '60s'").await;
                     Ok(())
                 })

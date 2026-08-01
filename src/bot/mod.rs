@@ -134,10 +134,7 @@ pub fn clear_bot_config() {
 
 /// Snapshot of the live bot config (reloaded after wizard / settings updates).
 pub(crate) fn current_bot_config() -> Option<BotConfig> {
-    BOT_CONFIG
-        .read()
-        .expect("BOT_CONFIG lock poisoned")
-        .clone()
+    BOT_CONFIG.read().expect("BOT_CONFIG lock poisoned").clone()
 }
 
 /// Start durable queue workers once. Safe to call after wizard GitHub setup.

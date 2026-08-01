@@ -272,8 +272,8 @@ async fn setup_database(
                     .map_err(|e| ApiError::bad_request(format!("Test query failed: {e}")))?;
                 test_pool.close().await;
                 // Do not persist credentials in app_config — use DATABASE_URL env.
-                message = "Postgres URL validated (not stored; set DATABASE_URL for the server)"
-                    .into();
+                message =
+                    "Postgres URL validated (not stored; set DATABASE_URL for the server)".into();
             }
 
             db::config::set_config(&state.pool, "database_provider", "postgres").await?;

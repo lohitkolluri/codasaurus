@@ -227,7 +227,10 @@ async fn security_headers_middleware(req: Request, next: Next) -> Response {
             "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'",
         ),
     );
-    headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
     headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
     headers.insert(
         header::REFERRER_POLICY,
@@ -400,7 +403,10 @@ async fn metrics_handler(headers: axum::http::HeaderMap) -> impl IntoResponse {
     let authorized = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer ").or_else(|| v.strip_prefix("bearer ")))
+        .and_then(|v| {
+            v.strip_prefix("Bearer ")
+                .or_else(|| v.strip_prefix("bearer "))
+        })
         .is_some_and(|token| bool::from(token.as_bytes().ct_eq(expected.as_bytes())));
 
     if !authorized {
@@ -413,10 +419,7 @@ async fn metrics_handler(headers: axum::http::HeaderMap) -> impl IntoResponse {
     let body = crate::metrics::render_prometheus();
     (
         StatusCode::OK,
-        [(
-            header::CONTENT_TYPE,
-            "text/plain; version=0.0.4",
-        )],
+        [(header::CONTENT_TYPE, "text/plain; version=0.0.4")],
         body,
     )
         .into_response()

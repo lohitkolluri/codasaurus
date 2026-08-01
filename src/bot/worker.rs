@@ -47,12 +47,8 @@ pub fn start_review_worker(pool: crate::db::DbPool) {
                                 job_id = job.id,
                                 "no bot config; requeueing after delay"
                             );
-                            let _ = queue::mark_failed(
-                                &pool,
-                                job.id,
-                                "bot config not configured",
-                            )
-                            .await;
+                            let _ = queue::mark_failed(&pool, job.id, "bot config not configured")
+                                .await;
                             let _ =
                                 queue::requeue_if_retryable(&pool, job.id, job.attempts, 3).await;
                             tokio::time::sleep(Duration::from_secs(5)).await;

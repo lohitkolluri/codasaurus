@@ -180,11 +180,10 @@ pub async fn accept_oidc(pool: &DbPool, email: &str) -> Result<Option<User>, sql
         return Ok(None);
     };
 
-    let existing: Option<User> =
-        sqlx::query_as("SELECT * FROM users WHERE email = $1")
-            .bind(email)
-            .fetch_optional(&mut *tx)
-            .await?;
+    let existing: Option<User> = sqlx::query_as("SELECT * FROM users WHERE email = $1")
+        .bind(email)
+        .fetch_optional(&mut *tx)
+        .await?;
     if let Some(u) = existing {
         tx.commit().await?;
         return Ok(Some(u));

@@ -143,10 +143,7 @@ fn clear_cookie() -> String {
 }
 
 fn client_ip(headers: &axum::http::HeaderMap) -> String {
-    if let Some(xff) = headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-    {
+    if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
         if let Some(first) = xff.split(',').next() {
             let t = first.trim();
             if !t.is_empty() {
@@ -165,9 +162,7 @@ fn client_ip(headers: &axum::http::HeaderMap) -> String {
 
 fn check_auth_rate_limit(headers: &axum::http::HeaderMap, email: &str) -> Result<(), ApiError> {
     let key = format!("{}/{}", client_ip(headers), email.trim().to_lowercase());
-    let mut map = LOGIN_ATTEMPTS
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let mut map = LOGIN_ATTEMPTS.lock().unwrap_or_else(|e| e.into_inner());
     let now = Instant::now();
     map.retain(|_, (_, started)| now.duration_since(*started) < LOGIN_RATE_WINDOW);
     let entry = map.entry(key).or_insert((0, now));

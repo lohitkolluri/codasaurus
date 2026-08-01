@@ -141,8 +141,7 @@ pub async fn bootstrap_manifests(
         to_fetch.push(path);
     }
 
-    let fetched =
-        fetch_repo_files_parallel(client, headers, repo, &to_fetch, git_ref, 5).await;
+    let fetched = fetch_repo_files_parallel(client, headers, repo, &to_fetch, git_ref, 5).await;
     for (path, content) in fetched {
         if let Ok(parsed) = crate::parser::parse_file(&path, &content) {
             out.push(parsed);
