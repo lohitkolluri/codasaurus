@@ -39,11 +39,7 @@ async fn list_audit(
     State(state): State<AppState>,
     Query(params): Query<ListAuditParams>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let limit = params
-        .per_page
-        .or(params.limit)
-        .unwrap_or(50)
-        .clamp(1, 500);
+    let limit = params.per_page.or(params.limit).unwrap_or(50).clamp(1, 500);
     let offset = if let Some(page) = params.page {
         ((page.max(1) - 1) * limit).max(0)
     } else {

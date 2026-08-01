@@ -112,7 +112,9 @@ async fn set_setting(
     if key == "openrouter_api_key"
         && (body.value.is_empty() || body.value.contains('•') || body.value.contains('*'))
     {
-        return Ok(Json(json!({ "status": "ok", "key": key, "skipped": "unchanged" })));
+        return Ok(Json(
+            json!({ "status": "ok", "key": key, "skipped": "unchanged" }),
+        ));
     }
     if key == "llm_daily_budget_usd" && !body.value.trim().is_empty() {
         body.value
@@ -132,14 +134,7 @@ async fn set_setting(
             .map_err(ApiError::bad_request)?;
     }
     db::config::set_config(&state.pool, &key, &body.value).await?;
-    db::audit::log_event(
-        &state.pool,
-        "settings.updated",
-        None,
-        Some(&key),
-        None,
-    )
-    .await;
+    db::audit::log_event(&state.pool, "settings.updated", None, Some(&key), None).await;
     if key == "offline_mode" {
         let on = matches!(
             body.value.to_ascii_lowercase().as_str(),
