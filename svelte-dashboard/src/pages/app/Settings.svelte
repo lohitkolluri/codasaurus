@@ -28,17 +28,24 @@
   let severitySaving = $state(false);
   let severityMsg = $state("");
 
-  /* Model search */
+  /* Model search (review + cheap) */
   let models = $state([]);
   let modelSearch = $state("");
   let modelDropdown = $state(false);
-  let modelFiltered = $derived.by(() => {
-    if (!modelSearch) return models.slice(0, 20);
-    const q = modelSearch.toLowerCase();
+  let cheapModelSearch = $state("");
+  let cheapModelDropdown = $state(false);
+  let modelFiltered = $derived.by(() => filterModels(modelSearch));
+  let cheapModelFiltered = $derived.by(() => filterModels(cheapModelSearch));
+
+  const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+
+  function filterModels(q) {
+    if (!q) return models.slice(0, 20);
+    const needle = q.toLowerCase();
     return models
-      .filter(m => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
+      .filter((m) => m.id.toLowerCase().includes(needle) || m.name.toLowerCase().includes(needle))
       .slice(0, 15);
-  });
+  }
 
   const DETECTOR_KEYS = [
     "hallucinated_imports", "phantom_deps", "vulnerabilities", "secrets",
@@ -62,8 +69,8 @@
   let rulesMsg = $state("");
 
   const PROVIDER_DEFAULTS = {
-    openrouter: { model: "openai/gpt-4o", baseUrl: "https://openrouter.ai/api/v1" },
-    ollama: { model: "llama3", baseUrl: "http://localhost:11434" },
+    openrouter: { model: "openai/gpt-4o", baseUrl: OPENROUTER_BASE },
+    ollama: { model: "llama3", baseUrl: "http://localhost:11434/v1" },
     custom: { model: "", baseUrl: "" },
     disabled: { model: "", baseUrl: "" },
   };
@@ -79,8 +86,15 @@
   function handleProviderChange(val) {
     llmProvider = val;
     const cfg = PROVIDER_DEFAULTS[val];
-    if (cfg) { llmModel = cfg.model; llmBaseUrl = cfg.baseUrl; modelSearch = cfg.model; }
-    if (val === "openrouter" && models.length === 0) loadModels();
+    if (cfg) {
+      llmModel = cfg.model;
+      llmBaseUrl = cfg.baseUrl;
+      modelSearch = cfg.model;
+    }
+    if (val === "openrouter") {
+      llmBaseUrl = OPENROUTER_BASE;
+      if (models.length === 0) loadModels();
+    }
   }
 
   function selectModel(m) {
@@ -89,12 +103,26 @@
     modelDropdown = false;
   }
 
+  function selectCheapModel(m) {
+    llmModelCheap = m.id;
+    cheapModelSearch = m.id;
+    cheapModelDropdown = false;
+  }
+
   function handleModelKeydown(e) {
     if (e.key === "Escape") { modelDropdown = false; e.target.blur(); }
   }
 
+  function handleCheapModelKeydown(e) {
+    if (e.key === "Escape") { cheapModelDropdown = false; e.target.blur(); }
+  }
+
   function handleModelBlur() {
     setTimeout(() => (modelDropdown = false), 150);
+  }
+
+  function handleCheapModelBlur() {
+    setTimeout(() => (cheapModelDropdown = false), 150);
   }
 
   onMount(async () => {
@@ -107,7 +135,11 @@
       llmModelCheap = data.llm_model_cheap ?? "";
       llmBaseUrl = data.llm_base_url ?? "";
       llmDailyBudget = data.llm_daily_budget_usd ?? "";
+      if (llmProvider === "openrouter" && !llmBaseUrl.trim()) {
+        llmBaseUrl = OPENROUTER_BASE;
+      }
       modelSearch = llmModel;
+      cheapModelSearch = llmModelCheap;
       if (llmProvider === "openrouter") loadModels();
       const toggles = {};
       for (const key of DETECTOR_KEYS) {
@@ -144,6 +176,8 @@
     llmSaving = true; llmMsg = "";
     try {
       if (modelSearch.trim()) llmModel = modelSearch.trim();
+      if (cheapModelSearch.trim()) llmModelCheap = cheapModelSearch.trim();
+      if (llmProvider === "openrouter") llmBaseUrl = OPENROUTER_BASE;
       const updates = [
         api.put("/api/settings/llm_provider", { value: llmProvider }),
         api.put("/api/settings/llm_model", { value: llmModel }),
@@ -231,13 +265,12 @@
       {:else}
         <div class="page-toolbar compact">
           <div>
-            <p class="eyebrow">Control plane</p>
             <h1 class="page-title">Settings</h1>
-            <p class="page-description">LLM, detectors, policy pack, offline mode, and learned rules.</p>
+            <p class="page-description">LLM, detectors, policy, offline mode, and learned rules.</p>
           </div>
         </div>
         <div class="settings-stack">
-        <div class="card settings-card">
+        <div class="card settings-card settings-card-wide">
           <h3 class="section-heading">LLM Configuration</h3>
           <div class="form-group">
             <label for="llm-provider">Provider</label>
@@ -253,6 +286,7 @@
               <label for="llm-key">API Key</label>
               <input id="llm-key" type="password" bind:value={llmKey} placeholder="sk-..." />
             </div>
+            <div class="settings-llm-grid">
             <div class="form-group model-search">
               <label for="llm-model">Model (review_diff)</label>
               {#if llmProvider === "openrouter"}
@@ -279,14 +313,42 @@
                 <input id="llm-model" type="text" bind:value={llmModel} />
               {/if}
             </div>
-            <div class="form-group">
+            <div class="form-group model-search">
               <label for="llm-model-cheap">Cheap model (summarize / describe / ask)</label>
-              <input id="llm-model-cheap" type="text" bind:value={llmModelCheap}
-                placeholder="e.g. openai/gpt-4o-mini or anthropic/claude-haiku-4.5" />
+              {#if llmProvider === "openrouter"}
+                <div class="search-wrap">
+                  <input id="llm-model-cheap" type="text" bind:value={cheapModelSearch}
+                    oninput={() => (cheapModelDropdown = true)}
+                    onfocus={() => (cheapModelDropdown = true)}
+                    onkeydown={handleCheapModelKeydown}
+                    onblur={handleCheapModelBlur}
+                    placeholder="Search models…" autocomplete="off" />
+                  {#if cheapModelDropdown && cheapModelFiltered.length > 0}
+                    <div class="search-dropdown">
+                      {#each cheapModelFiltered as m}
+                        <button class="search-item" class:active={m.id === llmModelCheap}
+                          onmousedown={(e) => e.preventDefault()}
+                          onclick={() => selectCheapModel(m)}>
+                          <span class="search-id">{m.id}</span>
+                        </button>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              {:else}
+                <input id="llm-model-cheap" type="text" bind:value={llmModelCheap}
+                  placeholder="optional cheaper model id" />
+              {/if}
+            </div>
             </div>
             <div class="form-group">
               <label for="llm-url">Base URL</label>
-              <input id="llm-url" type="text" bind:value={llmBaseUrl} />
+              {#if llmProvider === "openrouter"}
+                <input id="llm-url" type="text" value={OPENROUTER_BASE} readonly class="input-readonly" />
+                <p class="field-hint">Fixed for OpenRouter. Saved automatically.</p>
+              {:else}
+                <input id="llm-url" type="text" bind:value={llmBaseUrl} placeholder="https://…" />
+              {/if}
             </div>
             <div class="form-group">
               <label for="llm-budget">Daily LLM budget USD (0 = unlimited)</label>
