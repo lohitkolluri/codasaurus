@@ -12,6 +12,17 @@
     { path: "/app/settings/github", label: "GitHub App", icon: KeyRound },
     { path: "/app/audit", label: "Audit log", icon: ClipboardList },
   ];
+
+  /** Longest matching nav prefix wins (avoids Settings+GitHub both active). */
+  function isActive(path) {
+    const loc = $location || "";
+    const matches = navItems.filter(
+      (item) => loc === item.path || loc.startsWith(`${item.path}/`)
+    );
+    if (matches.length === 0) return false;
+    const best = matches.reduce((a, b) => (a.path.length >= b.path.length ? a : b));
+    return best.path === path;
+  }
 </script>
 
 <aside class="app-sidebar">
@@ -26,7 +37,8 @@
           <a
             href={item.path}
             use:link
-            class:active={$location?.startsWith(item.path)}
+            class:active={isActive(item.path)}
+            aria-current={isActive(item.path) ? "page" : undefined}
           >
             <svelte:component this={item.icon} size={16} strokeWidth={1.8} />
             <span>{item.label}</span>
