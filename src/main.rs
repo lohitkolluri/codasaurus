@@ -61,8 +61,9 @@ fn main() -> Result<()> {
                     || std::env::var_os("RENDER_SERVICE_ID").is_some() =>
                 {
                     anyhow::bail!(
-                        "DATABASE_URL is required on Render. Link a Postgres database \
-                         (use the Internal Database URL) or set DATABASE_URL in the service env."
+                        "DATABASE_URL is required on Render. Set it to a Neon Free \
+                         (or other always-free) Postgres URI — not Render free Postgres \
+                         (that plan expires). See docs/run-for-free.md."
                     );
                 }
                 _ => "postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus".into(),

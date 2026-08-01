@@ -38,15 +38,26 @@ impl DbPool {
     }
 }
 
+/// Trim paste noise (quotes, whitespace) from Render/Neon env values.
+pub fn trim_database_url(raw: &str) -> String {
+    let t = raw.trim();
+    if (t.starts_with('"') && t.ends_with('"')) || (t.starts_with('\'') && t.ends_with('\'')) {
+        t[1..t.len() - 1].trim().to_string()
+    } else {
+        t.to_string()
+    }
+}
+
 /// Normalize a database URL by percent-encoding special characters in the
 /// password portion (like `@`, `:`, `#`, `%`, `?`). Users often paste raw
 /// passwords into connection strings, which breaks URL parsing.
 pub fn normalize_database_url(raw: &str) -> String {
+    let raw = trim_database_url(raw);
     if !raw.starts_with("postgres://") && !raw.starts_with("postgresql://") {
-        return raw.to_string();
+        return raw;
     }
-    if url::Url::parse(raw).is_ok() {
-        return raw.to_string();
+    if url::Url::parse(&raw).is_ok() {
+        return raw;
     }
     if let Some(at_pos) = raw.rfind('@') {
         let before_at = &raw[..at_pos];
@@ -66,7 +77,40 @@ pub fn normalize_database_url(raw: &str) -> String {
             return format!("{prefix}{encoded}{after_at}");
         }
     }
-    raw.to_string()
+    raw
+}
+
+/// Host:port/db for logs — never include user/password.
+fn safe_db_target(url: &str) -> String {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return "(unparseable DATABASE_URL)".into();
+    };
+    let host = parsed.host_str().unwrap_or("?");
+    let port = parsed.port().unwrap_or(5432);
+    let db = parsed.path().trim_start_matches('/');
+    if db.is_empty() {
+        format!("{host}:{port}")
+    } else {
+        format!("{host}:{port}/{db}")
+    }
+}
+
+fn is_local_pg_host(host: &str) -> bool {
+    let host = host.to_ascii_lowercase();
+    host.is_empty()
+        || host == "localhost"
+        || host == "127.0.0.1"
+        || host == "::1"
+        || host == "postgres" // compose service name
+        || host.ends_with(".local")
+}
+
+fn append_query_param(url: &str, key: &str, value: &str) -> String {
+    if url.contains('?') {
+        format!("{url}&{key}={value}")
+    } else {
+        format!("{url}?{key}={value}")
+    }
 }
 
 /// Ensure remote cloud Postgres URLs request TLS (`sslmode=require`).
@@ -75,14 +119,7 @@ pub fn ensure_sslmode(url: &str) -> String {
     let Ok(parsed) = url::Url::parse(url) else {
         return url.to_string();
     };
-    let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
-    let local = host.is_empty()
-        || host == "localhost"
-        || host == "127.0.0.1"
-        || host == "::1"
-        || host == "postgres" // compose service name
-        || host.ends_with(".local");
-    if local {
+    if is_local_pg_host(parsed.host_str().unwrap_or("")) {
         return url.to_string();
     }
     let has_ssl = parsed
@@ -91,11 +128,25 @@ pub fn ensure_sslmode(url: &str) -> String {
     if has_ssl {
         return url.to_string();
     }
-    if url.contains('?') {
-        format!("{url}&sslmode=require")
-    } else {
-        format!("{url}?sslmode=require")
+    append_query_param(url, "sslmode", "require")
+}
+
+/// Give Neon / free DBs time to wake during the TCP+TLS handshake.
+/// sqlx maps libpq `connect_timeout` (seconds) into the driver.
+pub fn ensure_connect_timeout(url: &str, secs: u64) -> String {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return url.to_string();
+    };
+    if is_local_pg_host(parsed.host_str().unwrap_or("")) {
+        return url.to_string();
     }
+    let has = parsed
+        .query_pairs()
+        .any(|(k, _)| k.eq_ignore_ascii_case("connect_timeout"));
+    if has {
+        return url.to_string();
+    }
+    append_query_param(url, "connect_timeout", &secs.to_string())
 }
 
 fn free_tier_hints(database_url: &str) -> bool {
@@ -171,29 +222,77 @@ pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
         .unwrap_or_else(|| default_acquire_timeout_secs(&normalized))
         .clamp(5, 120);
 
+    // Per-attempt handshake budget; Neon cold start often needs >5s.
+    let connect_timeout_secs = acquire_secs.min(60).max(15);
+    let normalized = ensure_connect_timeout(&normalized, connect_timeout_secs);
+    let target = safe_db_target(&normalized);
+    let free = free_tier_hints(&normalized);
+    let attempts: u32 = if free { 4 } else { 2 };
+
     tracing::info!(
+        target = %target,
         max_connections,
         acquire_secs,
-        free_tier = free_tier_hints(&normalized),
+        connect_timeout_secs,
+        free_tier = free,
+        attempts,
         "connecting to PostgreSQL"
     );
+    println!("  Connecting to PostgreSQL at {target} (up to {attempts} attempts)…");
 
-    let pool = PgPoolOptions::new()
-        .max_connections(max_connections)
-        .min_connections(0)
-        .acquire_timeout(Duration::from_secs(acquire_secs))
-        .idle_timeout(Duration::from_secs(600))
-        .max_lifetime(Duration::from_secs(1800))
-        .test_before_acquire(false)
-        .connect(&normalized)
-        .await
-        .map_err(|e| {
-            tracing::error!(
-                error = %e,
-                "PostgreSQL connect failed — check DATABASE_URL, SSL (sslmode=require), and that the DB is reachable (Render+Neon is the recommended free stack; see docs/run-for-free.md)"
+    let mut last_err = None;
+    let mut pool = None;
+    for attempt in 1..=attempts {
+        match PgPoolOptions::new()
+            .max_connections(max_connections)
+            .min_connections(0)
+            .acquire_timeout(Duration::from_secs(acquire_secs))
+            .idle_timeout(Duration::from_secs(600))
+            .max_lifetime(Duration::from_secs(1800))
+            .test_before_acquire(false)
+            .connect(&normalized)
+            .await
+        {
+            Ok(p) => {
+                pool = Some(p);
+                break;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    attempt,
+                    attempts,
+                    target = %target,
+                    error = %e,
+                    "PostgreSQL connect attempt failed"
+                );
+                eprintln!("  PostgreSQL connect attempt {attempt}/{attempts} failed: {e}");
+                last_err = Some(e);
+                if attempt < attempts {
+                    let backoff = Duration::from_secs(2u64.pow(attempt.saturating_sub(1)).min(8));
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
+    }
+
+    let pool = match pool {
+        Some(p) => p,
+        None => {
+            let e = last_err.unwrap_or_else(|| {
+                sqlx::Error::Configuration("PostgreSQL connect failed with no error".into())
+            });
+            let hint = format!(
+                "PostgreSQL connect failed for {target}. \
+                 On Render: set DATABASE_URL to a Neon Free *direct/session* URI \
+                 (not Render free Postgres — it expires; not Supabase :6543 transaction pooler). \
+                 Open the Neon console once to wake the compute, then redeploy. \
+                 See docs/run-for-free.md. Error: {e}"
             );
-            e
-        })?;
+            tracing::error!("{hint}");
+            eprintln!("  ✖ {hint}");
+            return Err(e);
+        }
+    };
     migrations::run_migrations(&pool).await?;
     Ok(DbPool(pool))
 }
@@ -235,5 +334,26 @@ mod tests {
     #[test]
     fn free_tier_skips_local() {
         assert!(!free_tier_hints("postgres://u:p@127.0.0.1:5432/app"));
+    }
+
+    #[test]
+    fn trims_quoted_database_url() {
+        assert_eq!(
+            trim_database_url("  \"postgres://u:p@h/db\"  "),
+            "postgres://u:p@h/db"
+        );
+    }
+
+    #[test]
+    fn adds_connect_timeout_for_remote() {
+        let u = ensure_connect_timeout("postgres://u:p@ep-x.neon.tech/neondb", 30);
+        assert!(u.contains("connect_timeout=30"));
+    }
+
+    #[test]
+    fn safe_target_hides_password() {
+        let t = safe_db_target("postgres://u:s3cret@ep-x.neon.tech:5432/neondb");
+        assert_eq!(t, "ep-x.neon.tech:5432/neondb");
+        assert!(!t.contains("s3cret"));
     }
 }

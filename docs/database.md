@@ -53,22 +53,25 @@ DATABASE_URL=postgresql://user:pass@host:5432/dbname
 
 ### `pool timed out while waiting for an open connection`
 
-Usually means the app could not get a live DB connection in time:
+The app could not open a live Postgres connection before the timeout. On free stacks this is almost always **URL / wake**, not “need a bigger pool.”
 
 | Check | Fix |
 | --- | --- |
-| Missing / wrong `DATABASE_URL` | Set Internal URL from Render DB → Info |
-| External URL + no TLS | Redeploy latest Codasaurus (TLS built-in) or add `?sslmode=require` |
-| Wrong region / unreachable host | Same-region Internal URL |
-| Connection cap exhausted | Lower `CODASAURUS_DB_MAX_CONNECTIONS` (e.g. `3`) |
-| Neon paused / cold start | Wait and retry; raise `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS` (default `30`) |
+| Missing / wrong `DATABASE_URL` | Neon Free direct/session URI (see [run-for-free.md](run-for-free.md)) |
+| Neon compute asleep | Open the Neon console once, then redeploy |
+| TLS | Latest Codasaurus adds `sslmode=require` for remote hosts automatically |
+| Transaction pooler (`:6543`) | Use session/direct instead |
+| Render free Postgres | Expires — switch to Neon |
+| Still stuck | Set `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS=90` and `CODASAURUS_FREE_TIER=1` |
+
+Logs should show `Connecting to PostgreSQL at host:port/db` (password never printed).
 
 ## Pool tuning
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `CODASAURUS_DB_MAX_CONNECTIONS` | `16` local / `5` on Render | Clamped 2–64; stay under Postgres `max_connections` |
-| `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS` | `30` | Wait for a free connection / slow wake |
+| `CODASAURUS_DB_MAX_CONNECTIONS` | `16` local / `3` free-tier | Clamped 2–64 |
+| `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS` | `30` local / `60` free-tier | Neon wake + pool wait |
 | idle timeout | 10m | Recycle idle clients |
 | max lifetime | 30m | Align with PG / proxy lifetimes |
 
