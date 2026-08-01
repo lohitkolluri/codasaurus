@@ -1,6 +1,12 @@
 # Commands
 
+<p>
+  <img src="https://img.shields.io/badge/@codasaurus-commands-8b5cf6" alt="Commands">
+  <a href="README.md"><img src="https://img.shields.io/badge/docs-index-111827" alt="Docs index"></a>
+</p>
+
 Mention **`@codasaurus`** (or your App’s slug) on a pull request comment. Commands are case-insensitive; extra words after the verb become arguments for `ask` / `ignore`.
+
 
 ## Core review
 

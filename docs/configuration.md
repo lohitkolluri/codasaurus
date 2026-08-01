@@ -1,6 +1,13 @@
 # Configuration
 
+<p>
+  <img src="https://img.shields.io/badge/config-env%20%7C%20TOML%20%7C%20DB-64748b" alt="Config">
+  <img src="https://img.shields.io/badge/offline-fail--closed-111827" alt="Offline">
+  <a href="README.md"><img src="https://img.shields.io/badge/docs-index-111827" alt="Docs index"></a>
+</p>
+
 Codasaurus merges **environment variables**, optional **TOML**, and **dashboard / DB** settings. Precedence for GitHub App credentials: env → DB (wizard). Detector toggles and policy prefer DB overlays when present.
+
 
 ## Process commands
 
@@ -19,7 +26,7 @@ codasaurus version
 | `DATABASE_URL`                  | recommended         | Postgres URL (default `postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus`) |
 | `CODASAURUS_DB_MAX_CONNECTIONS`     | no          | Pool size (default `16`, or `3` on free/Render/Neon hosts) |
 | `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS`| no          | Wait for a free connection (default `30`, or `60` on free hosts) |
-| `CODASAURUS_FREE_TIER`              | no          | `1` — force free-tier pool + concurrency defaults |
+| `CODASAURUS_FREE_TIER`              | no          | `1` forces free-tier pool + concurrency defaults |
 | `CODASAURUS_DATA_DIR`               | no          | Data directory (Docker: `/data`) |
 | `PORT` / `--port`               | no                  | Listen port (default `3000`)                                                        |
 | `PUBLIC_URL`                    | recommended in prod | Canonical HTTPS origin for GitHub manifest callbacks                                |
@@ -44,7 +51,7 @@ codasaurus version
 | `CODASAURUS_MODEL`                  | Strong model for structured `review_diff`                                      |
 | `CODASAURUS_MODEL_CHEAP`            | Cheap model for summarize / describe / ask / changelog (defaults from primary) |
 | `CODASAURUS_LLM_DAILY_BUDGET_USD`   | Hard daily spend cap (estimate); `0` / unset = unlimited                       |
-| `CODASAURUS_OFFLINE`                | `1` / `true` — fail-closed: no LLM socket; registry/OSV cache-only             |
+| `CODASAURUS_OFFLINE`                | `1` / `true`: fail-closed (no LLM socket; registry/OSV cache-only)             |
 | `CODASAURUS_MAX_LLM_DIFF_CHARS`     | Cap chars sent to `review_diff` (default `8000`)                               |
 | `CODASAURUS_AUTO_IMPROVE_MAX_FILES` | Skip auto improve above this file count (default `40`)                         |
 | `CODASAURUS_AUTO_IMPROVE_MAX_DIFF`  | Cap aggregated patch chars for auto improve (default `24000`)                  |
@@ -122,7 +129,7 @@ Per-repo overlays and policy packs are edited in the dashboard (`config_json`, f
 
 | `egress_profile` | Meaning                                                                                             |
 | ---------------- | --------------------------------------------------------------------------------------------------- |
-| `offline`        | `CODASAURUS_OFFLINE` or dashboard `offline_mode` — no LLM; registries/OSV fail-closed or cache-only |
+| `offline`        | `CODASAURUS_OFFLINE` or dashboard `offline_mode`: no LLM; registries/OSV fail-closed or cache-only |
 | `byok-only`      | LLM endpoint/key configured; Tier‑1 network allowed                                                 |
 | `full`           | Not offline; no LLM configured (Tier‑1 only)                                                        |
 

@@ -1,8 +1,16 @@
-# Database — PostgreSQL
+# Database (PostgreSQL)
+
+<p>
+  <img src="https://img.shields.io/badge/db-PostgreSQL-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL">
+  <img src="https://img.shields.io/badge/sqlite-gone-lightgrey" alt="No SQLite">
+  <a href="run-for-free.md"><img src="https://img.shields.io/badge/%240-free%20hosts-2ea44f" alt="Free hosts"></a>
+  <a href="README.md"><img src="https://img.shields.io/badge/docs-index-111827" alt="Docs index"></a>
+</p>
 
 Codasaurus uses **one PostgreSQL database** for all durable state: repos, reviews, findings, the review job queue, sessions, learning, webhooks, and `agent_events`.
 
 There is no SQLite mode and no Redis requirement.
+
 
 ## Quick start
 
@@ -23,26 +31,23 @@ export DATABASE_URL="postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus"
 codasaurus serve --port 3000
 ```
 
-Unset `DATABASE_URL` falls back to that same local default (**not** on Render — there it is required).
+Unset `DATABASE_URL` falls back to that same local default (**not** on Render; there it is required).
 
-**$0 forever (no trials):** [run-for-free.md](run-for-free.md) — Render free web + Neon Free Postgres only.
+**$0 forever (no trials):** [run-for-free.md](run-for-free.md). Render free web + Aiven Free Postgres (or Neon).
 
-## Render / Neon / Supabase
+## Cloud Postgres (Aiven / Neon / Supabase)
 
-1. Create a Postgres database.
+1. Create a Postgres database on an always-free plan (or self-host).
 2. Set `DATABASE_URL` on the Codasaurus service.
 3. Redeploy.
 
-**Render-specific**
+**Tips**
 
-- Prefer the **Internal Database URL** when the web service and DB are in the **same region** ([Render docs](https://render.com/docs/postgresql-creating-connecting)).
 - Codasaurus enables TLS (`sslmode=require`) automatically for non-local hosts.
-- Keep pool small on free/shared DBs: default is **5** connections when `RENDER` is set.
-
-**Neon / Supabase**
-
-- Use the **session** pooler or direct URI (not transaction mode / port 6543).
-- Include password; SSL is auto-added if missing.
+- Free / shared DBs get a small pool by default (**3** when `RENDER`, `CODASAURUS_FREE_TIER=1`, or the URL looks like Aiven / Neon / Supabase).
+- **Aiven:** paste the Service URI from Quick connect (`*.aivencloud.com`, non-5432 port is normal).
+- **Neon / Supabase:** use the **session** pooler or direct URI (not transaction mode / port 6543).
+- Skip **Render free Postgres** (it expires). Keep Render for the *web* service only.
 
 Example:
 
@@ -57,11 +62,11 @@ The app could not open a live Postgres connection before the timeout. On free st
 
 | Check | Fix |
 | --- | --- |
-| Missing / wrong `DATABASE_URL` | Neon Free direct/session URI (see [run-for-free.md](run-for-free.md)) |
+| Missing / wrong `DATABASE_URL` | Aiven Service URI or Neon/Supabase session/direct URI ([run-for-free.md](run-for-free.md)) |
 | Neon compute asleep | Open the Neon console once, then redeploy |
 | TLS | Latest Codasaurus adds `sslmode=require` for remote hosts automatically |
 | Transaction pooler (`:6543`) | Use session/direct instead |
-| Render free Postgres | Expires — switch to Neon |
+| Render free Postgres | Expires. Switch to Aiven or Neon |
 | Still stuck | Set `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS=90` and `CODASAURUS_FREE_TIER=1` |
 
 Logs should show `Connecting to PostgreSQL at host:port/db` (password never printed).

@@ -1,6 +1,13 @@
-# Setup — GitHub App
+# GitHub App setup
+
+<p>
+  <img src="https://img.shields.io/badge/setup-GitHub%20App-2088FF?logo=github&logoColor=white" alt="GitHub App">
+  <a href="setup-onboarding.md"><img src="https://img.shields.io/badge/prefer-wizard-0ea5e9" alt="Wizard"></a>
+  <a href="README.md"><img src="https://img.shields.io/badge/docs-index-111827" alt="Docs index"></a>
+</p>
 
 Codasaurus reviews PRs as a **GitHub App**. Prefer the dashboard [onboarding wizard](setup-onboarding.md) (manifest flow). Use this guide for manual registration or troubleshooting.
+
 
 ## Permissions
 
@@ -69,7 +76,7 @@ Also exposed as `github_install_url` on `GET /api/setup/status` and `GET /api/gi
 curl -s http://localhost:3000/health
 ```
 
-Expect `"status":"ok"` and an `egress_profile`. Open a PR on an installed repo — Codasaurus should post a review within the webhook delivery window.
+Expect `"status":"ok"` and an `egress_profile`. Open a PR on an installed repo. Codasaurus should post a review within the webhook delivery window.
 
 ### Common failures
 

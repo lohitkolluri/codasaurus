@@ -1,6 +1,14 @@
-# Operations — backup & restore
+# Backup and restore
+
+<p>
+  <img src="https://img.shields.io/badge/ops-backup-f59e0b" alt="Backup">
+  <img src="https://img.shields.io/badge/tool-pg__dump-4169E1" alt="pg_dump">
+  <a href="database.md"><img src="https://img.shields.io/badge/see-database-4169E1" alt="Database"></a>
+  <a href="README.md"><img src="https://img.shields.io/badge/docs-index-111827" alt="Docs index"></a>
+</p>
 
 State lives in **PostgreSQL** (`DATABASE_URL=postgres://…`). Treat the database and your secret store as the recovery unit. Schema and pool details: [database.md](database.md).
+
 
 ## What to back up
 
