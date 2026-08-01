@@ -258,6 +258,11 @@ async fn setup_database(
                     ));
                 }
                 let db_url = crate::db::normalize_database_url(&body.url);
+                // SSRF: reject private/metadata hosts before connecting.
+                // Loopback (localhost / 127.0.0.1) is allowed for local setup.
+                ssrf::validate_postgres_url_resolved(&db_url)
+                    .await
+                    .map_err(ApiError::bad_request)?;
                 let test_pool = sqlx::PgPool::connect(&db_url)
                     .await
                     .map_err(|e| ApiError::bad_request(format!("Cannot connect: {e}")))?;
@@ -266,8 +271,9 @@ async fn setup_database(
                     .await
                     .map_err(|e| ApiError::bad_request(format!("Test query failed: {e}")))?;
                 test_pool.close().await;
-                db::config::set_config(&state.pool, "database_url", &db_url).await?;
-                message = "Postgres URL validated and saved as preference".into();
+                // Do not persist credentials in app_config — use DATABASE_URL env.
+                message = "Postgres URL validated (not stored; set DATABASE_URL for the server)"
+                    .into();
             }
 
             db::config::set_config(&state.pool, "database_provider", "postgres").await?;
@@ -613,6 +619,20 @@ async fn setup_github(
     db::config::set_config(&state.pool, "github_private_key", &body.private_key).await?;
     db::config::set_config(&state.pool, "github_webhook_secret", &body.webhook_secret).await?;
 
+    let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
+    let port: u16 = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(3000);
+    bot::set_bot_config(bot::BotConfig {
+        app_id: body.app_id.clone(),
+        private_key: body.private_key.clone(),
+        webhook_secret: body.webhook_secret.clone(),
+        host,
+        port,
+    });
+    bot::ensure_review_worker(state.pool.clone());
+
     Ok(Json(SetupResponse {
         status: "ok".into(),
         message: Some("GitHub App credentials verified and saved".into()),
@@ -647,6 +667,29 @@ async fn github_callback_page(
         }
     };
 
+    // Reject anything that isn't a safe OAuth code charset to prevent XSS when
+    // embedding into the HTML/JS bootstrap page.
+    if !code
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~' | '/' | '=' | '+'))
+        || code.len() > 512
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            Html(
+                r#"<html><body style="font:14px sans-serif;padding:40px">
+                    <p>Invalid authorization code.</p>
+                    <a href="/#/setup/github">Back to setup</a>
+                </body></html>"#
+                    .into(),
+            ),
+        );
+    }
+
+    // Pass code via JSON serialization so it cannot break out of a JS string.
+    let code_json = serde_json::to_string(&code).unwrap_or_else(|_| "\"\"".into());
+
     let html = format!(
         r#"<!DOCTYPE html>
 <html>
@@ -678,10 +721,11 @@ async fn github_callback_page(
   <script>
     (async () => {{
       try {{
+        const code = {code_json};
         const r = await fetch('/api/setup/github/callback', {{
           method: 'POST',
           headers: {{ 'Content-Type': 'application/json' }},
-          body: JSON.stringify({{"code": "{code}"}})
+          body: JSON.stringify({{"code": code}})
         }});
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || 'Request failed');
@@ -793,6 +837,8 @@ async fn github_callback(
         host,
         port,
     });
+    // Wizard-first installs often boot without credentials; start workers now if not yet running.
+    bot::ensure_review_worker(state.pool.clone());
 
     let install_url = format!("https://github.com/apps/{slug}/installations/new");
 
@@ -822,10 +868,8 @@ async fn setup_admin(
     if !body.email.contains('@') {
         return Err(ApiError::bad_request("Invalid email address"));
     }
-    if body.password.len() < 8 {
-        return Err(ApiError::bad_request(
-            "Password must be at least 8 characters",
-        ));
+    if let Err(msg) = db::users::validate_password_policy(&body.password, &body.email) {
+        return Err(ApiError::bad_request(msg));
     }
 
     let result = if owner_exists {

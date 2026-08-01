@@ -1,26 +1,12 @@
 use crate::db::{db_execute, db_fetch_all, db_scalar, DbPool};
 use anyhow::Result;
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 use tokio::runtime::{Handle, Runtime};
 
 use crate::detectors::Finding;
 
 static FALLBACK_RT: LazyLock<Runtime> =
     LazyLock::new(|| Runtime::new().expect("failed to create fallback tokio runtime"));
-
-/// Optional repo scope for filtering dismissals/rules during a review.
-static FILTER_REPO: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
-
-/// Scope learning filter to a repo for the duration of a bot review.
-pub fn set_filter_repo(repo: Option<String>) {
-    if let Ok(mut g) = FILTER_REPO.lock() {
-        *g = repo;
-    }
-}
-
-fn filter_repo_scope() -> Option<String> {
-    FILTER_REPO.lock().ok().and_then(|g| g.clone())
-}
 
 fn block_on<F: std::future::Future>(fut: F) -> F::Output {
     match Handle::try_current() {
@@ -45,7 +31,7 @@ impl LearningStore {
 
     pub async fn dismiss_async(&self, finding: &Finding) -> Result<()> {
         let fingerprint = finding.fingerprint();
-        let repo = filter_repo_scope();
+        let repo: Option<String> = None;
         db_execute!(
             &self.pool,
             "INSERT INTO dismissed_findings (fingerprint, detector, file, line, message, repo_full_name)
@@ -81,8 +67,7 @@ impl LearningStore {
         file: &str,
         message: &str,
     ) -> Result<()> {
-        let repo = filter_repo_scope();
-        self.dismiss_fingerprint_for_repo(fingerprint, detector, file, message, repo.as_deref())
+        self.dismiss_fingerprint_for_repo(fingerprint, detector, file, message, None)
             .await
     }
 
@@ -94,9 +79,7 @@ impl LearningStore {
         message: &str,
         repo_full_name: Option<&str>,
     ) -> Result<()> {
-        let repo = repo_full_name
-            .map(str::to_string)
-            .or_else(filter_repo_scope);
+        let repo = repo_full_name.map(str::to_string);
         db_execute!(
             &self.pool,
             "INSERT INTO dismissed_findings (fingerprint, detector, file, line, message, repo_full_name)
@@ -123,7 +106,7 @@ impl LearningStore {
     }
 
     pub async fn add_rule_async(&self, rule: &crate::learning::LearnedRule) -> Result<()> {
-        let repo = filter_repo_scope();
+        let repo: Option<String> = None;
         db_execute!(
             &self.pool,
             "INSERT INTO learned_rules (id, detector, file_pattern, message_pattern, action, reason, repo_full_name)
@@ -210,16 +193,24 @@ impl LearningStore {
         Ok(())
     }
 
-    pub fn filter_findings(&self, findings: &[Finding]) -> Result<Vec<Finding>> {
-        block_on(self.filter_findings_async(findings))
+    pub fn filter_findings(
+        &self,
+        findings: &[Finding],
+        repo: Option<&str>,
+    ) -> Result<Vec<Finding>> {
+        block_on(self.filter_findings_async(findings, repo))
     }
 
-    pub async fn filter_findings_async(&self, findings: &[Finding]) -> Result<Vec<Finding>> {
+    pub async fn filter_findings_async(
+        &self,
+        findings: &[Finding],
+        repo: Option<&str>,
+    ) -> Result<Vec<Finding>> {
         if findings.is_empty() {
             return Ok(Vec::new());
         }
 
-        let repo_scope = filter_repo_scope();
+        let repo_scope = repo.map(str::to_string);
         let fingerprints: Vec<String> = findings.iter().map(|f| f.fingerprint()).collect();
         let mut dismissed_set = std::collections::HashSet::new();
 

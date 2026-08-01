@@ -121,9 +121,31 @@ impl WebhookContext {
 
 static BOT_CONFIG: std::sync::RwLock<Option<BotConfig>> = std::sync::RwLock::new(None);
 pub(crate) static CONFIG_POOL: std::sync::OnceLock<crate::db::DbPool> = std::sync::OnceLock::new();
+static WORKER_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn set_bot_config(config: BotConfig) {
     *BOT_CONFIG.write().expect("BOT_CONFIG lock poisoned") = Some(config);
+}
+
+/// Clear in-memory GitHub App credentials (e.g. after dashboard delete).
+pub fn clear_bot_config() {
+    *BOT_CONFIG.write().expect("BOT_CONFIG lock poisoned") = None;
+}
+
+/// Snapshot of the live bot config (reloaded after wizard / settings updates).
+pub(crate) fn current_bot_config() -> Option<BotConfig> {
+    BOT_CONFIG
+        .read()
+        .expect("BOT_CONFIG lock poisoned")
+        .clone()
+}
+
+/// Start durable queue workers once. Safe to call after wizard GitHub setup.
+pub fn ensure_review_worker(pool: crate::db::DbPool) {
+    if WORKER_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    worker::start_review_worker(pool);
 }
 
 pub fn set_config_pool(pool: crate::db::DbPool) {
@@ -203,10 +225,7 @@ fn author_can_command(payload: &WebhookPayload) -> bool {
         .and_then(|c| c.get("author_association"))
         .and_then(|a| a.as_str())
         .unwrap_or("");
-    matches!(
-        association,
-        "OWNER" | "MEMBER" | "COLLABORATOR" | "CONTRIBUTOR"
-    )
+    matches!(association, "OWNER" | "MEMBER" | "COLLABORATOR")
 }
 
 pub(crate) async fn handle_webhook(
@@ -298,6 +317,21 @@ pub(crate) async fn handle_webhook(
                     ensure_repo_exists(&repo_full_name, inst_id, &repo_val).await;
                 }
 
+                // Opt-in: do not enqueue for inactive repos (avoids silent mark_done no-ops).
+                if let Some(pool) = bot_db_pool() {
+                    if let Ok(Some(repo)) =
+                        db::repos::get_repo_by_full_name(pool, &repo_full_name).await
+                    {
+                        if !repo.active {
+                            tracing::info!(
+                                repo = %repo_full_name,
+                                "repo inactive; skipping enqueue (enable in dashboard)"
+                            );
+                            return;
+                        }
+                    }
+                }
+
                 // Durable queue: persist job; background worker runs the review.
                 if let Some(pool) = bot_db_pool() {
                     match queue::enqueue(
@@ -312,7 +346,7 @@ pub(crate) async fn handle_webhook(
                     {
                         Ok(job_id) => {
                             tracing::info!(job_id, "enqueued review job");
-                            worker::QUEUE_NOTIFY.notify_one();
+                            worker::QUEUE_NOTIFY.notify_waiters();
                         }
                         Err(e) => {
                             tracing::warn!(error = %e, "queue enqueue failed; running inline");
@@ -477,7 +511,7 @@ async fn handle_installation_created(
         let default_branch = repo["default_branch"].as_str().map(|s| s.to_string());
         let private = repo["private"].as_bool().unwrap_or(false);
 
-        if let Err(e) = db::repos::create_repo(
+        if let Err(e) = db::repos::create_repo_from_installation(
             pool,
             &RepoCreate {
                 github_id,
@@ -565,7 +599,7 @@ async fn handle_repos_added(installation: Option<InstallationInfo>, repos: Vec<s
         let default_branch = repo["default_branch"].as_str().map(|s| s.to_string());
         let private = repo["private"].as_bool().unwrap_or(false);
 
-        if let Err(e) = db::repos::create_repo(
+        if let Err(e) = db::repos::create_repo_from_installation(
             pool,
             &RepoCreate {
                 github_id,

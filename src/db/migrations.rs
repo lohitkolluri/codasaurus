@@ -245,6 +245,30 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     migrate_v12_roles_and_invites(pool).await?;
     migrate_v13_bootstrap_owner(pool).await?;
     migrate_v14_repo_scoped_learning(pool).await?;
+    migrate_v15_invites_email_index(pool).await?;
+    Ok(())
+}
+
+/// v15: case-insensitive pending-invite lookup by email.
+async fn migrate_v15_invites_email_index(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
+    if current.unwrap_or(0) >= 15 {
+        return Ok(());
+    }
+
+    let _ = sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_invites_email_pending ON invites (lower(email)) WHERE accepted_at IS NULL",
+    )
+    .execute(pool)
+    .await;
+
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (15) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

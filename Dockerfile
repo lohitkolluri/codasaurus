@@ -42,8 +42,8 @@ ENV PORT=3000 \
     CODASAURUS_DATA_DIR=/data \
     HOME=/data
 EXPOSE 3000
-# Render sets PORT=10000; keep Docker HEALTHCHECK on the same port.
+# Render sets PORT; health CLI reads $PORT when --port omitted.
 HEALTHCHECK --interval=30s --timeout=8s --start-period=90s --retries=5 \
-  CMD ["sh", "-c", "codasaurus health --port ${PORT:-3000}"]
+  CMD ["codasaurus", "health", "--ready"]
 ENTRYPOINT ["codasaurus"]
 CMD ["serve", "--host", "0.0.0.0"]

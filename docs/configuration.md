@@ -20,15 +20,18 @@ codasaurus version
 
 ### Core
 
-| Variable                             | Required            | Description                                                                         |
-| ------------------------------------ | ------------------- | ----------------------------------------------------------------------------------- |
-| `DATABASE_URL`                       | recommended         | Postgres URL (default `postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus`) |
-| `CODASAURUS_DB_MAX_CONNECTIONS`      | no                  | Pool size (default `16`, or `3` on free/Render/Neon hosts)                          |
-| `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS` | no                  | Wait for a free connection (default `30`, or `60` on free hosts)                    |
-| `CODASAURUS_FREE_TIER`               | no                  | `1` forces free-tier pool + concurrency defaults                                    |
-| `CODASAURUS_DATA_DIR`                | no                  | Data directory (Docker: `/data`)                                                    |
-| `PORT` / `--port`                    | no                  | Listen port (default `3000`)                                                        |
-| `PUBLIC_URL`                         | recommended in prod | Canonical HTTPS origin for GitHub manifest callbacks                                |
+| Variable                             | Required            | Description                                                                                                     |
+| ------------------------------------ | ------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                       | recommended         | Postgres URL (default `postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus`)                             |
+| `CODASAURUS_DB_MAX_CONNECTIONS`      | no                  | Pool size (default `16`, or `3` on free/Render/Neon hosts)                                                      |
+| `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS` | no                  | Wait for a free connection (default `30`, or `60` on free hosts)                                                |
+| `CODASAURUS_FREE_TIER`               | no                  | `1` forces free-tier pool + concurrency defaults                                                                |
+| `CODASAURUS_DATA_DIR`                | no                  | Data directory (Docker: `/data`)                                                                                |
+| `PORT` / `--port`                    | no                  | Listen port (default `3000`)                                                                                    |
+| `PUBLIC_URL`                         | recommended in prod | Canonical HTTPS origin for GitHub manifest callbacks                                                            |
+| `CODASAURUS_HSTS`                    | no                  | `1` forces `Strict-Transport-Security` even if `PUBLIC_URL` is unset (auto-on when `PUBLIC_URL` is `https://…`) |
+| `CODASAURUS_QUEUE_WORKERS`           | no                  | Durable review queue workers (1–8; default min of review permits / 4)                                           |
+| `CODASAURUS_METRICS_TOKEN`           | no                  | If set, enables `/metrics` (Bearer token required)                                                              |
 
 ### GitHub App
 
@@ -171,6 +174,12 @@ The Dashboard **Review analytics** panel rolls up the last 7 days from Postgres 
 ```text
 @codasaurus digest
 ```
+
+## Auth & sessions
+
+- Local passwords use **Argon2id** at OWASP minimum (`m=19456`, `t=2`, `p=1`).
+- Session cookies are `HttpOnly; SameSite=Lax; Secure` by default (set `CODASAURUS_INSECURE_COOKIES=1` only for plain HTTP local dev).
+- Login rate limit is **10 attempts / 15 minutes per IP+email**, **in-process only** (not shared across replicas; resets on restart). For multi-instance deploys, rate-limit at the reverse proxy / CDN as well.
 
 ## Docker
 

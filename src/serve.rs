@@ -1,14 +1,21 @@
 use anyhow::Result;
 use axum::{
-    http::StatusCode,
-    response::IntoResponse,
+    error_handling::HandleErrorLayer,
+    extract::Request,
+    http::{header, HeaderValue, StatusCode, Uri},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post},
-    Router,
+    BoxError, Router,
 };
 use std::net::SocketAddr;
 use std::path::Path;
+use std::time::Duration;
+use subtle::ConstantTimeEq;
 use tokio::signal;
+use tower::{ServiceBuilder, ServiceExt};
 use tower_http::{
+    compression::CompressionLayer,
     limit::RequestBodyLimitLayer,
     services::{ServeDir, ServeFile},
     trace::TraceLayer,
@@ -58,10 +65,8 @@ pub async fn serve(
     println!("  Database connected (PostgreSQL)");
 
     // Mark setup database step complete for Compose / env-based boots.
+    // Do not persist DATABASE_URL credentials into app_config.
     let _ = crate::db::config::set_config(&pool, "database_provider", "postgres").await;
-    if let Ok(url) = std::env::var("DATABASE_URL") {
-        let _ = crate::db::config::set_config(&pool, "database_url", &url).await;
-    }
 
     // Try loading bot config from DB (setup wizard may have stored it),
     // with env vars taking precedence.
@@ -84,7 +89,7 @@ pub async fn serve(
         }
     }
 
-    let app = build_router(pool, bot_config);
+    let app = build_router(pool.clone(), bot_config);
 
     let addr: SocketAddr = format!("{host}:{port}").parse()?;
     println!("  Codasaurus server listening on http://{addr}");
@@ -93,6 +98,10 @@ pub async fn serve(
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+
+    // Drain the pool so Postgres sees clean disconnects on deploy/restart.
+    pool.close().await;
+    tracing::info!("database pool closed");
     Ok(())
 }
 
@@ -121,10 +130,10 @@ fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> 
         port: 3000,
     });
     bot::set_bot_config(bot_cfg.clone());
-    if !bot_cfg.app_id.is_empty() && !bot_cfg.webhook_secret.is_empty() {
-        bot::start_review_worker(pool, bot_cfg);
-        println!("  Review queue worker started");
-    }
+    // Always start workers so wizard-first deploys drain the queue after GitHub setup
+    // without requiring a process restart. Workers reload credentials per job.
+    bot::ensure_review_worker(pool);
+    println!("  Review queue worker started");
 
     // Direct POST route — no .nest(), no State/Extension, no state-laden routers.
     // GitHub sends POST to /webhook/ (with trailing slash). Register both variants
@@ -138,25 +147,110 @@ fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> 
     let mut app = Router::new()
         .merge(api)
         .route("/health", get(health_handler))
-        .route("/metrics", get(metrics_handler))
+        .route("/health/ready", get(ready_handler))
         .route("/webhook", webhook_handler.clone())
         .route("/webhook/", webhook_handler);
 
-    // SPA static file serving — acts as catch-all for unmatched routes
+    // Metrics only when an auth token is configured (Bearer required).
+    if std::env::var("CODASAURUS_METRICS_TOKEN")
+        .map(|t| !t.is_empty())
+        .unwrap_or(false)
+    {
+        app = app.route("/metrics", get(metrics_handler));
+        println!("  /metrics enabled (CODASAURUS_METRICS_TOKEN set)");
+    }
+
+    // SPA static file serving — catch-all, but never mask unknown /api routes as HTML.
     let dist_path = Path::new("svelte-dashboard").join("dist");
     if dist_path.exists() {
         let serve_dir = ServeDir::new(&dist_path)
             .append_index_html_on_directories(true)
             .not_found_service(ServeFile::new(dist_path.join("index.html")));
-        app = app.fallback_service(serve_dir);
+        app = app.fallback(move |req: Request| {
+            let serve_dir = serve_dir.clone();
+            async move {
+                if req.uri().path().starts_with("/api") {
+                    return (
+                        StatusCode::NOT_FOUND,
+                        axum::Json(serde_json::json!({ "error": "not_found" })),
+                    )
+                        .into_response();
+                }
+                match serve_dir.oneshot(req).await {
+                    Ok(res) => res.into_response(),
+                    Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+                }
+            }
+        });
+    } else {
+        app = app.fallback(|uri: Uri| async move {
+            if uri.path().starts_with("/api") {
+                (
+                    StatusCode::NOT_FOUND,
+                    axum::Json(serde_json::json!({ "error": "not_found" })),
+                )
+                    .into_response()
+            } else {
+                StatusCode::NOT_FOUND.into_response()
+            }
+        });
     }
 
-    // Layers applied to the final resolved router
+    // Layers: last applied = outermost.
     app = app
+        .layer(middleware::from_fn(security_headers_middleware))
+        .layer(CompressionLayer::new())
         .layer(TraceLayer::new_for_http())
+        .layer(
+            ServiceBuilder::new()
+                .layer(HandleErrorLayer::new(|err: BoxError| async move {
+                    if err.is::<tower::timeout::error::Elapsed>() {
+                        StatusCode::REQUEST_TIMEOUT
+                    } else {
+                        tracing::error!(error = %err, "unhandled service error");
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    }
+                }))
+                .timeout(Duration::from_secs(120)),
+        )
         .layer(RequestBodyLimitLayer::new(25 * 1024 * 1024));
 
     app
+}
+
+async fn security_headers_middleware(req: Request, next: Next) -> Response {
+    let mut res = next.run(req).await;
+    let headers = res.headers_mut();
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'",
+        ),
+    );
+    headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    // HSTS only when serving (or advertised) over HTTPS — local HTTP stays usable.
+    let hsts = std::env::var("CODASAURUS_HSTS")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+        || std::env::var("PUBLIC_URL")
+            .map(|u| u.starts_with("https://"))
+            .unwrap_or(false);
+    if hsts {
+        headers.insert(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+        );
+    }
+    headers.insert(
+        header::HeaderName::from_static("permissions-policy"),
+        HeaderValue::from_static("geolocation=(), microphone=(), camera=()"),
+    );
+    res
 }
 
 /// Try to load bot credentials from environment variables first, then
@@ -226,8 +320,17 @@ async fn resolve_bot_config(
 }
 
 async fn health_handler() -> impl IntoResponse {
-    // Liveness-first: free PaaS (Render) + serverless Postgres (Neon) can cold-start.
-    // Returning 503 on a slow DB ping causes restart loops. Report DB in the body instead.
+    health_response(false).await
+}
+
+/// Readiness: requires writable data_dir **and** a successful DB ping.
+async fn ready_handler() -> impl IntoResponse {
+    health_response(true).await
+}
+
+async fn health_response(require_db: bool) -> impl IntoResponse {
+    // Liveness-first for free PaaS + serverless Postgres cold starts:
+    // `/health` stays 200 when only DB is waking; `/health/ready` fails closed.
     let db_ok = if let Some(pool) = crate::bot::CONFIG_POOL.get() {
         matches!(
             tokio::time::timeout(std::time::Duration::from_secs(2), pool.ping()).await,
@@ -238,11 +341,10 @@ async fn health_handler() -> impl IntoResponse {
     };
     let data_dir = crate::storage::data_dir();
     let data_dir_ok = std::fs::create_dir_all(&data_dir).is_ok();
-    // Process is up if we can write data_dir; DB may still be waking.
-    let status = if data_dir_ok {
-        StatusCode::OK
-    } else {
+    let status = if !data_dir_ok || (require_db && !db_ok) {
         StatusCode::SERVICE_UNAVAILABLE
+    } else {
+        StatusCode::OK
     };
 
     let mut offline = crate::bot::offline::offline_mode_from_env_and_db(None);
@@ -266,7 +368,6 @@ async fn health_handler() -> impl IntoResponse {
             }
         }
     }
-    // Read-only: do not mutate global offline flag from health probes.
     let profile =
         crate::bot::offline::resolve_egress_profile(offline, llm_disabled, has_llm_endpoint);
     let llm_allowed = !llm_disabled && has_llm_endpoint && !offline;
@@ -278,6 +379,7 @@ async fn health_handler() -> impl IntoResponse {
             "status": if db_ok && data_dir_ok { "ok" } else if data_dir_ok { "degraded" } else { "unhealthy" },
             "db": db_ok,
             "data_dir": data_dir_ok,
+            "ready": db_ok && data_dir_ok,
             "version": env!("CARGO_PKG_VERSION"),
             "egress_profile": egress["egress_profile"],
             "offline_mode": egress["offline_mode"],
@@ -287,7 +389,24 @@ async fn health_handler() -> impl IntoResponse {
     )
 }
 
-async fn metrics_handler() -> impl IntoResponse {
+async fn metrics_handler(headers: axum::http::HeaderMap) -> impl IntoResponse {
+    let Ok(expected) = std::env::var("CODASAURUS_METRICS_TOKEN") else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if expected.is_empty() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let authorized = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer ").or_else(|| v.strip_prefix("bearer ")))
+        .is_some_and(|token| bool::from(token.as_bytes().ct_eq(expected.as_bytes())));
+
+    if !authorized {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
     if let Some(pool) = crate::bot::CONFIG_POOL.get() {
         crate::metrics::refresh_from_db(pool).await;
     }
@@ -295,11 +414,12 @@ async fn metrics_handler() -> impl IntoResponse {
     (
         StatusCode::OK,
         [(
-            axum::http::header::CONTENT_TYPE,
+            header::CONTENT_TYPE,
             "text/plain; version=0.0.4",
         )],
         body,
     )
+        .into_response()
 }
 
 async fn shutdown_signal() {

@@ -5,26 +5,37 @@
 
   let setupComplete = $state(false);
   let checking = $state(true);
+  let statusError = $state("");
 
   onMount(async () => {
     try {
-      const status = await fetch("/api/setup/status", { credentials: "same-origin" }).then((r) =>
-        r.ok ? r.json() : null,
-      );
-      if (status && !status.complete) {
+      const res = await fetch("/api/setup/status", { credentials: "same-origin" });
+      const status = res.ok ? await res.json().catch(() => null) : null;
+      if (!res.ok || !status) {
+        // Ambiguous: don't pretend setup is complete.
+        statusError = "Could not verify setup status.";
+        setupComplete = false;
+        return;
+      }
+      if (!status.complete) {
         push("/setup");
         return;
       }
       setupComplete = true;
     } catch {
-      setupComplete = true;
+      statusError = "Could not reach the server.";
+      setupComplete = false;
     } finally {
       checking = false;
     }
   });
 </script>
 
-{#if !checking && setupComplete}
+{#if checking}
+  <div class="landing landing-loading">
+    <p class="landing-load-msg">Loading…</p>
+  </div>
+{:else if setupComplete}
   <div class="landing">
     <div class="landing-stage" aria-hidden="true">
       <div class="landing-glow landing-glow-a"></div>
@@ -68,5 +79,13 @@
     <footer class="landing-foot">
       <p>Free forever<span aria-hidden="true"> · </span>No seat tax<span aria-hidden="true"> · </span>Learns in your Postgres</p>
     </footer>
+  </div>
+{:else}
+  <div class="landing landing-loading">
+    <p class="landing-load-msg">{statusError || "Setup incomplete."}</p>
+    <div class="landing-ctas" style="justify-content:center;margin-top:16px">
+      <a class="landing-cta" href="#/setup">Continue setup</a>
+      <a class="landing-ghost" href="#/login">Sign in</a>
+    </div>
   </div>
 {/if}

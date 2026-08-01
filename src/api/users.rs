@@ -316,10 +316,8 @@ async fn change_my_password(
     Json(body): Json<ChangePasswordBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let actor = rbac::current_user(&state.pool, &headers).await?;
-    if body.new_password.len() < 8 {
-        return Err(ApiError::bad_request(
-            "Password must be at least 8 characters",
-        ));
+    if let Err(msg) = db::users::validate_password_policy(&body.new_password, &actor.email) {
+        return Err(ApiError::bad_request(msg));
     }
     let user = db::users::get_user_by_email(&state.pool, &actor.email)
         .await?

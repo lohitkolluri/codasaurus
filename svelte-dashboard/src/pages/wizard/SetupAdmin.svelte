@@ -11,7 +11,7 @@
   let error = $state("");
   let status = $state(null);
 
-  const lengthOk = $derived(password.length >= 8);
+  const lengthOk = $derived(password.length >= 10);
   const matchOk = $derived(password.length > 0 && password === confirmPassword);
   const canSubmit = $derived(!!email && lengthOk && matchOk && !creating);
 
@@ -29,7 +29,7 @@
   async function handleCreate() {
     error = "";
     if (!lengthOk) {
-      error = "Password must be at least 8 characters.";
+      error = "Password must be at least 10 characters.";
       return;
     }
     if (!matchOk) {
@@ -69,7 +69,7 @@
       At least 8 characters
       {#if password.length > 0}
         <span style="color:{lengthOk ? 'var(--success)' : 'var(--error)'}">
-          {lengthOk ? "meets minimum" : `${password.length}/8`}
+          {lengthOk ? "meets minimum" : `${password.length}/10`}
         </span>
       {/if}
     </div>

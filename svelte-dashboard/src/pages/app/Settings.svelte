@@ -705,10 +705,10 @@
               </div>
               <div class="form-group">
                 <label for="pw-new">New password</label>
-                <input id="pw-new" type="password" bind:value={pwNew} placeholder="At least 8 characters" autocomplete="new-password" />
+                <input id="pw-new" type="password" bind:value={pwNew} placeholder="At least 10 characters" autocomplete="new-password" />
               </div>
               <div class="save-row">
-                <button onclick={changePassword} disabled={pwSaving || !pwCurrent || pwNew.length < 8}>
+                <button onclick={changePassword} disabled={pwSaving || !pwCurrent || pwNew.length < 10}>
                   {pwSaving ? "Updating…" : "Update password"}
                 </button>
                 {#if pwMsg}<span class="save-msg" class:error={pwMsg !== "Password updated"}>{pwMsg}</span>{/if}

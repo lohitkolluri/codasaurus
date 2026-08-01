@@ -60,6 +60,79 @@ pub fn validate_llm_base_url(raw: &str, allow_loopback: bool) -> Result<(), Stri
 /// (mitigates DNS rebinding to link-local / RFC1918).
 pub async fn validate_llm_base_url_resolved(raw: &str, allow_loopback: bool) -> Result<(), String> {
     validate_llm_base_url(raw, allow_loopback)?;
+    resolve_and_check_host(raw, allow_loopback).await
+}
+
+/// Validate a user-supplied Postgres URL before connecting (setup wizard).
+///
+/// Allows only `postgres` / `postgresql` schemes. Loopback (`localhost`,
+/// `127.0.0.1`, `::1`) is permitted for local setup; private LAN and
+/// cloud-metadata addresses are always rejected.
+pub fn validate_postgres_url(raw: &str) -> Result<(), String> {
+    let url = Url::parse(raw).map_err(|e| format!("Invalid URL: {e}"))?;
+
+    match url.scheme() {
+        "postgres" | "postgresql" => {}
+        other => {
+            return Err(format!(
+                "Unsupported URL scheme '{other}' — use postgres:// or postgresql://"
+            ))
+        }
+    }
+
+    let host = url
+        .host_str()
+        .ok_or_else(|| "URL must include a host".to_string())?;
+
+    let host_lower = host.to_ascii_lowercase();
+    let is_loopback_host = host_lower == "localhost"
+        || host_lower.ends_with(".localhost")
+        || host_lower == "127.0.0.1"
+        || host_lower == "::1";
+
+    // Local setup: allow explicit loopback hosts only.
+    let allow_loopback = is_loopback_host;
+
+    if is_loopback_host {
+        return Ok(());
+    }
+
+    if matches!(
+        host_lower.as_str(),
+        "metadata.google.internal" | "metadata" | "metadata.azure.com"
+    ) || host_lower.ends_with(".internal")
+        || host_lower.ends_with(".local")
+    {
+        return Err(format!("Host '{host}' is not allowed (SSRF protection)"));
+    }
+
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_blocked_ip(ip, allow_loopback) {
+            return Err(format!(
+                "IP address '{ip}' is not allowed (SSRF protection)"
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Like [`validate_postgres_url`], then resolve DNS and reject private/metadata answers.
+pub async fn validate_postgres_url_resolved(raw: &str) -> Result<(), String> {
+    validate_postgres_url(raw)?;
+    let url = Url::parse(raw).map_err(|e| format!("Invalid URL: {e}"))?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| "URL must include a host".to_string())?;
+    let host_lower = host.to_ascii_lowercase();
+    let allow_loopback = host_lower == "localhost"
+        || host_lower.ends_with(".localhost")
+        || host_lower == "127.0.0.1"
+        || host_lower == "::1";
+    resolve_and_check_host(raw, allow_loopback).await
+}
+
+async fn resolve_and_check_host(raw: &str, allow_loopback: bool) -> Result<(), String> {
     let url = Url::parse(raw).map_err(|e| format!("Invalid URL: {e}"))?;
     let host = url
         .host_str()
@@ -70,7 +143,15 @@ pub async fn validate_llm_base_url_resolved(raw: &str, allow_loopback: bool) -> 
         return Ok(());
     }
 
-    let port = url.port_or_known_default().unwrap_or(443);
+    let port = url
+        .port()
+        .or_else(|| match url.scheme() {
+            "postgres" | "postgresql" => Some(5432),
+            "https" => Some(443),
+            "http" => Some(80),
+            _ => None,
+        })
+        .unwrap_or(443);
     let addrs = tokio::net::lookup_host((host, port))
         .await
         .map_err(|e| format!("DNS lookup failed for '{host}': {e}"))?;
@@ -170,5 +251,24 @@ mod tests {
     async fn resolve_allows_public_host() {
         let r = validate_llm_base_url_resolved("https://openrouter.ai/api/v1", false).await;
         assert!(r.is_ok(), "{r:?}");
+    }
+
+    #[test]
+    fn postgres_allows_loopback_local_setup() {
+        assert!(validate_postgres_url("postgres://u:p@localhost:5432/db").is_ok());
+        assert!(validate_postgres_url("postgresql://u:p@127.0.0.1:5432/db").is_ok());
+    }
+
+    #[test]
+    fn postgres_blocks_private_and_metadata() {
+        assert!(validate_postgres_url("postgres://u:p@10.0.0.1:5432/db").is_err());
+        assert!(validate_postgres_url("postgres://u:p@169.254.169.254:5432/db").is_err());
+        assert!(validate_postgres_url("postgres://u:p@192.168.1.1:5432/db").is_err());
+    }
+
+    #[test]
+    fn postgres_rejects_non_postgres_scheme() {
+        assert!(validate_postgres_url("https://example.com/db").is_err());
+        assert!(validate_postgres_url("http://localhost:5432/db").is_err());
     }
 }

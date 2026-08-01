@@ -2538,8 +2538,25 @@ tr:hover td {
  * - Vercel: purposeful motion, product demonstration over decoration
  */
 
+.landing-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: #000;
+    color: #fcfdff;
+}
+
+.landing-load-msg {
+    margin: 0;
+    font-family: "Manrope", var(--font-body);
+    font-size: 14px;
+    color: #8a8f98;
+}
+
 .landing {
-    --land-bg: #000000;
+    --land-bg: #000;
     --land-ink: #fcfdff;
     --land-muted: #8a8f98;
     --land-dim: #464a4d;

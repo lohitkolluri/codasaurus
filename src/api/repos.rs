@@ -197,6 +197,7 @@ fn create_jwt(app_id: &str, private_key_pem: &str) -> Result<String, ApiError> {
 }
 
 /// Parse GitHub `Link: <url>; rel="next"` header.
+/// Only returns the URL when the host is exactly `api.github.com` (SSRF guard).
 fn next_github_link(headers: &axum::http::HeaderMap) -> Option<String> {
     let link = headers.get(axum::http::header::LINK)?.to_str().ok()?;
     for part in link.split(',') {
@@ -206,8 +207,18 @@ fn next_github_link(headers: &axum::http::HeaderMap) -> Option<String> {
         }
         let start = part.find('<')? + 1;
         let end = part.find('>')?;
-        if start < end {
-            return Some(part[start..end].to_string());
+        if start >= end {
+            continue;
+        }
+        let candidate = &part[start..end];
+        let Ok(url) = url::Url::parse(candidate) else {
+            continue;
+        };
+        let Some(host) = url.host_str() else {
+            continue;
+        };
+        if host.eq_ignore_ascii_case("api.github.com") {
+            return Some(candidate.to_string());
         }
     }
     None

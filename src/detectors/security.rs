@@ -45,10 +45,20 @@ static SECRET_PRE_CHECK: LazyLock<AhoCorasick> = LazyLock::new(|| {
         .expect("valid secret pre-check patterns")
 });
 
+fn is_test_file_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase().replace('\\', "/");
+    lower.contains("/test")
+        || lower.contains("/tests/")
+        || lower.contains("_test.")
+        || lower.contains(".spec.")
+        || lower.contains("_spec.")
+}
+
 pub fn detect_secrets(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     let mut findings = Vec::new();
 
     for file in parsed_files {
+        let skip_test_helpers = is_test_file_path(&file.path);
         for line in &file.lines {
             let trimmed = line.content.trim();
 
@@ -65,9 +75,9 @@ pub fn detect_secrets(parsed_files: &[ParsedFile]) -> Vec<Finding> {
             if is_in_string_context(trimmed) {
                 continue;
             }
-            // Skip test/mock/fixture lines — word-boundary checked to avoid
-            // false positives from substrings like "contest" matching "test_".
-            if SKIP_LINE_RE.is_match(trimmed) {
+            // Skip test/mock/fixture helper lines only in test files — word-boundary
+            // checked to avoid false positives from substrings like "contest".
+            if skip_test_helpers && SKIP_LINE_RE.is_match(trimmed) {
                 continue;
             }
 

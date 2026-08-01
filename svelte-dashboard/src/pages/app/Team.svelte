@@ -478,7 +478,7 @@
                       id="pw-new"
                       type="password"
                       bind:value={pwNew}
-                      placeholder="At least 8 characters"
+                      placeholder="At least 10 characters"
                       autocomplete="new-password"
                     />
                   </div>
@@ -486,7 +486,7 @@
                 <div class="save-row">
                   <button
                     onclick={changePassword}
-                    disabled={pwSaving || !pwCurrent || pwNew.length < 8}
+                    disabled={pwSaving || !pwCurrent || pwNew.length < 10}
                   >
                     {pwSaving ? "Updating…" : "Update password"}
                   </button>

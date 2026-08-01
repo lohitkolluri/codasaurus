@@ -42,8 +42,8 @@
   async function handleSubmit(e) {
     e.preventDefault();
     error = "";
-    if (password.length < 8) {
-      error = "Password must be at least 8 characters";
+    if (password.length < 10) {
+      error = "Password must be at least 10 characters";
       return;
     }
     if (password !== password2) {

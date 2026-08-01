@@ -1,7 +1,7 @@
 //! Build remote repo awareness for PR reviews (manifests, guidelines, CODEOWNERS, issues).
 
 use super::codeowners::{owners_for_paths, parse_codeowners};
-use super::github_files::{fetch_first_existing, fetch_repo_file};
+use super::github_files::{fetch_first_existing, fetch_repo_files_parallel};
 use crate::context::guidelines::GuidelineFile;
 use crate::llm::{IssueContext, ReviewContext};
 use crate::parser::ParsedFile;
@@ -10,10 +10,18 @@ use anyhow::Result;
 use regex::Regex;
 use reqwest::header::HeaderMap;
 use std::collections::HashSet;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
+use tokio::sync::Semaphore;
 
 static ISSUE_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(?:fixes|closes|resolves|fix(?:es)?)\s+#(\d+)\b").expect("issue ref regex")
+});
+
+static JIRA_KEY_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b([A-Z][A-Z0-9]+-\d+)\b").expect("jira key regex"));
+
+static LINEAR_ISSUE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"linear\.app/[^\s]+/issue/([A-Z]+-\d+)").expect("linear issue regex")
 });
 
 const GUIDELINE_PATHS: &[&str] = &[
@@ -118,6 +126,7 @@ pub async fn bootstrap_manifests(
     candidates.dedup();
     candidates.truncate(24);
 
+    let mut to_fetch = Vec::new();
     for path in candidates {
         let key = path.to_lowercase();
         if !attempted.insert(key.clone()) {
@@ -129,10 +138,14 @@ pub async fn bootstrap_manifests(
         {
             continue;
         }
-        if let Some(content) = fetch_repo_file(client, headers, repo, &path, git_ref).await? {
-            if let Ok(parsed) = crate::parser::parse_file(&path, &content) {
-                out.push(parsed);
-            }
+        to_fetch.push(path);
+    }
+
+    let fetched =
+        fetch_repo_files_parallel(client, headers, repo, &to_fetch, git_ref, 5).await;
+    for (path, content) in fetched {
+        if let Ok(parsed) = crate::parser::parse_file(&path, &content) {
+            out.push(parsed);
         }
     }
     Ok(out)
@@ -145,13 +158,16 @@ pub async fn fetch_guidelines(
     repo: &str,
     git_ref: &str,
 ) -> Result<Vec<GuidelineFile>> {
+    let paths: Vec<String> = GUIDELINE_PATHS.iter().map(|p| (*p).to_string()).collect();
+    let fetched = fetch_repo_files_parallel(client, headers, repo, &paths, git_ref, 5).await;
+
     let mut files = Vec::new();
     for path in GUIDELINE_PATHS {
         if files.len() >= 3 {
             break;
         }
-        if let Some(content) = fetch_repo_file(client, headers, repo, path, git_ref).await? {
-            if let Some(gf) = GuidelineFile::from_content(*path, path, content) {
+        if let Some((_, content)) = fetched.iter().find(|(p, _)| p == path) {
+            if let Some(gf) = GuidelineFile::from_content(*path, path, content.clone()) {
                 files.push(gf);
             }
         }
@@ -192,47 +208,62 @@ pub async fn fetch_linked_issues(
     numbers.dedup();
     numbers.truncate(5);
 
-    let mut issues = Vec::new();
-    for n in numbers {
-        let url = format!("https://api.github.com/repos/{repo}/issues/{n}");
-        let resp = retry_async(
-            &RetryConfig::api_default(),
-            "fetch_linked_issue",
-            &is_reqwest_error_retryable,
-            || async {
-                client
-                    .get(&url)
-                    .headers(headers.clone())
-                    .send()
-                    .await
-                    .map_err(Into::into)
-            },
-        )
-        .await;
-        let Ok(resp) = resp else {
-            continue;
-        };
-        if !resp.status().is_success() {
-            continue;
-        }
-        let Ok(body) = resp.json::<serde_json::Value>().await else {
-            continue;
-        };
-        // Skip if it's actually a PR
-        if body.get("pull_request").is_some() {
-            continue;
-        }
-        let title = body["title"].as_str().unwrap_or("").to_string();
-        let issue_body = body["body"].as_str().map(|s| {
-            let t: String = s.chars().take(800).collect();
-            t
-        });
-        issues.push(IssueContext {
-            number: n,
-            title,
-            body: issue_body,
-        });
+    if numbers.is_empty() {
+        return Ok(Vec::new());
     }
+
+    let semaphore = Arc::new(Semaphore::new(5));
+    let mut handles = Vec::with_capacity(numbers.len());
+    for n in numbers {
+        let cl = client.clone();
+        let hdrs = headers.clone();
+        let repo = repo.to_string();
+        let sem = Arc::clone(&semaphore);
+        handles.push(tokio::spawn(async move {
+            let _permit = sem.acquire().await.ok()?;
+            let url = format!("https://api.github.com/repos/{repo}/issues/{n}");
+            let resp = retry_async(
+                &RetryConfig::api_default(),
+                "fetch_linked_issue",
+                &is_reqwest_error_retryable,
+                || async {
+                    cl.get(&url)
+                        .headers(hdrs.clone())
+                        .send()
+                        .await
+                        .map_err(Into::into)
+                },
+            )
+            .await
+            .ok()?;
+            if !resp.status().is_success() {
+                return None;
+            }
+            let body = resp.json::<serde_json::Value>().await.ok()?;
+            // Skip if it's actually a PR
+            if body.get("pull_request").is_some() {
+                return None;
+            }
+            let title = body["title"].as_str().unwrap_or("").to_string();
+            let issue_body = body["body"].as_str().map(|s| {
+                let t: String = s.chars().take(800).collect();
+                t
+            });
+            Some(IssueContext {
+                number: n,
+                title,
+                body: issue_body,
+            })
+        }));
+    }
+
+    let mut issues = Vec::with_capacity(handles.len());
+    for h in handles {
+        if let Ok(Some(issue)) = h.await {
+            issues.push(issue);
+        }
+    }
+    issues.sort_by_key(|i| i.number);
     Ok(issues)
 }
 
@@ -240,126 +271,120 @@ pub async fn fetch_linked_issues(
 pub async fn fetch_external_tickets(pr_body: &str) -> Vec<IssueContext> {
     let mut out = Vec::new();
     // Jira: PROJ-123
-    let jira_re = regex::Regex::new(r"\b([A-Z][A-Z0-9]+-\d+)\b").ok();
-    if let Some(re) = jira_re {
-        let keys: Vec<String> = re
-            .captures_iter(pr_body)
-            .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
-            .take(5)
-            .collect();
-        if let (Ok(base), Ok(email), Ok(token)) = (
-            std::env::var("JIRA_BASE_URL"),
-            std::env::var("JIRA_EMAIL"),
-            std::env::var("JIRA_API_TOKEN"),
-        ) {
-            let client = reqwest::Client::new();
-            for key in keys {
-                let url = format!("{}/rest/api/3/issue/{}", base.trim_end_matches('/'), key);
-                if let Ok(resp) = client
-                    .get(&url)
-                    .basic_auth(&email, Some(&token))
-                    .header("Accept", "application/json")
-                    .send()
-                    .await
-                {
-                    if resp.status().is_success() {
-                        if let Ok(v) = resp.json::<serde_json::Value>().await {
-                            let title = v["fields"]["summary"].as_str().unwrap_or(&key).to_string();
-                            let body = v["fields"]["description"]
+    let keys: Vec<String> = JIRA_KEY_RE
+        .captures_iter(pr_body)
+        .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
+        .take(5)
+        .collect();
+    if let (Ok(base), Ok(email), Ok(token)) = (
+        std::env::var("JIRA_BASE_URL"),
+        std::env::var("JIRA_EMAIL"),
+        std::env::var("JIRA_API_TOKEN"),
+    ) {
+        let client = reqwest::Client::new();
+        for key in keys {
+            let url = format!("{}/rest/api/3/issue/{}", base.trim_end_matches('/'), key);
+            if let Ok(resp) = client
+                .get(&url)
+                .basic_auth(&email, Some(&token))
+                .header("Accept", "application/json")
+                .send()
+                .await
+            {
+                if resp.status().is_success() {
+                    if let Ok(v) = resp.json::<serde_json::Value>().await {
+                        let title = v["fields"]["summary"].as_str().unwrap_or(&key).to_string();
+                        let body = v["fields"]["description"]
+                            .as_str()
+                            .map(|s| s.chars().take(800).collect());
+                        let num = key
+                            .split('-')
+                            .next_back()
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(0);
+                        out.push(IssueContext {
+                            number: num,
+                            title: format!("[Jira {key}] {title}"),
+                            body,
+                        });
+                    }
+                }
+            }
+        }
+    } else {
+        for key in keys {
+            out.push(IssueContext {
+                number: 0,
+                title: format!("[Jira {key}] (configure JIRA_* to fetch)"),
+                body: None,
+            });
+        }
+    }
+
+    // Linear: https://linear.app/.../issue/ENG-123/...
+    let ids: Vec<String> = LINEAR_ISSUE_RE
+        .captures_iter(pr_body)
+        .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
+        .take(5)
+        .collect();
+    if let Ok(api_key) = std::env::var("LINEAR_API_KEY") {
+        let client = reqwest::Client::new();
+        for id in ids {
+            let query = serde_json::json!({
+                "query": "query($q: String!) { issueSearch(query: $q, first: 1) { nodes { identifier title description } } }",
+                "variables": { "q": id }
+            });
+            match client
+                .post("https://api.linear.app/graphql")
+                .header("Authorization", api_key.as_str())
+                .header("Content-Type", "application/json")
+                .json(&query)
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    if let Ok(v) = resp.json::<serde_json::Value>().await {
+                        let node = &v["data"]["issueSearch"]["nodes"][0];
+                        if node.is_object() {
+                            let title = node["title"].as_str().unwrap_or(&id).to_string();
+                            let body = node["description"]
                                 .as_str()
                                 .map(|s| s.chars().take(800).collect());
-                            let num = key
+                            let num = id
                                 .split('-')
                                 .next_back()
                                 .and_then(|s| s.parse().ok())
                                 .unwrap_or(0);
                             out.push(IssueContext {
                                 number: num,
-                                title: format!("[Jira {key}] {title}"),
+                                title: format!("[Linear {id}] {title}"),
                                 body,
                             });
+                            continue;
                         }
                     }
+                    out.push(IssueContext {
+                        number: 0,
+                        title: format!("[Linear {id}]"),
+                        body: Some("Linked from PR body (fetch returned no issue).".into()),
+                    });
                 }
-            }
-        } else {
-            for key in keys {
-                out.push(IssueContext {
-                    number: 0,
-                    title: format!("[Jira {key}] (configure JIRA_* to fetch)"),
-                    body: None,
-                });
+                _ => {
+                    out.push(IssueContext {
+                        number: 0,
+                        title: format!("[Linear {id}]"),
+                        body: Some("Linked from PR body (Linear fetch failed).".into()),
+                    });
+                }
             }
         }
-    }
-
-    // Linear: https://linear.app/.../issue/ENG-123/...
-    let linear_re = regex::Regex::new(r"linear\.app/[^\s]+/issue/([A-Z]+-\d+)").ok();
-    if let Some(re) = linear_re {
-        let ids: Vec<String> = re
-            .captures_iter(pr_body)
-            .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
-            .take(5)
-            .collect();
-        if let Ok(api_key) = std::env::var("LINEAR_API_KEY") {
-            let client = reqwest::Client::new();
-            for id in ids {
-                let query = serde_json::json!({
-                    "query": "query($q: String!) { issueSearch(query: $q, first: 1) { nodes { identifier title description } } }",
-                    "variables": { "q": id }
-                });
-                match client
-                    .post("https://api.linear.app/graphql")
-                    .header("Authorization", api_key.as_str())
-                    .header("Content-Type", "application/json")
-                    .json(&query)
-                    .send()
-                    .await
-                {
-                    Ok(resp) if resp.status().is_success() => {
-                        if let Ok(v) = resp.json::<serde_json::Value>().await {
-                            let node = &v["data"]["issueSearch"]["nodes"][0];
-                            if node.is_object() {
-                                let title = node["title"].as_str().unwrap_or(&id).to_string();
-                                let body = node["description"]
-                                    .as_str()
-                                    .map(|s| s.chars().take(800).collect());
-                                let num = id
-                                    .split('-')
-                                    .next_back()
-                                    .and_then(|s| s.parse().ok())
-                                    .unwrap_or(0);
-                                out.push(IssueContext {
-                                    number: num,
-                                    title: format!("[Linear {id}] {title}"),
-                                    body,
-                                });
-                                continue;
-                            }
-                        }
-                        out.push(IssueContext {
-                            number: 0,
-                            title: format!("[Linear {id}]"),
-                            body: Some("Linked from PR body (fetch returned no issue).".into()),
-                        });
-                    }
-                    _ => {
-                        out.push(IssueContext {
-                            number: 0,
-                            title: format!("[Linear {id}]"),
-                            body: Some("Linked from PR body (Linear fetch failed).".into()),
-                        });
-                    }
-                }
-            }
-        } else {
-            for id in ids {
-                out.push(IssueContext {
-                    number: 0,
-                    title: format!("[Linear {id}] (configure LINEAR_API_KEY to fetch)"),
-                    body: None,
-                });
-            }
+    } else {
+        for id in ids {
+            out.push(IssueContext {
+                number: 0,
+                title: format!("[Linear {id}] (configure LINEAR_API_KEY to fetch)"),
+                body: None,
+            });
         }
     }
     out

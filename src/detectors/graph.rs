@@ -3,6 +3,15 @@ use crate::graph::CodeGraph;
 use crate::parser::ParsedFile;
 use std::collections::HashMap;
 
+/// Cap files scanned when building word→import edges (O(files × lines × words)).
+const MAX_WORD_EDGE_FILES: usize = 64;
+/// Cap BFS blast-radius checks per review.
+const MAX_BFS_SYMBOLS: usize = 40;
+/// Stop expanding BFS once we already know the radius is "large".
+const BLAST_EARLY_STOP: usize = 24;
+/// Skip full BFS when direct out-degree already exceeds this.
+const HIGH_DEGREE_SKIP: usize = 16;
+
 /// Build a per-review code graph (never share across concurrent reviews).
 fn build_graph(files: &[ParsedFile]) -> CodeGraph {
     let mut graph = CodeGraph::new();
@@ -31,7 +40,7 @@ fn build_graph(files: &[ParsedFile]) -> CodeGraph {
     }
 
     let mut all_imports: Vec<(&str, &str)> = Vec::new();
-    for file in files {
+    for file in files.iter().take(MAX_WORD_EDGE_FILES) {
         for import in &file.imports {
             all_imports.push((import.name.as_str(), file.path.as_str()));
         }
@@ -52,7 +61,7 @@ fn build_graph(files: &[ParsedFile]) -> CodeGraph {
         }
     }
 
-    for file_a in files {
+    for file_a in files.iter().take(MAX_WORD_EDGE_FILES) {
         let a_path = file_a.path.as_str();
         for line in &file_a.lines {
             let trimmed = line.content.trim();
@@ -95,13 +104,61 @@ fn build_graph(files: &[ParsedFile]) -> CodeGraph {
     graph
 }
 
+/// Prefer file-local symbols (path::name) over bare package imports for BFS.
+fn is_file_local_symbol(sym: &str) -> bool {
+    sym.contains('/') || sym.contains('\\') || sym.contains('.')
+}
+
 pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     let mut findings = Vec::new();
+    if parsed_files.is_empty() {
+        return findings;
+    }
     let graph = build_graph(parsed_files);
 
-    for (file_path, symbols) in &graph.file_to_nodes {
+    // Input files are the changed/scanned set for this review — only BFS those.
+    let changed: std::collections::HashSet<&str> =
+        parsed_files.iter().map(|f| f.path.as_str()).collect();
+
+    let mut bfs_done = 0usize;
+    'outer: for (file_path, symbols) in &graph.file_to_nodes {
+        if !changed.contains(file_path.as_str()) {
+            continue;
+        }
         for sym in symbols {
-            let affected = graph.blast_radius(sym, 3);
+            if bfs_done >= MAX_BFS_SYMBOLS {
+                break 'outer;
+            }
+            // Package-name import nodes fan out widely; skip unless file-local.
+            if !is_file_local_symbol(sym) {
+                continue;
+            }
+
+            let degree = graph.out_degree(sym);
+            if degree > HIGH_DEGREE_SKIP {
+                // Already large enough to surface without a full BFS.
+                findings.push(Finding {
+                    detector: "graph".to_string(),
+                    severity: "info",
+                    file: file_path.clone(),
+                    line: 0,
+                    column: 0,
+                    message: format!(
+                        "Symbol `{sym}` has a large blast radius ({degree}+ direct dependents)"
+                    ),
+                    suggestion: Some(
+                        "Review callers before changing this symbol; consider feature flags."
+                            .into(),
+                    ),
+                    evidence: None,
+                    codemod: None,
+                });
+                bfs_done += 1;
+                continue;
+            }
+
+            let affected = graph.blast_radius_capped(sym, 3, BLAST_EARLY_STOP);
+            bfs_done += 1;
             if affected.len() > 5 {
                 findings.push(Finding {
                     detector: "graph".to_string(),

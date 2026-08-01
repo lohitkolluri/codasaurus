@@ -321,6 +321,50 @@ pub async fn fetch_first_existing(
     Ok(None)
 }
 
+/// Fetch many paths concurrently (bounded). Missing/error paths are omitted.
+pub async fn fetch_repo_files_parallel(
+    client: &reqwest::Client,
+    headers: &HeaderMap,
+    repo: &str,
+    paths: &[String],
+    git_ref: &str,
+    max_concurrent: usize,
+) -> Vec<(String, String)> {
+    use std::sync::Arc;
+    use tokio::sync::Semaphore;
+
+    if paths.is_empty() {
+        return Vec::new();
+    }
+    let limit = max_concurrent.clamp(1, 8);
+    let semaphore = Arc::new(Semaphore::new(limit));
+    let mut handles = Vec::with_capacity(paths.len());
+
+    for path in paths {
+        let cl = client.clone();
+        let hdrs = headers.clone();
+        let repo = repo.to_string();
+        let path = path.clone();
+        let git_ref = git_ref.to_string();
+        let sem = Arc::clone(&semaphore);
+        handles.push(tokio::spawn(async move {
+            let _permit = sem.acquire().await.ok()?;
+            match fetch_repo_file(&cl, &hdrs, &repo, &path, &git_ref).await {
+                Ok(Some(content)) if !content.is_empty() => Some((path, content)),
+                _ => None,
+            }
+        }));
+    }
+
+    let mut out = Vec::with_capacity(handles.len());
+    for h in handles {
+        if let Ok(Some(pair)) = h.await {
+            out.push(pair);
+        }
+    }
+    out
+}
+
 fn urlencoding_query(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {

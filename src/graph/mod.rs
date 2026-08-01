@@ -69,8 +69,26 @@ impl CodeGraph {
         }
     }
 
+    /// Direct out-neighbors count (cheap pre-check before BFS).
+    pub fn out_degree(&self, symbol: &str) -> usize {
+        self.node_indices
+            .get(symbol)
+            .map(|&idx| self.graph.neighbors(idx).count())
+            .unwrap_or(0)
+    }
+
     /// Find all symbols that could be affected by a change to `symbol`, up to `max_hops` away.
     pub fn blast_radius(&self, symbol: &str, max_hops: usize) -> Vec<&SymbolNode> {
+        self.blast_radius_capped(symbol, max_hops, usize::MAX)
+    }
+
+    /// Like [`blast_radius`], but stops once `cap` nodes have been collected.
+    pub fn blast_radius_capped(
+        &self,
+        symbol: &str,
+        max_hops: usize,
+        cap: usize,
+    ) -> Vec<&SymbolNode> {
         let mut affected = Vec::new();
         if let Some(&start) = self.node_indices.get(symbol) {
             let mut visited = std::collections::HashSet::new();
@@ -84,6 +102,9 @@ impl CodeGraph {
             while let Some(nx) = queue.pop_front() {
                 let d = depths[&nx];
                 affected.push(&self.graph[nx]);
+                if affected.len() >= cap {
+                    break;
+                }
 
                 if d < max_hops {
                     for neighbor in self.graph.neighbors(nx) {

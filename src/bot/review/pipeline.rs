@@ -20,10 +20,8 @@ pub struct ReviewOptions {
     pub auto_describe: bool,
     /// Run LLM `review_diff` when PR size is under budget.
     pub auto_review_diff: bool,
-}
-
-pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -> Result<()> {
-    review_pr_with_options(token, repo_name, payload, ReviewOptions::default()).await
+    /// Review draft PRs (slash `/review` and similar).
+    pub force_draft: bool,
 }
 
 pub async fn review_pr_with_options(
@@ -37,9 +35,9 @@ pub async fn review_pr_with_options(
         None => return Ok(()),
     };
 
-    // Draft PRs: skip full review (edge case) unless explicitly forced via comment path
+    // Draft PRs: skip unless explicitly forced (slash-command path).
     let is_draft = pr["draft"].as_bool().unwrap_or(false);
-    if is_draft {
+    if is_draft && !options.force_draft {
         tracing::info!(repo = repo_name, "skipping draft PR");
         return Ok(());
     }
@@ -51,13 +49,19 @@ pub async fn review_pr_with_options(
 
     let pool = crate::bot::CONFIG_POOL.get();
 
-    // Honor dashboard active toggle
-    if let Some(pool) = pool {
-        if let Ok(Some(repo)) = crate::db::repos::get_repo_by_full_name(pool, repo_name).await {
-            if !repo.active {
-                tracing::info!(repo = repo_name, "repo inactive, skipping review");
-                return Ok(());
-            }
+    // Honor dashboard active toggle (single fetch; reused for config overlay below).
+    let db_repo = if let Some(pool) = pool {
+        crate::db::repos::get_repo_by_full_name(pool, repo_name)
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+    if let Some(ref repo) = db_repo {
+        if !repo.active {
+            tracing::info!(repo = repo_name, "repo inactive, skipping review");
+            return Ok(());
         }
     }
 
@@ -86,14 +90,14 @@ pub async fn review_pr_with_options(
     let mut repo_llm_enabled = true;
     let mut repo_flags = crate::config::RepoBotFlags::default();
     let mut repo_config_json: Option<String> = None;
-    if let Some(pool) = pool {
-        if let Ok(Some(repo)) = crate::db::repos::get_repo_by_full_name(pool, repo_name).await {
-            if let Some(ref cfg_json) = repo.config_json {
-                repo_config_json = Some(cfg_json.clone());
-                repo_flags = config.overlay_repo_config_json(cfg_json);
-                repo_llm_enabled = repo_flags.llm_enabled;
-            }
+    if let Some(ref repo) = db_repo {
+        if let Some(ref cfg_json) = repo.config_json {
+            repo_config_json = Some(cfg_json.clone());
+            repo_flags = config.overlay_repo_config_json(cfg_json);
+            repo_llm_enabled = repo_flags.llm_enabled;
         }
+    }
+    if let Some(pool) = pool {
         if let Ok(Some(v)) = crate::db::config::get_config(pool, "auto_labels_enabled").await {
             if matches!(
                 v.to_ascii_lowercase().as_str(),
@@ -241,69 +245,78 @@ pub async fn review_pr_with_options(
     }
 
     // Full-file fetch for critical paths (auth/crypto/IaC/Docker) when under size budget.
+    // Overlap with commits fetch — commits do not depend on critical file contents.
     let head_for_files = if head_sha.is_empty() {
         head_ref
     } else {
         head_sha
     };
-    if !low_signal_only {
-        for path in &changed_paths {
-            if !is_critical_full_file_path(path) {
-                continue;
+    let critical_paths: Vec<String> = if !low_signal_only {
+        changed_paths
+            .iter()
+            .filter(|path| is_critical_full_file_path(path))
+            .filter(|path| {
+                !parsed_files_collected
+                    .iter()
+                    .any(|p| p.path == **path && p.raw_content.len() > 400)
+            })
+            .cloned()
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    let pr_author = pr["user"]["login"].as_str().unwrap_or("");
+    let commits_url = format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/commits");
+    let (fetched_critical, commit_messages) = tokio::join!(
+        async {
+            if critical_paths.is_empty() {
+                Vec::new()
+            } else {
+                crate::bot::github_files::fetch_repo_files_parallel(
+                    client,
+                    &headers,
+                    repo_name,
+                    &critical_paths,
+                    head_for_files,
+                    5,
+                )
+                .await
             }
-            if parsed_files_collected
-                .iter()
-                .any(|p| p.path == *path && p.raw_content.len() > 400)
-            {
-                continue;
-            }
-            match crate::bot::github_files::fetch_repo_file(
-                client,
-                &headers,
-                repo_name,
-                path,
-                head_for_files,
+        },
+        async {
+            match retry_async(
+                &RetryConfig::api_default(),
+                "fetch_pr_commits",
+                &is_reqwest_error_retryable,
+                || async {
+                    client
+                        .get(&commits_url)
+                        .headers(headers.clone())
+                        .send()
+                        .await
+                        .map_err(Into::into)
+                },
             )
             .await
             {
-                Ok(Some(content)) if !content.is_empty() => {
-                    if let Ok(parsed) = crate::parser::parse_file(path, &content) {
-                        parsed_files_collected.retain(|p| p.path != *path);
-                        parsed_files_collected.push(parsed);
-                    }
-                }
-                _ => {}
+                Ok(r) => match r.json::<Vec<serde_json::Value>>().await {
+                    Ok(commits) => commits
+                        .iter()
+                        .filter_map(|c| c["commit"]["message"].as_str().map(String::from))
+                        .collect(),
+                    Err(_) => vec![],
+                },
+                Err(_) => vec![],
             }
+        },
+    );
+    for (path, content) in fetched_critical {
+        if let Ok(parsed) = crate::parser::parse_file(&path, &content) {
+            parsed_files_collected.retain(|p| p.path != path);
+            parsed_files_collected.push(parsed);
         }
     }
-
-    // Fetch commits early (used by slop + remote guidelines).
-    let pr_author = pr["user"]["login"].as_str().unwrap_or("");
-    let commits_url = format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/commits");
-    let commit_messages: Vec<String> = match retry_async(
-        &RetryConfig::api_default(),
-        "fetch_pr_commits",
-        &is_reqwest_error_retryable,
-        || async {
-            client
-                .get(&commits_url)
-                .headers(headers.clone())
-                .send()
-                .await
-                .map_err(Into::into)
-        },
-    )
-    .await
-    {
-        Ok(r) => match r.json::<Vec<serde_json::Value>>().await {
-            Ok(commits) => commits
-                .iter()
-                .filter_map(|c| c["commit"]["message"].as_str().map(String::from))
-                .collect(),
-            Err(_) => vec![],
-        },
-        Err(_) => vec![],
-    };
 
     // Capture head-side manifest text before base-branch bootstrap overwrites.
     let mut head_manifests: std::collections::HashMap<String, String> =
@@ -319,30 +332,28 @@ pub async fn review_pr_with_options(
         head_sha
     };
     if !low_signal_only {
-        for path in changed_paths
+        let manifest_paths: Vec<String> = changed_paths
             .iter()
             .filter(|p| crate::bot::dep_delta::is_manifest_path(p))
+            .filter(|path| {
+                head_manifests
+                    .get(*path)
+                    .map(|c| c.len() < 80)
+                    .unwrap_or(true)
+            })
+            .cloned()
+            .collect();
+        for (path, content) in crate::bot::github_files::fetch_repo_files_parallel(
+            client,
+            &headers,
+            repo_name,
+            &manifest_paths,
+            head_for_manifest,
+            5,
+        )
+        .await
         {
-            let need_fetch = head_manifests
-                .get(path)
-                .map(|c| c.len() < 80)
-                .unwrap_or(true);
-            if !need_fetch {
-                continue;
-            }
-            if let Ok(Some(content)) = crate::bot::github_files::fetch_repo_file(
-                client,
-                &headers,
-                repo_name,
-                path,
-                head_for_manifest,
-            )
-            .await
-            {
-                if !content.is_empty() {
-                    head_manifests.insert(path.clone(), content);
-                }
-            }
+            head_manifests.insert(path, content);
         }
     }
 
@@ -376,21 +387,27 @@ pub async fn review_pr_with_options(
         }
     }
     // Changed manifests skipped by bootstrap (already in the PR) still need a real base fetch.
-    for (path, new_content) in &head_manifests {
-        if bootstrapped.iter().any(|b| &b.path == path) {
-            continue;
-        }
-        if !changed_paths.iter().any(|p| p == path) {
-            continue;
-        }
-        let old_content =
-            crate::bot::github_files::fetch_repo_file(client, &headers, repo_name, path, base_sha)
-                .await
-                .ok()
-                .flatten()
-                .unwrap_or_default();
-        if let Some(d) = crate::bot::dep_delta::diff_manifest(path, &old_content, new_content) {
-            dep_deltas.push(d);
+    let base_fetch_paths: Vec<String> = head_manifests
+        .keys()
+        .filter(|path| !bootstrapped.iter().any(|b| &b.path == *path))
+        .filter(|path| changed_paths.iter().any(|p| p == *path))
+        .cloned()
+        .collect();
+    let base_contents = crate::bot::github_files::fetch_repo_files_parallel(
+        client,
+        &headers,
+        repo_name,
+        &base_fetch_paths,
+        base_sha,
+        5,
+    )
+    .await;
+    for (path, old_content) in base_contents {
+        if let Some(new_content) = head_manifests.get(&path) {
+            if let Some(d) = crate::bot::dep_delta::diff_manifest(&path, &old_content, new_content)
+            {
+                dep_deltas.push(d);
+            }
         }
     }
     for file in &files {
@@ -436,20 +453,21 @@ pub async fn review_pr_with_options(
     }
 
     // Detectors stay sync but registry hits are now mostly cache; still isolate on a worker.
+    // Move parsed files into the closure (no clone) and move them back for later use.
     let mut findings = if parsed_files_collected.is_empty() {
         Findings::new()
     } else {
         let cfg = config.clone();
-        let parsed = parsed_files_collected.clone();
+        let parsed = std::mem::take(&mut parsed_files_collected);
         let repo_for_learning = repo_name.to_string();
-        tokio::task::spawn_blocking(move || {
-            crate::learning::store::set_filter_repo(Some(repo_for_learning));
-            let out = detectors::run_all(&parsed, &cfg);
-            crate::learning::store::set_filter_repo(None);
-            out
+        let (out, parsed_back) = tokio::task::spawn_blocking(move || {
+            let out = detectors::run_all(&parsed, &cfg, Some(repo_for_learning.as_str()));
+            (out, parsed)
         })
         .await
-        .map_err(|e| anyhow::anyhow!("detector task join error: {e}"))?
+        .map_err(|e| anyhow::anyhow!("detector task join error: {e}"))?;
+        parsed_files_collected = parsed_back;
+        out
     };
 
     if want_guidelines && !remote_ctx.guidelines.is_empty() {
@@ -476,16 +494,12 @@ pub async fn review_pr_with_options(
         } else {
             head_ref
         };
-        for path in &required {
-            match crate::bot::github_files::fetch_repo_file(
-                client, &headers, repo_name, path, git_ref,
-            )
-            .await
-            {
-                Ok(Some(_)) => present_paths.push(path.clone()),
-                Ok(None) => {}
-                Err(e) => tracing::debug!(error = %e, path, "required-file probe failed"),
-            }
+        for (path, _) in crate::bot::github_files::fetch_repo_files_parallel(
+            client, &headers, repo_name, &required, git_ref, 5,
+        )
+        .await
+        {
+            present_paths.push(path);
         }
 
         let g = detectors::guidelines::detect_remote(
@@ -498,30 +512,41 @@ pub async fn review_pr_with_options(
         findings.findings.extend(g);
     }
 
-    // Mine human feedback on this PR into learned rules (budgeted; best-effort).
-    if let Some(pool) = pool {
-        let store = crate::learning::store::LearningStore::from_pool(pool);
-        match crate::learning::mine::mine_pr_comment_feedback(
-            client, &headers, repo_name, pr_number, &store,
-        )
-        .await
-        {
-            Ok(n) if n > 0 => tracing::info!(learned = n, "mined PR feedback into rules"),
-            Ok(_) => {}
-            Err(e) => tracing::debug!(error = %e, "feedback mining skipped"),
-        }
+    // Mine feedback, related PRs, and reviewer suggestions concurrently (independent I/O).
+    let (mine_result, related_prs, mut reviewers) = tokio::join!(
+        async {
+            if let Some(pool) = pool {
+                let store = crate::learning::store::LearningStore::from_pool(pool);
+                crate::learning::mine::mine_pr_comment_feedback(
+                    client, &headers, repo_name, pr_number, &store,
+                )
+                .await
+            } else {
+                Ok(0usize)
+            }
+        },
+        crate::bot::related_prs::find_related_prs(
+            client,
+            &headers,
+            repo_name,
+            &changed_paths,
+            pr_number,
+        ),
+        suggest_reviewers(
+            client,
+            &auth_header,
+            repo_name,
+            &files,
+            pr_author,
+            runtime.max_reviewer_files.min(MAX_REVIEWER_FILES),
+        ),
+    );
+    match mine_result {
+        Ok(n) if n > 0 => tracing::info!(learned = n, "mined PR feedback into rules"),
+        Ok(_) => {}
+        Err(e) => tracing::debug!(error = %e, "feedback mining skipped"),
     }
-
-    // Related PRs by path history (for LLM / walkthrough context).
-    let related_prs = crate::bot::related_prs::find_related_prs(
-        client,
-        &headers,
-        repo_name,
-        &changed_paths,
-        pr_number,
-    )
-    .await
-    .unwrap_or_default();
+    let related_prs = related_prs.unwrap_or_default();
     if !related_prs.is_empty() {
         tracing::info!(n = related_prs.len(), "found related PRs");
     }
@@ -580,15 +605,6 @@ pub async fn review_pr_with_options(
         ));
     crate::bot::policy::enforce_count_caps(&mut findings.findings, &policy_pack);
 
-    let mut reviewers = suggest_reviewers(
-        client,
-        &auth_header,
-        repo_name,
-        &files,
-        pr_author,
-        runtime.max_reviewer_files.min(MAX_REVIEWER_FILES),
-    )
-    .await;
     // CODEOWNERS first, then history-based (deduped).
     for owner in remote_ctx.codeowner_reviewers.iter().rev() {
         if owner != pr_author && !reviewers.iter().any(|r| r == owner) {

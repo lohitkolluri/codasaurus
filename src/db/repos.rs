@@ -22,6 +22,22 @@ pub async fn get_repo_by_full_name(
 }
 
 pub async fn create_repo(pool: &DbPool, repo: &RepoCreate) -> Result<Repo, sqlx::Error> {
+    create_repo_with_active(pool, repo, false).await
+}
+
+/// Register a repo from an installation webhook with reviews enabled by default.
+pub async fn create_repo_from_installation(
+    pool: &DbPool,
+    repo: &RepoCreate,
+) -> Result<Repo, sqlx::Error> {
+    create_repo_with_active(pool, repo, true).await
+}
+
+async fn create_repo_with_active(
+    pool: &DbPool,
+    repo: &RepoCreate,
+    active: bool,
+) -> Result<Repo, sqlx::Error> {
     db_fetch_one!(
         pool,
         Repo,
@@ -32,6 +48,8 @@ pub async fn create_repo(pool: &DbPool, repo: &RepoCreate) -> Result<Repo, sqlx:
            installation_id = excluded.installation_id,
            private = excluded.private,
            default_branch = COALESCE(excluded.default_branch, repos.default_branch),
+           -- Reactivate on reinstall; never deactivate an already-active repo via upsert.
+           active = repos.active OR excluded.active,
            updated_at = CURRENT_TIMESTAMP
          RETURNING *",
         repo.github_id,
@@ -41,7 +59,7 @@ pub async fn create_repo(pool: &DbPool, repo: &RepoCreate) -> Result<Repo, sqlx:
         &repo.default_branch,
         repo.installation_id,
         repo.private,
-        false // opt-in: operator enables reviews in the dashboard
+        active
     )
 }
 

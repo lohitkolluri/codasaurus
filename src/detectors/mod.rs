@@ -98,52 +98,63 @@ impl Findings {
     }
 }
 
-pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
+pub fn run_all(parsed_files: &[ParsedFile], config: &Config, repo: Option<&str>) -> Findings {
     let mut all = Findings::new();
 
-    if config.checks.hallucinated_imports {
-        all.extend(hallucinated_imports::detect(parsed_files));
-    }
+    std::thread::scope(|s| {
+        let mut handles = Vec::new();
 
-    if config.checks.phantom_deps {
-        all.extend(phantom_deps::detect(parsed_files));
-    }
+        if config.checks.hallucinated_imports {
+            handles.push(s.spawn(|| hallucinated_imports::detect(parsed_files)));
+        }
 
-    if config.checks.secrets {
-        all.extend(security::detect_secrets(parsed_files));
-    }
+        if config.checks.phantom_deps {
+            handles.push(s.spawn(|| phantom_deps::detect(parsed_files)));
+        }
 
-    if config.checks.todo_leaks {
-        all.extend(security::detect_todos(parsed_files));
-    }
+        if config.checks.secrets {
+            handles.push(s.spawn(|| security::detect_secrets(parsed_files)));
+        }
 
-    if config.checks.over_engineering {
-        all.extend(style::detect_over_engineering(parsed_files));
-    }
+        if config.checks.todo_leaks {
+            handles.push(s.spawn(|| security::detect_todos(parsed_files)));
+        }
 
-    if config.checks.boilerplate {
-        all.extend(style::detect_boilerplate(parsed_files));
-    }
+        if config.checks.over_engineering {
+            handles.push(s.spawn(|| style::detect_over_engineering(parsed_files)));
+        }
 
-    if config.checks.vulnerabilities {
-        all.extend(vulnerabilities::detect(parsed_files));
-    }
+        if config.checks.boilerplate {
+            handles.push(s.spawn(|| style::detect_boilerplate(parsed_files)));
+        }
 
-    if config.checks.stale_api {
-        all.extend(stale_api::detect(parsed_files));
-    }
+        if config.checks.vulnerabilities {
+            handles.push(s.spawn(|| vulnerabilities::detect(parsed_files)));
+        }
 
-    if config.checks.risky_patterns {
-        all.extend(risky_patterns::detect(parsed_files));
-    }
+        if config.checks.stale_api {
+            handles.push(s.spawn(|| stale_api::detect(parsed_files)));
+        }
 
-    if config.checks.graph {
-        all.extend(graph::detect(parsed_files));
-    }
+        if config.checks.risky_patterns {
+            handles.push(s.spawn(|| risky_patterns::detect(parsed_files)));
+        }
 
-    if config.checks.iac {
-        all.extend(iac::detect(parsed_files));
-    }
+        if config.checks.graph {
+            handles.push(s.spawn(|| graph::detect(parsed_files)));
+        }
+
+        if config.checks.iac {
+            handles.push(s.spawn(|| iac::detect(parsed_files)));
+        }
+
+        for handle in handles {
+            match handle.join() {
+                Ok(findings) => all.extend(findings),
+                Err(payload) => std::panic::resume_unwind(payload),
+            }
+        }
+    });
 
     // Guidelines run via detect_remote on the bot path (GitHub Contents), not local git.
 
@@ -156,7 +167,7 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
                 }
             }
             if let Some(ref store) = *guard {
-                match store.filter_findings(&all.findings) {
+                match store.filter_findings(&all.findings, repo) {
                     Ok(filtered) => return Findings { findings: filtered },
                     Err(e) => {
                         eprintln!("Warning: learning store filter_findings failed: {e}; returning all unfiltered findings");
@@ -174,6 +185,17 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
     all
 }
 
+/// Precomputed exclude pattern (lowercased + directory path variants).
+#[derive(Debug, Clone)]
+pub struct PreparedExclude {
+    /// Trimmed lowercase pattern as configured (e.g. `dist/`, `*.lock`).
+    pub pattern: String,
+    /// For directory patterns: `/{dir}/` for contains checks.
+    pub dir_contains: Option<String>,
+    /// For directory patterns: `/{dir}` for ends-with checks.
+    pub dir_ends: Option<String>,
+}
+
 /// Check if a file path matches any of the exclusion patterns.
 /// Supports glob-style wildcards (`*.lock`), directory prefixes (`dist/`),
 /// and direct filename/path matches.
@@ -183,35 +205,50 @@ pub fn is_excluded(path: &str, patterns: &[String]) -> bool {
 }
 
 /// Lowercase/trim exclusion patterns once for hot loops (many files per PR).
-pub fn prepare_exclude_patterns(patterns: &[String]) -> Vec<String> {
+/// Precomputes `/{dir}/` and `/{dir}` forms so matching does not allocate per path.
+pub fn prepare_exclude_patterns(patterns: &[String]) -> Vec<PreparedExclude> {
     patterns
         .iter()
-        .map(|p| p.trim().to_lowercase())
-        .filter(|p| !p.is_empty())
+        .filter_map(|p| {
+            let pattern = p.trim().to_lowercase();
+            if pattern.is_empty() {
+                return None;
+            }
+            let (dir_contains, dir_ends) = if pattern.ends_with('/') {
+                let dir = &pattern[..pattern.len() - 1];
+                (Some(format!("/{dir}/")), Some(format!("/{dir}")))
+            } else {
+                (None, None)
+            };
+            Some(PreparedExclude {
+                pattern,
+                dir_contains,
+                dir_ends,
+            })
+        })
         .collect()
 }
 
-/// Like [`is_excluded`] but expects patterns already lowercased via [`prepare_exclude_patterns`].
-pub fn is_excluded_prepared(path: &str, patterns_lower: &[String]) -> bool {
+/// Like [`is_excluded`] but expects patterns from [`prepare_exclude_patterns`].
+pub fn is_excluded_prepared(path: &str, patterns: &[PreparedExclude]) -> bool {
     let path_lower = path.to_lowercase();
-    patterns_lower.iter().any(|p| {
-        if path_lower.ends_with(p) {
+    patterns.iter().any(|p| {
+        if path_lower.ends_with(&p.pattern) {
             return true;
         }
-        if let Some(ext) = p.strip_prefix('*') {
+        if let Some(ext) = p.pattern.strip_prefix('*') {
             if path_lower.ends_with(ext) {
                 return true;
             }
         }
-        if p.ends_with('/') {
-            let dir = &p[..p.len() - 1];
-            if path_lower.starts_with(p) {
+        if let (Some(ref contains), Some(ref ends)) = (&p.dir_contains, &p.dir_ends) {
+            if path_lower.starts_with(&p.pattern) {
                 return true;
             }
-            if path_lower.contains(&format!("/{dir}/")) {
+            if path_lower.contains(contains) {
                 return true;
             }
-            if path_lower.ends_with(&format!("/{dir}")) {
+            if path_lower.ends_with(ends) {
                 return true;
             }
         }

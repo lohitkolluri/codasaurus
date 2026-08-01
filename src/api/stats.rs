@@ -2,11 +2,19 @@ use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::json;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::db;
 
 use super::errors::ApiError;
 use super::AppState;
+
+/// Cache expensive dashboard stats for 30s (unbounded COUNTs / AVG on large tables).
+static STATS_CACHE: LazyLock<Mutex<(Instant, Option<serde_json::Value>)>> =
+    LazyLock::new(|| Mutex::new((Instant::now() - Duration::from_secs(60), None)));
+
+const STATS_CACHE_TTL: Duration = Duration::from_secs(30);
 
 // ---------------------------------------------------------------------------
 // Router
@@ -22,6 +30,14 @@ pub fn router() -> Router<AppState> {
 
 /// GET /api/v1/stats
 async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+    if let Ok(guard) = STATS_CACHE.lock() {
+        if let Some(ref cached) = guard.1 {
+            if guard.0.elapsed() < STATS_CACHE_TTL {
+                return Ok(Json(cached.clone()));
+            }
+        }
+    }
+
     // Core stats are computed by the DB layer
     let mut core: serde_json::Value = db::reviews::get_stats(&state.pool).await?;
 
@@ -72,11 +88,18 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
     let tier1 = crate::db::db_scalar!(
         &state.pool,
         i64,
-        "SELECT COUNT(*) FROM findings WHERE detector IN ('secrets','vulnerabilities','iac','hallucinated-imports','phantom-deps')"
+        "SELECT COUNT(*) FROM findings WHERE detector IN ('secrets','vulnerabilities','iac','hallucinated-imports','phantom-deps')
+         AND review_id IN (SELECT id FROM reviews WHERE created_at >= NOW() - INTERVAL '30 days')"
     )
     .unwrap_or(0);
-    let total_findings =
-        crate::db::db_scalar!(&state.pool, i64, "SELECT COUNT(*) FROM findings").unwrap_or(0);
+    let total_findings = crate::db::db_scalar!(
+        &state.pool,
+        i64,
+        "SELECT COUNT(*) FROM findings f
+         INNER JOIN reviews r ON r.id = f.review_id
+         WHERE r.created_at >= NOW() - INTERVAL '30 days'"
+    )
+    .unwrap_or(0);
     let fp_proxy = if tier1 == 0 {
         0.0
     } else {
@@ -138,9 +161,11 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
     let findings_by_detector = crate::db::db_fetch_all!(
         &state.pool,
         DetectorCount,
-        "SELECT detector, COUNT(*)::bigint AS count
-         FROM findings
-         GROUP BY detector
+        "SELECT f.detector, COUNT(*)::bigint AS count
+         FROM findings f
+         INNER JOIN reviews r ON r.id = f.review_id
+         WHERE r.created_at >= NOW() - INTERVAL '30 days'
+         GROUP BY f.detector
          ORDER BY count DESC
          LIMIT 12"
     )
@@ -202,6 +227,10 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
                 },
             }),
         );
+    }
+
+    if let Ok(mut guard) = STATS_CACHE.lock() {
+        *guard = (Instant::now(), Some(core.clone()));
     }
 
     Ok(Json(core))

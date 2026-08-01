@@ -56,10 +56,10 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "codasaurus", "health", "--port", "3000"]
+      test: ["CMD", "codasaurus", "health", "--ready"]
       interval: 30s
       timeout: 5s
-      start_period: 15s
+      start_period: 90s
       retries: 3
     logging:
       driver: "json-file"

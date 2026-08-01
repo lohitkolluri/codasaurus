@@ -37,8 +37,10 @@ pub fn router() -> Router<AppState> {
 /// GET /api/v1/audit
 async fn list_audit(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Query(params): Query<ListAuditParams>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    super::rbac::require_maintainer(&state, &headers).await?;
     let limit = params.per_page.or(params.limit).unwrap_or(50).clamp(1, 500);
     let offset = if let Some(page) = params.page {
         ((page.max(1) - 1) * limit).max(0)

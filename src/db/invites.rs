@@ -91,7 +91,7 @@ pub async fn get_pending_by_email(
         pool,
         Invite,
         "SELECT * FROM invites
-         WHERE email = ? AND accepted_at IS NULL AND expires_at > NOW()
+         WHERE lower(email) = lower(?) AND accepted_at IS NULL AND expires_at > NOW()
          ORDER BY created_at DESC
          LIMIT 1",
         email
@@ -116,23 +116,90 @@ pub async fn mark_accepted(pool: &DbPool, id: i64) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-/// Accept a local invite: create user + mark invite accepted.
+/// Accept a local invite: atomically claim invite, then create user (single transaction).
 pub async fn accept_local(
     pool: &DbPool,
     invite: &Invite,
     email: &str,
     password: &str,
 ) -> Result<User, sqlx::Error> {
-    let user = crate::db::users::create_user(pool, email, password, &invite.role).await?;
-    mark_accepted(pool, invite.id).await?;
+    let mut tx = pool.as_pg().begin().await?;
+
+    let claimed: Option<Invite> = sqlx::query_as(
+        "UPDATE invites SET accepted_at = NOW()
+         WHERE id = $1 AND accepted_at IS NULL AND expires_at > NOW()
+         RETURNING *",
+    )
+    .bind(invite.id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let claimed = claimed.ok_or_else(|| {
+        sqlx::Error::Protocol("Invite not found, expired, or already accepted".into())
+    })?;
+
+    let password_hash = crate::db::users::hash_password(password)?;
+    let user: User = sqlx::query_as(
+        "INSERT INTO users (email, password_hash, role, auth_provider, is_bootstrap)
+         VALUES ($1, $2, $3, 'local', false)
+         RETURNING *",
+    )
+    .bind(email)
+    .bind(&password_hash)
+    .bind(&claimed.role)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
     Ok(user)
 }
 
-/// Consume a pending invite for an OIDC email (no password). Returns invite role if consumed.
-pub async fn consume_for_oidc(pool: &DbPool, email: &str) -> Result<Option<String>, sqlx::Error> {
-    if let Some(inv) = get_pending_by_email(pool, email).await? {
-        mark_accepted(pool, inv.id).await?;
-        return Ok(Some(inv.role));
+/// Consume a pending OIDC invite and create the user in one transaction.
+/// Returns `Ok(None)` when no invite exists (caller may allow open join).
+pub async fn accept_oidc(pool: &DbPool, email: &str) -> Result<Option<User>, sqlx::Error> {
+    let mut tx = pool.as_pg().begin().await?;
+
+    let claimed: Option<Invite> = sqlx::query_as(
+        "UPDATE invites SET accepted_at = NOW()
+         WHERE id = (
+           SELECT id FROM invites
+           WHERE lower(email) = lower($1)
+             AND accepted_at IS NULL
+             AND expires_at > NOW()
+           ORDER BY created_at DESC
+           LIMIT 1
+         )
+         RETURNING *",
+    )
+    .bind(email)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let Some(claimed) = claimed else {
+        tx.rollback().await?;
+        return Ok(None);
+    };
+
+    let existing: Option<User> =
+        sqlx::query_as("SELECT * FROM users WHERE email = $1")
+            .bind(email)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if let Some(u) = existing {
+        tx.commit().await?;
+        return Ok(Some(u));
     }
-    Ok(None)
+
+    let user: User = sqlx::query_as(
+        "INSERT INTO users (email, password_hash, role, auth_provider, is_bootstrap)
+         VALUES ($1, '', $2, 'oidc', false)
+         RETURNING *",
+    )
+    .bind(email)
+    .bind(&claimed.role)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(Some(user))
 }

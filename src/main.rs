@@ -32,15 +32,19 @@ enum Commands {
     /// Print version information
     Version,
 
-    /// Health check for Docker (checks HTTP /health endpoint)
+    /// Health check for Docker / orchestrators (HTTP `/health` or `/health/ready`)
     Health {
-        /// Port to check
-        #[arg(long, default_value = "3000")]
-        port: u16,
+        /// Port to check (defaults to `$PORT`, then 3000)
+        #[arg(long)]
+        port: Option<u16>,
 
         /// Host to check
         #[arg(long, default_value = "localhost")]
         host: String,
+
+        /// Require readiness (DB ping ok). Use for Docker HEALTHCHECK after start-period.
+        #[arg(long)]
+        ready: bool,
     },
 }
 
@@ -94,8 +98,12 @@ fn main() -> Result<()> {
         Commands::Version => {
             println!("codasaurus v{}", env!("CARGO_PKG_VERSION"));
         }
-        Commands::Health { port, host } => {
-            let url = format!("http://{host}:{port}/health");
+        Commands::Health { port, host, ready } => {
+            let port = port
+                .or_else(|| std::env::var("PORT").ok().and_then(|p| p.parse().ok()))
+                .unwrap_or(3000);
+            let path = if *ready { "/health/ready" } else { "/health" };
+            let url = format!("http://{host}:{port}{path}");
             let client = reqwest::blocking::Client::builder()
                 .timeout(std::time::Duration::from_secs(5))
                 .connect_timeout(std::time::Duration::from_secs(3))

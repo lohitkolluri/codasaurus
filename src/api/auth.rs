@@ -6,6 +6,9 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::db;
 
@@ -15,6 +18,18 @@ use super::AppState;
 
 const SESSION_COOKIE: &str = "codasaurus_session";
 const SESSION_MAX_AGE: &str = "604800"; // 7 days
+
+const LOGIN_RATE_LIMIT: u32 = 10;
+const LOGIN_RATE_WINDOW: Duration = Duration::from_secs(15 * 60);
+
+/// Per-process login rate limiter: `{ip}/{email}` → (attempt count, window start).
+///
+/// Not shared across replicas and resets on restart. Fine for single-node /
+/// Compose deploys. Behind a trusted reverse proxy, client IP comes from
+/// `X-Forwarded-For` (first hop). For multi-instance production, put a shared
+/// limiter in front (CDN / reverse proxy) — see `docs/configuration.md`.
+static LOGIN_ATTEMPTS: LazyLock<Mutex<HashMap<String, (u32, Instant)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 // ---------------------------------------------------------------------------
 // Request / response types
@@ -85,14 +100,28 @@ fn extract_token(headers: &axum::http::HeaderMap) -> Option<String> {
     None
 }
 
+/// Secure cookies by default. Opt out with `CODASAURUS_INSECURE_COOKIES=1` or
+/// when `PUBLIC_URL` is `http://localhost*` / `http://127.0.0.1*`.
 fn cookie_should_be_secure() -> bool {
-    std::env::var("PUBLIC_URL")
+    if std::env::var("CODASAURUS_SECURE_COOKIES")
         .ok()
-        .filter(|u| u.starts_with("https://"))
-        .is_some()
-        || std::env::var("CODASAURUS_SECURE_COOKIES")
-            .ok()
-            .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    {
+        return true;
+    }
+    if std::env::var("CODASAURUS_INSECURE_COOKIES")
+        .ok()
+        .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    {
+        return false;
+    }
+    if let Ok(url) = std::env::var("PUBLIC_URL") {
+        let u = url.to_ascii_lowercase();
+        if u.starts_with("http://localhost") || u.starts_with("http://127.0.0.1") {
+            return false;
+        }
+    }
+    true
 }
 
 fn set_cookie(token: &str) -> String {
@@ -111,6 +140,47 @@ fn clear_cookie() -> String {
         cookie.push_str("; Secure");
     }
     cookie
+}
+
+fn client_ip(headers: &axum::http::HeaderMap) -> String {
+    if let Some(xff) = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Some(first) = xff.split(',').next() {
+            let t = first.trim();
+            if !t.is_empty() {
+                return t.to_string();
+            }
+        }
+    }
+    if let Some(rip) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
+        let t = rip.trim();
+        if !t.is_empty() {
+            return t.to_string();
+        }
+    }
+    "unknown".into()
+}
+
+fn check_auth_rate_limit(headers: &axum::http::HeaderMap, email: &str) -> Result<(), ApiError> {
+    let key = format!("{}/{}", client_ip(headers), email.trim().to_lowercase());
+    let mut map = LOGIN_ATTEMPTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    map.retain(|_, (_, started)| now.duration_since(*started) < LOGIN_RATE_WINDOW);
+    let entry = map.entry(key).or_insert((0, now));
+    if now.duration_since(entry.1) >= LOGIN_RATE_WINDOW {
+        *entry = (0, now);
+    }
+    if entry.0 >= LOGIN_RATE_LIMIT {
+        return Err(ApiError::too_many_requests(
+            "Too many attempts. Try again in 15 minutes.",
+        ));
+    }
+    entry.0 += 1;
+    Ok(())
 }
 
 pub(crate) async fn require_session(
@@ -144,8 +214,11 @@ pub async fn auth_middleware(
 /// POST /api/auth/login
 async fn login(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<LoginBody>,
 ) -> Result<impl IntoResponse, ApiError> {
+    check_auth_rate_limit(&headers, &body.email)?;
+
     let user = db::users::verify_password(&state.pool, &body.email, &body.password)
         .await
         .map_err(|_| ApiError::unauthorized("Invalid email or password"))?
@@ -261,36 +334,45 @@ async fn oidc_callback(
     let state_param = params
         .state
         .ok_or_else(|| ApiError::bad_request("missing state"))?;
-    if !crate::oidc::take_state(&state_param) {
-        return Err(ApiError::bad_request("invalid or expired OIDC state"));
-    }
+    let code_verifier = crate::oidc::take_pending(&state_param)
+        .ok_or_else(|| ApiError::bad_request("invalid or expired OIDC state"))?;
     let cfg = crate::oidc::OidcConfig::from_env()
         .ok_or_else(|| ApiError::bad_request("OIDC is not configured"))?;
-    let email = crate::oidc::exchange_code(&cfg, &code)
+    let email = crate::oidc::exchange_code(&cfg, &code, &code_verifier)
         .await
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
 
     let existing = db::users::get_user_by_email(&state.pool, &email)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
-    let role = if existing.is_some() {
-        // Preserve role on re-login; do not consume invites for existing users.
-        "viewer".to_string()
+    let user = if let Some(u) = existing {
+        u
     } else {
-        match db::invites::consume_for_oidc(&state.pool, &email)
+        match db::invites::accept_oidc(&state.pool, &email)
             .await
             .map_err(|e| ApiError::internal(e.to_string()))?
         {
-            Some(r) => r,
-            None => "viewer".to_string(),
+            Some(u) => u,
+            None => {
+                let open_join = std::env::var("OIDC_ALLOW_OPEN_JOIN")
+                    .ok()
+                    .is_some_and(|v| v == "1");
+                if open_join {
+                    db::users::upsert_oidc_user(&state.pool, &email, "viewer")
+                        .await
+                        .map_err(|e| ApiError::internal(e.to_string()))?
+                } else {
+                    return Err(ApiError::bad_request(
+                        "No invite found for this email. Ask an admin for an invite link.",
+                    ));
+                }
+            }
         }
     };
-    let _user = db::users::upsert_oidc_user(&state.pool, &email, &role)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
     let token = db::sessions::create_session(&state.pool, &email)
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
+    let _ = &user.role;
     db::audit::log_event(&state.pool, "user.login", Some(&email), Some("user"), None).await;
     let cookie = set_cookie(&token);
     Ok((
@@ -321,18 +403,13 @@ async fn invite_info(
 /// POST /api/auth/invite/:token/accept
 async fn accept_invite(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Path(token): Path<String>,
     Json(body): Json<AcceptInviteBody>,
 ) -> Result<impl IntoResponse, ApiError> {
     let invite = db::invites::get_pending_by_token(&state.pool, &token)
         .await?
         .ok_or_else(|| ApiError::not_found("Invite not found or expired"))?;
-
-    if body.password.len() < 8 {
-        return Err(ApiError::bad_request(
-            "Password must be at least 8 characters",
-        ));
-    }
 
     let email = if let Some(locked) = &invite.email {
         if let Some(provided) = body.email.as_ref().map(|e| e.trim().to_lowercase()) {
@@ -356,6 +433,12 @@ async fn accept_invite(
         e
     };
 
+    check_auth_rate_limit(&headers, &email)?;
+
+    if let Err(msg) = db::users::validate_password_policy(&body.password, &email) {
+        return Err(ApiError::bad_request(msg));
+    }
+
     if db::users::get_user_by_email(&state.pool, &email)
         .await?
         .is_some()
@@ -371,6 +454,11 @@ async fn accept_invite(
             if let sqlx::Error::Database(ref db_err) = e {
                 if db_err.message().contains("UNIQUE") {
                     return ApiError::bad_request("A user with that email already exists");
+                }
+            }
+            if let sqlx::Error::Protocol(ref msg) = e {
+                if msg.contains("Invite not found") {
+                    return ApiError::bad_request(msg.clone());
                 }
             }
             ApiError::internal(e.to_string())

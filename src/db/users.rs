@@ -1,14 +1,21 @@
 use argon2::password_hash::rand_core::OsRng;
-use argon2::password_hash::SaltString;
-use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
+use argon2::password_hash::{PasswordHasher, SaltString};
+use argon2::{Algorithm, Argon2, Params, PasswordHash, PasswordVerifier, Version};
 use std::sync::LazyLock;
 
 use crate::db::models::*;
 use crate::db::{db_execute, db_fetch_all, db_fetch_one, db_fetch_optional, db_scalar, DbPool};
 
+/// OWASP Password Storage Cheat Sheet minimum for Argon2id:
+/// m=19456 KiB (19 MiB), t=2, p=1.
+fn argon2id() -> Argon2<'static> {
+    let params = Params::new(19_456, 2, 1, None).expect("OWASP Argon2id params");
+    Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+}
+
 static DUMMY_PASSWORD_HASH: LazyLock<String> = LazyLock::new(|| {
     let salt = SaltString::generate(&mut OsRng);
-    Argon2::default()
+    argon2id()
         .hash_password(b"codasaurus-timing-dummy-v1", &salt)
         .map(|h| h.to_string())
         .unwrap_or_else(|_| {
@@ -17,12 +24,23 @@ static DUMMY_PASSWORD_HASH: LazyLock<String> = LazyLock::new(|| {
         })
 });
 
-fn hash_password(password: &str) -> Result<String, sqlx::Error> {
+pub(crate) fn hash_password(password: &str) -> Result<String, sqlx::Error> {
     let salt = SaltString::generate(&mut OsRng);
-    Argon2::default()
+    argon2id()
         .hash_password(password.as_bytes(), &salt)
         .map(|h| h.to_string())
         .map_err(|e| sqlx::Error::Protocol(e.to_string()))
+}
+
+/// Shared password policy for local account creation and password changes.
+pub fn validate_password_policy(password: &str, email: &str) -> Result<(), &'static str> {
+    if password.len() < 10 {
+        return Err("Password must be at least 10 characters");
+    }
+    if password.eq_ignore_ascii_case(email) {
+        return Err("Password must not be the same as your email");
+    }
+    Ok(())
 }
 
 pub async fn create_user(
@@ -102,7 +120,7 @@ pub async fn verify_password(
 
     let parsed_hash =
         PasswordHash::new(&expected_hash).map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
-    match Argon2::default().verify_password(password.as_bytes(), &parsed_hash) {
+    match argon2id().verify_password(password.as_bytes(), &parsed_hash) {
         Ok(_) => Ok(user_view),
         Err(_) => Ok(None),
     }

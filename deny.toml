@@ -1,3 +1,10 @@
+# cargo-deny configuration for license / ban / source checks (CI).
+# Advisories are gated separately via `cargo audit` in CI.
+
+[advisories]
+# Warn (do not fail) on yanked crates when `cargo deny check advisories` is run.
+yanked = "warn"
+
 [licenses]
 allow = [
     "MIT",

@@ -6,55 +6,107 @@ use tokio::time::timeout;
 use super::auth::get_installation_token;
 use super::queue;
 use super::review::{fetch_pull_request, review_pr_with_options, ReviewOptions};
-use super::{bot_db_pool, pr_lock, prune_pr_lock, BotConfig, WebhookPayload, REVIEW_PERMITS};
+use super::{
+    bot_db_pool, current_bot_config, pr_lock, prune_pr_lock, BotConfig, WebhookPayload,
+    REVIEW_PERMITS,
+};
 use crate::bot_runtime::BotRuntimeConfig;
 
 /// Wake the durable queue worker when a job is enqueued.
 pub(crate) static QUEUE_NOTIFY: std::sync::LazyLock<tokio::sync::Notify> =
     std::sync::LazyLock::new(tokio::sync::Notify::new);
 
-/// Background worker that drains durable review_jobs (crash recovery).
-pub fn start_review_worker(pool: crate::db::DbPool, bot_cfg: BotConfig) {
-    tokio::spawn(async move {
-        tracing::info!("review queue worker started");
-        let mut idle_ticks: u64 = 0;
-        loop {
-            match queue::claim_next(&pool, 600).await {
-                Ok(Some(job)) => {
-                    idle_ticks = 0;
-                    let cfg = bot_cfg.clone();
-                    let timeout_secs = BotRuntimeConfig::default().review_timeout_secs;
-                    process_queued_review(
-                        &cfg,
-                        job.id,
-                        &job.repo,
-                        job.pr_number,
-                        &job.head_sha,
-                        job.installation_id,
-                        &job.action,
-                        job.attempts,
-                        timeout_secs,
-                    )
-                    .await;
-                }
-                Ok(None) => {
-                    idle_ticks = idle_ticks.saturating_add(1);
-                    // ~every 60s of idle (2s poll × 30)
-                    if idle_ticks % 30 == 0 {
-                        crate::bot::maintenance::run_periodic_cleanup(&pool).await;
+/// Background workers that drain durable review_jobs (crash recovery).
+///
+/// Spawns `N` independent claim/process loops. `N` comes from
+/// `CODASAURUS_QUEUE_WORKERS` (1..=8), defaulting to
+/// `REVIEW_PERMITS.available_permits().clamp(1, 4)`.
+///
+/// Credentials are read from [`current_bot_config`] per job so wizard updates
+/// and key rotations take effect without restarting the process.
+pub fn start_review_worker(pool: crate::db::DbPool) {
+    let default_n = REVIEW_PERMITS.available_permits().clamp(1, 4);
+    let n = std::env::var("CODASAURUS_QUEUE_WORKERS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(default_n)
+        .clamp(1, 8);
+
+    tracing::info!(workers = n, "starting review queue workers");
+    for worker_id in 0..n {
+        let pool = pool.clone();
+        tokio::spawn(async move {
+            tracing::info!(worker_id, "review queue worker started");
+            let mut idle_ticks: u64 = 0;
+            loop {
+                match queue::claim_next(&pool, 600).await {
+                    Ok(Some(job)) => {
+                        idle_ticks = 0;
+                        let Some(cfg) = current_bot_config() else {
+                            tracing::warn!(
+                                job_id = job.id,
+                                "no bot config; requeueing after delay"
+                            );
+                            let _ = queue::mark_failed(
+                                &pool,
+                                job.id,
+                                "bot config not configured",
+                            )
+                            .await;
+                            let _ =
+                                queue::requeue_if_retryable(&pool, job.id, job.attempts, 3).await;
+                            tokio::time::sleep(Duration::from_secs(5)).await;
+                            continue;
+                        };
+                        if cfg.app_id.is_empty() || cfg.private_key.is_empty() {
+                            tracing::warn!(
+                                job_id = job.id,
+                                "incomplete GitHub App credentials; delaying job"
+                            );
+                            let _ = queue::mark_failed(
+                                &pool,
+                                job.id,
+                                "github app credentials incomplete",
+                            )
+                            .await;
+                            let _ =
+                                queue::requeue_if_retryable(&pool, job.id, job.attempts, 3).await;
+                            tokio::time::sleep(Duration::from_secs(10)).await;
+                            continue;
+                        }
+                        let timeout_secs = BotRuntimeConfig::default().review_timeout_secs;
+                        process_queued_review(
+                            &cfg,
+                            job.id,
+                            &job.repo,
+                            job.pr_number,
+                            &job.head_sha,
+                            job.installation_id,
+                            &job.action,
+                            job.attempts,
+                            timeout_secs,
+                        )
+                        .await;
                     }
-                    tokio::select! {
-                        _ = QUEUE_NOTIFY.notified() => {}
-                        _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+                    Ok(None) => {
+                        idle_ticks = idle_ticks.saturating_add(1);
+                        // ~every 60s of idle (2s poll × 30) — only worker 0 runs cleanup
+                        if worker_id == 0 && idle_ticks % 30 == 0 {
+                            crate::bot::maintenance::run_periodic_cleanup(&pool).await;
+                        }
+                        tokio::select! {
+                            _ = QUEUE_NOTIFY.notified() => {}
+                            _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+                        }
                     }
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "queue claim failed");
-                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    Err(e) => {
+                        tracing::warn!(worker_id, error = %e, "queue claim failed");
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                    }
                 }
             }
-        }
-    });
+        });
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -82,6 +134,7 @@ async fn process_queued_review(
     let opts = ReviewOptions {
         auto_describe: matches!(action, "opened" | "reopened" | "ready_for_review"),
         auto_review_diff: true,
+        force_draft: false,
     };
 
     let result = timeout(Duration::from_secs(timeout_secs), async {
@@ -155,6 +208,7 @@ pub(crate) async fn run_webhook_review_inline(
     let opts = ReviewOptions {
         auto_describe: matches!(action.as_str(), "opened" | "reopened" | "ready_for_review"),
         auto_review_diff: true,
+        force_draft: false,
     };
     let repo_for_claim = repo_full_name.clone();
     let sha_for_claim = head_sha.clone();

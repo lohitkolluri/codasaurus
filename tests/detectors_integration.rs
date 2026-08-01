@@ -45,7 +45,7 @@ fn main() {
 }
 "#;
     let file = make_file("lib.rs", "rust", content);
-    let findings = detectors::run_all(&[file], &all_checks_config());
+    let findings = detectors::run_all(&[file], &all_checks_config(), None);
     assert!(
         findings.is_empty(),
         "clean Rust should have no findings, got: {:?}",
@@ -64,7 +64,7 @@ def main() -> None:
     print(result)
 "#;
     let file = make_file("main.py", "python", content);
-    let findings = detectors::run_all(&[file], &all_checks_config());
+    let findings = detectors::run_all(&[file], &all_checks_config(), None);
     assert!(
         findings.is_empty(),
         "clean Python should have no findings, got: {:?}",
@@ -80,7 +80,7 @@ function add(a, b) {
 }
 "#;
     let file = make_file("util.js", "javascript", content);
-    let findings = detectors::run_all(&[file], &all_checks_config());
+    let findings = detectors::run_all(&[file], &all_checks_config(), None);
     assert!(
         findings.is_empty(),
         "clean JS should have no findings, got: {:?}",
@@ -99,7 +99,7 @@ const API_KEY = "sk-1234567890abcdef1234567890abcdef";
 console.log(API_KEY);
 "#;
     let file = make_file("config.js", "javascript", content);
-    let findings = detectors::run_all(&[file], &all_checks_config());
+    let findings = detectors::run_all(&[file], &all_checks_config(), None);
     let secret_findings: Vec<_> = findings
         .findings
         .iter()
@@ -118,7 +118,7 @@ function process() {
 }
 "#;
     let file = make_file("app.js", "javascript", content);
-    let findings = detectors::run_all(&[file], &all_checks_config());
+    let findings = detectors::run_all(&[file], &all_checks_config(), None);
     let todo_findings: Vec<_> = findings
         .findings
         .iter()
@@ -136,7 +136,7 @@ fn test_detects_aws_key() {
 AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE";
 "#;
     let file = make_file("config.py", "python", content);
-    let findings = detectors::run_all(&[file], &all_checks_config());
+    let findings = detectors::run_all(&[file], &all_checks_config(), None);
     let secret_findings: Vec<_> = findings
         .findings
         .iter()
@@ -159,7 +159,7 @@ class MyComponent extends React.Component {
 }
 "#;
     let file = make_file("component.jsx", "jsx", content);
-    let findings = detectors::run_all(&[file], &all_checks_config());
+    let findings = detectors::run_all(&[file], &all_checks_config(), None);
     let stale_findings: Vec<_> = findings
         .findings
         .iter()
@@ -180,7 +180,7 @@ fn read_file() -> Result<String, io::Error> {
 }
 "#;
     let file = make_file("reader.rs", "rust", content);
-    let findings = detectors::run_all(&[file], &all_checks_config());
+    let findings = detectors::run_all(&[file], &all_checks_config(), None);
     let stale_findings: Vec<_> = findings
         .findings
         .iter()
@@ -193,7 +193,7 @@ fn read_file() -> Result<String, io::Error> {
 fn test_detects_stale_urllib2() {
     let content = "import urllib2\n";
     let file = make_file("http.py", "python", content);
-    let findings = detectors::run_all(&[file], &all_checks_config());
+    let findings = detectors::run_all(&[file], &all_checks_config(), None);
     let stale_findings: Vec<_> = findings
         .findings
         .iter()
@@ -220,7 +220,7 @@ impl MyService for ServiceImpl {
 }
 "#;
     let file = make_file("service.rs", "rust", content);
-    let findings = detectors::run_all(&[file], &all_checks_config());
+    let findings = detectors::run_all(&[file], &all_checks_config(), None);
     let style_findings: Vec<_> = findings
         .findings
         .iter()
@@ -244,7 +244,7 @@ class User {
 }
 "#;
     let file = make_file("factory.js", "javascript", content);
-    let findings = detectors::run_all(&[file], &all_checks_config());
+    let findings = detectors::run_all(&[file], &all_checks_config(), None);
     let style_findings: Vec<_> = findings
         .findings
         .iter()
@@ -269,7 +269,7 @@ fn test_detects_long_function() {
     lines.push("}".to_string());
     let content = lines.join("\n");
     let file = make_file("processor.rs", "rust", &content);
-    let findings = detectors::run_all(&[file], &all_checks_config());
+    let findings = detectors::run_all(&[file], &all_checks_config(), None);
     let boilerplate: Vec<_> = findings
         .findings
         .iter()
@@ -301,7 +301,7 @@ fn test_phantom_deps_missing_from_package_json() {
         "javascript",
         "import { Router } from 'express';\nimport { createClient } from 'ioredis';\n",
     );
-    let findings = detectors::run_all(&[dep_file, source_file], &all_checks_config());
+    let findings = detectors::run_all(&[dep_file, source_file], &all_checks_config(), None);
     let phantom: Vec<_> = findings
         .findings
         .iter()
@@ -328,7 +328,7 @@ serde = "1"
         "rust",
         "use serde::Serialize;\nuse tokio::runtime::Runtime;\n",
     );
-    let findings = detectors::run_all(&[dep_file, source_file], &all_checks_config());
+    let findings = detectors::run_all(&[dep_file, source_file], &all_checks_config(), None);
     let phantom: Vec<_> = findings
         .findings
         .iter()
@@ -354,7 +354,7 @@ fn test_no_phantom_dep_when_declared() {
         "javascript",
         "const express = require('express');\nconst axios = require('axios');\n",
     );
-    let findings = detectors::run_all(&[dep_file, source_file], &all_checks_config());
+    let findings = detectors::run_all(&[dep_file, source_file], &all_checks_config(), None);
     let phantom: Vec<_> = findings
         .findings
         .iter()
@@ -383,7 +383,7 @@ class User {
 }
 "#;
     let file = make_file("messy.js", "javascript", content);
-    let findings = detectors::run_all(&[file], &all_checks_config());
+    let findings = detectors::run_all(&[file], &all_checks_config(), None);
     let by_severity = findings.count_by_severity();
     // Secrets are "blocking", TODO leaks are "warning", stale-api/over-engineering
     // may add "info"/"warning" findings
@@ -417,7 +417,7 @@ class MyComponent {
 }
 "#;
     let file = make_file("messy.jsx", "jsx", content);
-    let findings = detectors::run_all(&[file], &all_checks_config());
+    let findings = detectors::run_all(&[file], &all_checks_config(), None);
     let detectors_triggered: std::collections::HashSet<&str> = findings
         .findings
         .iter()
@@ -441,7 +441,7 @@ class MyComponent {
 fn test_finding_has_required_fields() {
     let content = "const AWS_KEY = \"AKIAIOSFODNN7EXAMPLE\";\n";
     let file = make_file("leak.js", "javascript", content);
-    let findings = detectors::run_all(&[file], &all_checks_config());
+    let findings = detectors::run_all(&[file], &all_checks_config(), None);
 
     for finding in &findings.findings {
         assert!(
@@ -498,7 +498,7 @@ fn test_multi_language_clean_files() {
         "class Math { static int add(int x, int y) { return x + y; } }",
     );
 
-    let findings = detectors::run_all(&[rs, py, js, ts, go, java], &all_checks_config());
+    let findings = detectors::run_all(&[rs, py, js, ts, go, java], &all_checks_config(), None);
     assert!(
         findings.is_empty(),
         "clean files in 6 languages should have no findings, got: {:?}",

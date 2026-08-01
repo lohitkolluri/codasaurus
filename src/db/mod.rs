@@ -25,6 +25,11 @@ impl DbPool {
         &self.0
     }
 
+    /// Close the underlying pool (waits for connections to finish).
+    pub async fn close(&self) {
+        self.0.close().await;
+    }
+
     /// Adapt `?` placeholders to Postgres `$n` bind parameters.
     pub fn prepare_sql(&self, sql: &str) -> String {
         dialect::prepare(sql)
@@ -250,7 +255,18 @@ pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
             .acquire_timeout(Duration::from_secs(acquire_secs))
             .idle_timeout(Duration::from_secs(600))
             .max_lifetime(Duration::from_secs(1800))
-            .test_before_acquire(false)
+            // Neon/idle proxies can drop sockets; validate before reuse.
+            .test_before_acquire(true)
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    use sqlx::Executor;
+                    let _ = conn
+                        .execute("SET application_name = 'codasaurus'")
+                        .await;
+                    let _ = conn.execute("SET statement_timeout = '60s'").await;
+                    Ok(())
+                })
+            })
             .connect(&normalized)
             .await
         {

@@ -43,17 +43,30 @@ pub fn router() -> Router<AppState> {
 // ---------------------------------------------------------------------------
 
 /// GET /api/v1/settings
-async fn get_settings(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+async fn get_settings(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    super::rbac::require_maintainer(&state, &headers).await?;
     let entries = db::config::get_all_config(&state.pool).await?;
 
     let sensitive_keys: &[&str] = &[
         "openrouter_api_key",
         "github_private_key",
         "github_webhook_secret",
+        "database_url",
+        "oidc_client_secret",
     ];
+
+    // Never expose connection strings or secrets to the dashboard — even owners
+    // should use env / server config for DATABASE_URL rotation.
+    const HIDDEN_KEYS: &[&str] = &["database_url"];
 
     let mut map = serde_json::Map::new();
     for entry in entries {
+        if HIDDEN_KEYS.contains(&entry.key.as_str()) {
+            continue;
+        }
         let value = if sensitive_keys.contains(&entry.key.as_str()) {
             "••••••••".to_string()
         } else {
@@ -169,7 +182,9 @@ async fn set_setting(
 
 async fn get_github_settings(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    super::rbac::require_maintainer(&state, &headers).await?;
     let app_id = db::config::get_config(&state.pool, "github_app_id")
         .await
         .ok()
@@ -202,6 +217,8 @@ async fn delete_github_settings(
     for key in GITHUB_KEYS {
         crate::db::db_execute!(&state.pool, "DELETE FROM app_config WHERE key = ?", key)?;
     }
+    // Drop live credentials so webhooks fail closed and workers stop minting tokens.
+    crate::bot::clear_bot_config();
     // Without App credentials we cannot talk to GitHub; stop reviewing locally.
     let _ = crate::db::db_execute!(&state.pool, "UPDATE repos SET active = false");
     db::audit::log_event(

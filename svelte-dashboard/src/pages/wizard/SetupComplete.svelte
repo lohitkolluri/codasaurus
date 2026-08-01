@@ -13,23 +13,23 @@
   onMount(async () => {
     try {
       status = await api.get("/api/setup/status");
-      if (!status.complete) {
-        if (!status.database) push("/setup/database");
-        else if (!status.llm) push("/setup/llm");
-        else if (!status.github) push("/setup/github");
-        else if (!status.admin) push("/setup/admin");
+      if (!status?.complete) {
+        if (!status?.database) push("/setup/database");
+        else if (!status?.llm) push("/setup/llm");
+        else if (!status?.github) push("/setup/github");
+        else if (!status?.admin) push("/setup/admin");
+        else push("/setup");
         return;
       }
       installUrl =
         status.github_install_url ||
         "https://github.com/settings/installations";
-    } catch {
-      /* still show celebration */
-    } finally {
       loading = false;
-    }
-    if (typeof window !== "undefined" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      startConfetti();
+      if (typeof window !== "undefined" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        startConfetti();
+      }
+    } catch {
+      push("/setup");
     }
   });
 

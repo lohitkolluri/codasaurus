@@ -263,10 +263,18 @@ pub async fn get_stats(pool: &DbPool) -> Result<serde_json::Value, sqlx::Error> 
     let pass_rate: Option<f64> = db_scalar!(
         pool,
         Option<f64>,
-        "SELECT AVG(CASE WHEN status = 'passed' THEN 100.0 WHEN status = 'failed' THEN 0.0 ELSE NULL END) FROM reviews"
+        "SELECT AVG(CASE WHEN status = 'passed' THEN 100.0 WHEN status = 'failed' THEN 0.0 ELSE NULL END)
+         FROM reviews
+         WHERE created_at >= NOW() - INTERVAL '30 days'"
     )?;
 
-    let total_findings: i64 = db_scalar!(pool, i64, "SELECT COUNT(*) FROM findings")?;
+    let total_findings: i64 = db_scalar!(
+        pool,
+        i64,
+        "SELECT COUNT(*) FROM findings f
+         INNER JOIN reviews r ON r.id = f.review_id
+         WHERE r.created_at >= NOW() - INTERVAL '30 days'"
+    )?;
 
     let reviews_last_7_days: i64 = db_scalar!(
         pool,

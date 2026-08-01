@@ -6,7 +6,7 @@ use tokio::time::timeout;
 use super::auth::get_installation_token;
 use super::github_extra;
 use super::markdown;
-use super::review::{fetch_pull_request, review_pr};
+use super::review::{fetch_pull_request, review_pr_with_options, ReviewOptions};
 use super::worker::release_claim_best_effort;
 use super::{
     bot_db_pool, pr_lock, prune_pr_lock, WebhookContext, WebhookPayload, REVIEW_PERMITS, USER_AGENT,
@@ -908,11 +908,6 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
         if let Some(sha) = pr_data["head"]["sha"].as_str() {
             *head_sha_slot.lock().await = sha.to_string();
         }
-        // Force review even if draft when manually requested
-        let mut pr_data = pr_data;
-        if let Some(obj) = pr_data.as_object_mut() {
-            obj.insert("draft".into(), serde_json::json!(false));
-        }
         let wrapped = WebhookPayload {
             action: String::new(),
             pull_request: Some(pr_data),
@@ -924,7 +919,17 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
             repositories: None,
             repositories_added: None,
         };
-        review_pr(&token, &ctx.repo_full_name, &wrapped).await
+        review_pr_with_options(
+            &token,
+            &ctx.repo_full_name,
+            &wrapped,
+            ReviewOptions {
+                auto_describe: false,
+                auto_review_diff: true,
+                force_draft: true,
+            },
+        )
+        .await
     })
     .await
     {
@@ -1311,7 +1316,7 @@ async fn spawn_fix(
                 parsed.push(p);
             }
         }
-        let findings = crate::detectors::run_all(&parsed, &config);
+        let findings = crate::detectors::run_all(&parsed, &config, None);
         let fp_filter = fingerprint.as_deref();
         let with_codemod: Vec<_> = findings
             .findings
