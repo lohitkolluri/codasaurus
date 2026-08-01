@@ -7,15 +7,18 @@
   import AppShell from "../../lib/AppShell.svelte";
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
   import ErrorState from "../../lib/ErrorState.svelte";
+  import Pagination from "../../lib/Pagination.svelte";
+
+  const RULES_PAGE_SIZE = 20;
 
   // Fewer primary categories; rare knobs live under Advanced (progressive disclosure).
   const TABS = [
-    { id: "llm", label: "LLM" },
-    { id: "review", label: "Review" },
-    { id: "connections", label: "Connections" },
-    { id: "system", label: "System" },
-    { id: "account", label: "Account" },
-    { id: "learning", label: "Learning" },
+    { id: "llm", label: "LLM", hint: "Provider and models" },
+    { id: "review", label: "Review", hint: "Detectors and policy" },
+    { id: "connections", label: "Connections", hint: "GitHub, SSO, tickets" },
+    { id: "system", label: "System", hint: "URL, retention, advanced" },
+    { id: "account", label: "Account", hint: "Your password" },
+    { id: "learning", label: "Learning", hint: "Ignore rules" },
   ];
 
   let canEditSettings = $derived($isOwner);
@@ -67,6 +70,14 @@
 
   let learnedRules = $state([]);
   let rulesMsg = $state("");
+  let rulesPage = $state(1);
+
+  let rulesPages = $derived(Math.max(1, Math.ceil(learnedRules.length / RULES_PAGE_SIZE)));
+  let rulesPageSafe = $derived(Math.min(Math.max(1, rulesPage), rulesPages));
+  let pageRules = $derived.by(() => {
+    const start = (rulesPageSafe - 1) * RULES_PAGE_SIZE;
+    return learnedRules.slice(start, start + RULES_PAGE_SIZE);
+  });
 
   let github = $state(null);
   let githubMsg = $state("");
@@ -477,6 +488,9 @@
     try {
       await api.delete(`/api/learning/rules/${id}`);
       learnedRules = learnedRules.filter((r) => r.id !== id);
+      if (rulesPage > 1 && (rulesPage - 1) * RULES_PAGE_SIZE >= learnedRules.length) {
+        rulesPage = Math.max(1, rulesPage - 1);
+      }
       rulesMsg = "Rule deleted";
     } catch (err) {
       rulesMsg = err.message || "Delete failed";
@@ -522,63 +536,64 @@
     <ErrorState message={error} />
   {:else if loading}
   {:else}
-    <div class="page-toolbar compact settings-hero">
-      <div>
-        <h1 class="page-title">Settings</h1>
-        <p class="page-description">Common options first. Rare knobs are under Advanced.</p>
+    <div class="settings-shell">
+      <div class="settings-page-head">
+        <div>
+          <h1 class="page-title">Settings</h1>
+          <p class="page-description">Pick a category on the left. Search finds sections fast.</p>
+        </div>
+        <label class="settings-filter" for="settings-filter">
+          <span class="sr-only">Search settings</span>
+          <input
+            id="settings-filter"
+            type="search"
+            placeholder="Search settings…"
+            bind:value={settingsFilter}
+            autocomplete="off"
+          />
+        </label>
       </div>
-      <label class="settings-filter" for="settings-filter">
-        <span class="sr-only">Filter settings</span>
-        <input
-          id="settings-filter"
-          type="search"
-          placeholder="Filter…"
-          bind:value={settingsFilter}
-          autocomplete="off"
-        />
-      </label>
-    </div>
 
-    {#if !canEditSettings}
-      <div class="settings-readonly-banner" role="status">
-        Only owners can change org settings. Your role: {roleLabel($currentUser?.role, $currentUser?.is_bootstrap)}.
-      </div>
-    {/if}
+      {#if !canEditSettings}
+        <div class="settings-readonly-banner" role="status">
+          Only owners can change org settings. Your role: {roleLabel($currentUser?.role, $currentUser?.is_bootstrap)}.
+        </div>
+      {/if}
 
-    <div class="settings-tabs-wrap">
-      <nav class="settings-tabs" aria-label="Settings tabs" role="tablist">
-        {#each visibleTabs as s}
-          <button
-            type="button"
-            role="tab"
-            class="settings-tab"
-            class:active={activeTab === s.id}
-            id="tab-{s.id}"
-            aria-selected={activeTab === s.id}
-            aria-controls="panel-{s.id}"
-            tabindex={activeTab === s.id ? 0 : -1}
-            onclick={() => selectTab(s.id)}
-          >{s.label}</button>
-        {/each}
-      </nav>
-    </div>
+      {#if visibleTabs.length === 0}
+        <p class="empty-note">No sections match “{settingsFilter}”.</p>
+      {:else}
+        <div class="settings-body">
+          <nav class="settings-side-nav" aria-label="Settings categories">
+            {#each visibleTabs as s}
+              <button
+                type="button"
+                class="settings-side-item"
+                class:active={activeTab === s.id}
+                aria-current={activeTab === s.id ? "page" : undefined}
+                onclick={() => selectTab(s.id)}
+              >
+                <span class="settings-side-label">{s.label}</span>
+                <span class="settings-side-hint">{s.hint}</span>
+              </button>
+            {/each}
+          </nav>
 
-    {#if visibleTabs.length === 0}
-      <p class="empty-note">No sections match “{settingsFilter}”.</p>
-    {:else if !visibleTabs.some((t) => t.id === activeTab)}
-      <p class="empty-note">
-        Switch to a matching tab
-        {#each visibleTabs as t, i}
-          {#if i > 0}, {/if}<button type="button" class="linkish" onclick={() => selectTab(t.id)}>{t.label}</button>
-        {/each}.
-      </p>
-    {:else}
-    <div
-      class="settings-panel"
-      role="tabpanel"
-      id="panel-{activeTab}"
-      aria-labelledby="tab-{activeTab}"
-    >
+          <div class="settings-main">
+            {#if !visibleTabs.some((t) => t.id === activeTab)}
+              <p class="empty-note">
+                Open
+                {#each visibleTabs as t, i}
+                  {#if i > 0}, {/if}<button type="button" class="linkish" onclick={() => selectTab(t.id)}>{t.label}</button>
+                {/each}.
+              </p>
+            {:else}
+              <div
+                class="settings-panel"
+                role="region"
+                id="panel-{activeTab}"
+                aria-label={TABS.find((t) => t.id === activeTab)?.label || "Settings"}
+              >
       {#if activeTab === "llm"}
         <section class="card settings-card">
           <header class="settings-section-head">
@@ -681,7 +696,7 @@
           </header>
 
           <h4 class="settings-subhead">Detectors</h4>
-          <div class="detector-list compact">
+          <div class="detector-grid">
             {#each Object.entries(detectorToggles) as [key, val]}
               <div class="detector-row">
                 <span>{formatLabel(key)}</span>
@@ -1121,7 +1136,7 @@
             <p class="empty-note">No learned ignore rules yet.</p>
           {:else}
             <div class="detector-list">
-              {#each learnedRules as rule}
+              {#each pageRules as rule}
                 <div class="detector-row">
                   <span>
                     <strong>{rule.detector}</strong>
@@ -1132,33 +1147,56 @@
                 </div>
               {/each}
             </div>
+            {#if learnedRules.length > RULES_PAGE_SIZE}
+              <div class="rules-page-meta">
+                <span class="muted">
+                  {learnedRules.length} rules · page {rulesPageSafe} of {rulesPages}
+                </span>
+                <Pagination
+                  page={rulesPageSafe}
+                  totalPages={rulesPages}
+                  onChange={(p) => (rulesPage = p)}
+                />
+              </div>
+            {/if}
           {/if}
           {#if rulesMsg}<p class="save-msg" class:error={rulesMsg !== "Rule deleted"}>{rulesMsg}</p>{/if}
         </section>
       {/if}
+              </div>
+            {/if}
+          </div>
+        </div>
+      {/if}
     </div>
-    {/if}
   {/if}
 </AppShell>
 
 <style>
-  .settings-hero {
-    margin-bottom: 12px;
+  .settings-shell {
+    width: 100%;
+    max-width: 1120px;
+  }
+
+  .settings-page-head {
     display: flex;
     align-items: flex-end;
     justify-content: space-between;
-    gap: 16px;
+    gap: 20px;
     flex-wrap: wrap;
+    margin-bottom: 24px;
   }
+
   .settings-filter input {
-    width: min(220px, 100%);
-    font-size: 13px;
-    padding: 8px 10px;
+    width: min(260px, 100%);
+    font-size: 14px;
+    padding: 10px 12px;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 8px;
     background: var(--bg-primary);
     color: var(--text-primary);
   }
+
   .sr-only {
     position: absolute;
     width: 1px;
@@ -1169,80 +1207,181 @@
     clip: rect(0, 0, 0, 0);
     border: 0;
   }
-  .settings-section-head { margin-bottom: 16px; }
+
+  .settings-body {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 28px;
+    align-items: start;
+  }
+
+  .settings-side-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: sticky;
+    top: 0;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--bg-secondary) 45%, transparent);
+  }
+
+  .settings-side-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    width: 100%;
+    text-align: left;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 10px 12px;
+    cursor: pointer;
+  }
+
+  .settings-side-item:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+  }
+
+  .settings-side-item.active {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    box-shadow: inset 2px 0 var(--accent-soft);
+  }
+
+  .settings-side-label {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .settings-side-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 400;
+    line-height: 1.35;
+  }
+
+  .settings-side-item.active .settings-side-hint {
+    color: var(--text-secondary);
+  }
+
+  .settings-main {
+    min-width: 0;
+  }
+
+  .settings-panel {
+    width: 100%;
+    max-width: none;
+  }
+
+  .settings-section-head {
+    margin-bottom: 20px;
+  }
+
   .settings-subhead {
-    margin: 20px 0 10px;
-    font-size: 13px;
+    margin: 28px 0 14px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.05em;
   }
+
   .section-desc {
-    margin: 4px 0 0;
-    font-size: 13px;
+    margin: 6px 0 0;
+    font-size: 14px;
     color: var(--text-muted);
+    line-height: 1.45;
   }
+
   .settings-stack {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 20px;
   }
+
   .settings-advanced {
-    margin-top: 16px;
-    padding: 12px 14px;
+    margin-top: 20px;
+    padding: 16px 18px;
     border: 1px solid var(--border-light);
-    border-radius: 8px;
+    border-radius: 10px;
     background: color-mix(in srgb, var(--bg-secondary) 40%, transparent);
   }
+
   .settings-advanced summary {
     cursor: pointer;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
     color: var(--text-muted);
     user-select: none;
   }
+
   .settings-advanced[open] summary {
-    margin-bottom: 12px;
+    margin-bottom: 14px;
     color: var(--text-primary);
   }
+
   .settings-meta-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 16px;
+    gap: 20px;
     margin-bottom: 8px;
   }
+
   .meta-label {
     display: block;
     font-size: 12px;
     color: var(--text-muted);
     margin-bottom: 4px;
   }
+
   .meta-value {
     margin: 0;
     font-size: 14px;
     font-family: var(--font-mono);
   }
-  .detector-list {
-    max-height: 280px;
-    overflow-y: auto;
-    margin: 0 -8px;
-    padding: 0 8px;
-    scrollbar-width: thin;
+
+  .detector-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 28px;
+    margin-bottom: 4px;
   }
-  .detector-list.compact { max-height: 220px; }
+
+  .detector-list {
+    margin: 0;
+  }
+
   .detector-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    padding: 8px 0;
+    gap: 16px;
+    padding: 12px 0;
     border-bottom: 1px solid var(--border-light);
     font-size: 14px;
   }
-  .detector-row:last-child { border-bottom: none; }
-  .toggle-stack .detector-row { border-bottom: 1px solid var(--border-light); }
-  .search-wrap { position: relative; }
+
+  .detector-row:last-child {
+    border-bottom: none;
+  }
+
+  .toggle-stack {
+    margin-top: 8px;
+  }
+
+  .toggle-stack .detector-row {
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .search-wrap {
+    position: relative;
+  }
+
   .search-dropdown {
     position: absolute;
     top: 100%;
@@ -1253,15 +1392,16 @@
     overflow-y: auto;
     background: var(--bg-primary);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 8px;
     margin-top: 4px;
     box-shadow: var(--shadow-md);
   }
+
   .search-item {
     display: block;
     width: 100%;
     text-align: left;
-    padding: 8px 12px;
+    padding: 10px 12px;
     border: none;
     border-radius: 0;
     background: none;
@@ -1270,17 +1410,28 @@
     color: var(--text-primary);
     cursor: pointer;
   }
-  .search-item:hover, .search-item.active { background: var(--bg-secondary); }
-  .empty-note { font-size: 13px; color: var(--text-muted); }
+
+  .search-item:hover,
+  .search-item.active {
+    background: var(--bg-secondary);
+  }
+
+  .empty-note {
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+
   .form-row-2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px 16px;
+    gap: 16px 24px;
   }
-  @media (max-width: 720px) {
-    .form-row-2, .settings-meta-grid { grid-template-columns: 1fr; }
+
+  .muted {
+    font-size: 12px;
+    color: var(--text-muted);
   }
-  .muted { font-size: 12px; color: var(--text-muted); }
+
   .linkish {
     background: none;
     border: none;
@@ -1289,15 +1440,58 @@
     font-size: 13px;
     padding: 4px 8px;
   }
-  .linkish:hover { text-decoration: underline; }
+
+  .linkish:hover {
+    text-decoration: underline;
+  }
+
+  .rules-page-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+
   textarea {
     width: 100%;
     font-family: inherit;
-    font-size: 13px;
-    padding: 8px;
+    font-size: 14px;
+    padding: 10px 12px;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 8px;
     background: var(--bg-primary);
     color: var(--text-primary);
+    line-height: 1.45;
+  }
+
+  @media (max-width: 900px) {
+    .settings-body {
+      grid-template-columns: 1fr;
+    }
+
+    .settings-side-nav {
+      position: static;
+      flex-direction: row;
+      overflow-x: auto;
+      gap: 6px;
+      padding: 8px;
+    }
+
+    .settings-side-item {
+      flex: 0 0 auto;
+      min-width: 140px;
+    }
+
+    .settings-side-item.active {
+      box-shadow: inset 0 -2px var(--accent-soft);
+    }
+
+    .detector-grid,
+    .form-row-2,
+    .settings-meta-grid {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

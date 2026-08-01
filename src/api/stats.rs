@@ -259,10 +259,14 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
     if let Some(obj) = core.as_object_mut() {
         let today = chrono::Utc::now().date_naive();
         let start = today - chrono::Duration::days(13);
-        let review_map: std::collections::HashMap<_, _> =
-            reviews_by_day.into_iter().map(|d| (d.day, d.count)).collect();
-        let finding_map: std::collections::HashMap<_, _> =
-            findings_by_day.into_iter().map(|d| (d.day, d.count)).collect();
+        let review_map: std::collections::HashMap<_, _> = reviews_by_day
+            .into_iter()
+            .map(|d| (d.day, d.count))
+            .collect();
+        let finding_map: std::collections::HashMap<_, _> = findings_by_day
+            .into_iter()
+            .map(|d| (d.day, d.count))
+            .collect();
 
         let mut series = Vec::with_capacity(14);
         for offset in 0..14 {

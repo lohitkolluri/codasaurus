@@ -7,6 +7,9 @@
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
   import EmptyState from "../../lib/EmptyState.svelte";
   import ErrorState from "../../lib/ErrorState.svelte";
+  import Pagination from "../../lib/Pagination.svelte";
+
+  const PAGE_SIZE = 25;
 
   let repos = $state([]);
   let loading = $state(true);
@@ -15,12 +18,28 @@
   let syncMsg = $state("");
   let syncError = $state(false);
   let search = $state("");
+  let page = $state(1);
   let canManage = $derived($isMaintainer);
 
   let filtered = $derived.by(() => {
     if (!search) return repos;
     const q = search.toLowerCase();
     return repos.filter((r) => (r.full_name ?? "").toLowerCase().includes(q));
+  });
+
+  let totalPages = $derived(Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)));
+  let pageSafe = $derived(Math.min(Math.max(1, page), totalPages));
+  let pageRepos = $derived.by(() => {
+    const start = (pageSafe - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  });
+
+  let prevSearch = $state("");
+  $effect(() => {
+    if (prevSearch !== search) {
+      page = 1;
+      prevSearch = search;
+    }
   });
 
   onMount(async () => {
@@ -185,7 +204,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each filtered as repo}
+            {#each pageRepos as repo}
               <tr onclick={() => openRepo(repo.id)}>
                 <td class="repo-cell">
                   <span class="repo-icon" aria-hidden="true">
@@ -210,7 +229,7 @@
                 <td
                   >{repo.updated_at
                     ? new Date(repo.updated_at).toLocaleDateString()
-                    : "—"}</td
+                    : "n/a"}</td
                 >
                 <td>
                   <button
@@ -231,6 +250,19 @@
           </tbody>
         </table>
       </div>
+      {#if filtered.length > PAGE_SIZE}
+        <div class="page-panel-footer">
+          <span class="filter-count">
+            Showing {(pageSafe - 1) * PAGE_SIZE + 1}–{Math.min(pageSafe * PAGE_SIZE, filtered.length)}
+            of {filtered.length}
+          </span>
+          <Pagination
+            page={pageSafe}
+            {totalPages}
+            onChange={(p) => (page = p)}
+          />
+        </div>
+      {/if}
     {/if}
   </div>
 </AppShell>

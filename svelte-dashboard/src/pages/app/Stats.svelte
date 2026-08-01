@@ -4,14 +4,17 @@
   import { api } from "../../stores/api.js";
   import AppShell from "../../lib/AppShell.svelte";
   import StatsCard from "../../lib/StatsCard.svelte";
+  import Pagination from "../../lib/Pagination.svelte";
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
   import EmptyState from "../../lib/EmptyState.svelte";
   import ErrorState from "../../lib/ErrorState.svelte";
 
+  const DETECTOR_PAGE = 8;
+
   let stats = $state(null);
   let loading = $state(true);
   let error = $state("");
-  let hoverDay = $state(null);
+  let detectorPage = $state(1);
 
   onMount(async () => {
     try {
@@ -57,6 +60,26 @@
     return curr - prev;
   }
 
+  function fmtRate(rate) {
+    if (rate == null) return "n/a";
+    return `${Math.round(rate)}%`;
+  }
+
+  function fmtRatio(ratio) {
+    if (ratio == null) return "n/a";
+    return Number(ratio).toFixed(2);
+  }
+
+  function fmtSpend(usd) {
+    if (usd == null) return "$0.000";
+    return `$${Number(usd).toFixed(3)}`;
+  }
+
+  function barHeight(value, max) {
+    if (!max) return 2;
+    return Math.max(2, Math.round((Number(value || 0) / max) * 112));
+  }
+
   let series = $derived(stats?.analytics?.reviews_by_day ?? []);
   let detectors = $derived(stats?.analytics?.findings_by_detector ?? []);
   let outcomes = $derived(stats?.analytics?.outcomes_7d ?? { passed: 0, failed: 0, other: 0 });
@@ -64,42 +87,16 @@
   let reviewSpark = $derived(series.map((r) => r.reviews || 0));
   let findingSpark = $derived(series.map((r) => r.findings || 0));
 
-  let chartGeom = $derived.by(() => {
-    const rows = series;
-    if (!rows.length) return null;
-    const w = 560;
-    const h = 160;
-    const pad = { t: 12, r: 8, b: 28, l: 36 };
-    const innerW = w - pad.l - pad.r;
-    const innerH = h - pad.t - pad.b;
-    const maxY = Math.max(
-      ...rows.map((r) => Math.max(r.reviews || 0, r.findings || 0)),
-      1,
-    );
-    const xAt = (i) => pad.l + (rows.length === 1 ? innerW / 2 : (i / (rows.length - 1)) * innerW);
-    const yAt = (v) => pad.t + innerH - (v / maxY) * innerH;
+  let seriesMax = $derived(
+    Math.max(0, ...series.map((r) => Math.max(r.reviews || 0, r.findings || 0))),
+  );
+  let chartHasActivity = $derived(seriesMax > 0);
 
-    const reviewLine = rows
-      .map((r, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yAt(r.reviews || 0).toFixed(1)}`)
-      .join(" ");
-    const findingLine = rows
-      .map((r, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yAt(r.findings || 0).toFixed(1)}`)
-      .join(" ");
-    const reviewArea =
-      reviewLine +
-      ` L${xAt(rows.length - 1).toFixed(1)},${(pad.t + innerH).toFixed(1)}` +
-      ` L${xAt(0).toFixed(1)},${(pad.t + innerH).toFixed(1)} Z`;
-
-    const ticks = [0, 0.5, 1].map((t) => ({
-      y: yAt(maxY * t),
-      label: Math.round(maxY * t),
-    }));
-
-    const xLabels = rows
-      .map((r, i) => ({ i, day: r.day, x: xAt(i) }))
-      .filter((_, i) => i === 0 || i === rows.length - 1 || i % 3 === 0);
-
-    return { w, h, pad, maxY, xAt, yAt, reviewLine, findingLine, reviewArea, ticks, xLabels, rows };
+  let detectorPages = $derived(Math.max(1, Math.ceil(detectors.length / DETECTOR_PAGE)));
+  let detectorPageSafe = $derived(Math.min(Math.max(1, detectorPage), detectorPages));
+  let pageDetectors = $derived.by(() => {
+    const start = (detectorPageSafe - 1) * DETECTOR_PAGE;
+    return detectors.slice(start, start + DETECTOR_PAGE);
   });
 
   let outcomeTotal = $derived(
@@ -239,25 +236,21 @@
         />
         <StatsCard
           label="Pass rate (7d)"
-          value={stats.analytics?.pass_rate_7d != null
-            ? `${Math.round(stats.analytics.pass_rate_7d)}%`
-            : "—"}
+          value={fmtRate(stats.analytics?.pass_rate_7d)}
           delta={absDelta(stats.analytics?.pass_rate_7d, stats.analytics?.pass_rate_prev_7d)}
           deltaLabel="pp vs prior week"
           tone={passTone(stats.analytics?.pass_rate_7d)}
-          hint={stats.pass_rate != null ? `30d avg ${Math.round(stats.pass_rate)}%` : ""}
+          hint={stats.pass_rate != null ? `30d avg ${Math.round(stats.pass_rate)}%` : "No reviews yet"}
         />
         <StatsCard
           label="Dismiss rate (7d)"
-          value={stats.analytics?.dismiss_rate_last_7_days != null
-            ? `${Math.round(stats.analytics.dismiss_rate_last_7_days)}%`
-            : "—"}
+          value={fmtRate(stats.analytics?.dismiss_rate_last_7_days)}
           delta={absDelta(
             stats.analytics?.weekly_digest?.dismissals ?? 0,
             stats.analytics?.dismissals_prev_7_days,
           )}
           deltaLabel="dismissals Δ"
-          hint="Dismissals ÷ findings"
+          hint="Dismissals ÷ (dismissals + findings)"
         />
       </div>
     </section>
@@ -267,28 +260,22 @@
       <div class="stats-row">
         <StatsCard
           label="Accept rate"
-          value={stats.trust?.accept_rate != null
-            ? `${Math.round(stats.trust.accept_rate)}%`
-            : "—"}
+          value={fmtRate(stats.trust?.accept_rate)}
           hint="Not dismissed · 30d"
           tone={acceptTone(stats.trust?.accept_rate)}
         />
         <StatsCard
           label="FP proxy"
-          value={stats.trust?.fp_proxy_ratio != null
-            ? Number(stats.trust.fp_proxy_ratio).toFixed(2)
-            : "—"}
+          value={fmtRatio(stats.trust?.fp_proxy_ratio ?? 0)}
           hint="Dismissals ÷ Tier-1"
           tone={fpTone(stats.trust?.fp_proxy_ratio)}
         />
         <StatsCard label="Tier-1 findings" value={stats.trust?.tier1_findings ?? 0} tone="info" />
         <StatsCard
           label="LLM spend (est.)"
-          value={stats.llm?.spend_usd_last_day != null
-            ? `$${Number(stats.llm.spend_usd_last_day).toFixed(3)}`
-            : stats.llm?.spend_usd_estimate != null
-              ? `$${Number(stats.llm.spend_usd_estimate).toFixed(3)}`
-              : "—"}
+          value={fmtSpend(
+            stats.llm?.spend_usd_last_day ?? stats.llm?.spend_usd_estimate ?? 0,
+          )}
           hint={stats.llm?.daily_budget_usd > 0
             ? `last day · budget $${Number(stats.llm.daily_budget_usd).toFixed(2)}`
             : `${stats.llm?.requests ?? 0} requests · last day`}
@@ -308,54 +295,36 @@
                 <span class="legend-item findings">Findings</span>
               </div>
             </div>
-            {#if chartGeom}
-              <div class="trend-chart-wrap">
-                <svg
-                  class="trend-chart"
-                  viewBox={`0 0 ${chartGeom.w} ${chartGeom.h}`}
-                  role="img"
-                  aria-label="Reviews and findings over 14 days"
-                >
-                  {#each chartGeom.ticks as tick}
-                    <line
-                      class="chart-grid"
-                      x1={chartGeom.pad.l}
-                      x2={chartGeom.w - chartGeom.pad.r}
-                      y1={tick.y}
-                      y2={tick.y}
-                    />
-                    <text class="chart-axis" x={chartGeom.pad.l - 6} y={tick.y + 3} text-anchor="end"
-                      >{tick.label}</text
-                    >
-                  {/each}
-                  <path class="chart-area-reviews" d={chartGeom.reviewArea} />
-                  <path class="chart-line-reviews" d={chartGeom.reviewLine} fill="none" />
-                  <path class="chart-line-findings" d={chartGeom.findingLine} fill="none" />
-                  {#each chartGeom.rows as row, i}
-                    <circle
-                      class="chart-hit"
-                      cx={chartGeom.xAt(i)}
-                      cy={chartGeom.yAt(row.reviews || 0)}
-                      r="10"
-                      onmouseenter={() => (hoverDay = row)}
-                      onmouseleave={() => (hoverDay = null)}
-                    />
-                  {/each}
-                  {#each chartGeom.xLabels as lab}
-                    <text class="chart-axis" x={lab.x} y={chartGeom.h - 8} text-anchor="middle"
-                      >{dayLabel(lab.day)}</text
-                    >
-                  {/each}
-                </svg>
-                {#if hoverDay}
-                  <div class="chart-tooltip" role="status">
-                    <strong>{hoverDay.day}</strong>
-                    · {hoverDay.reviews || 0} reviews · {hoverDay.findings || 0} findings
+            {#if chartHasActivity}
+              <div
+                class="analytics-bars"
+                role="img"
+                aria-label="Reviews and findings over 14 days"
+              >
+                {#each series as row}
+                  <div
+                    class="analytics-bar-col"
+                    title={`${dayLabel(row.day)}: ${row.reviews || 0} reviews, ${row.findings || 0} findings`}
+                  >
+                    <div class="analytics-bar-pair">
+                      <div
+                        class="analytics-bar"
+                        style={`height: ${barHeight(row.reviews, seriesMax)}px`}
+                      ></div>
+                      <div
+                        class="analytics-bar findings"
+                        style={`height: ${barHeight(row.findings, seriesMax)}px`}
+                      ></div>
+                    </div>
+                    <span class="analytics-bar-label">{dayLabel(row.day)}</span>
                   </div>
-                {/if}
+                {/each}
               </div>
             {:else}
-              <p class="empty-note">Not enough daily data yet.</p>
+              <div class="chart-empty">
+                <p class="empty-note">No review activity in the last 14 days.</p>
+                <a class="btn" href="#/app/repos" use:link>Enable a repository</a>
+              </div>
             {/if}
           </div>
 
@@ -364,7 +333,10 @@
               <h3 class="section-heading">Outcomes (7d)</h3>
             </div>
             {#if outcomeTotal === 0}
-              <p class="empty-note">No review outcomes this week.</p>
+              <div class="chart-empty">
+                <p class="empty-note">No pass/fail outcomes this week yet.</p>
+                <a class="btn" href="#/app/reviews" use:link>Open reviews</a>
+              </div>
             {:else}
               <div class="outcome-stack" role="img" aria-label="Pass fail mix">
                 <div
@@ -416,7 +388,7 @@
           <h2 class="stats-section-title">Findings by detector (30d)</h2>
           <div class="analytics-panel chart-card">
             <ul class="analytics-detectors">
-              {#each detectors as d}
+              {#each pageDetectors as d}
                 <li>
                   <span class="analytics-det-name" title={d.detector}>{d.detector}</span>
                   <div class="analytics-det-track">
@@ -432,6 +404,18 @@
                 </li>
               {/each}
             </ul>
+            {#if detectors.length > DETECTOR_PAGE}
+              <div class="detector-page-meta">
+                <span>
+                  {detectors.length} detectors · page {detectorPageSafe} of {detectorPages}
+                </span>
+                <Pagination
+                  page={detectorPageSafe}
+                  totalPages={detectorPages}
+                  onChange={(p) => (detectorPage = p)}
+                />
+              </div>
+            {/if}
           </div>
         </section>
       {/if}
