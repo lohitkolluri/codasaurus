@@ -345,7 +345,7 @@ async fn delete_github_settings(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let actor = super::rbac::require_owner(&state, &headers).await?;
     for key in GITHUB_KEYS {
-        crate::db::db_execute!(&state.pool, "DELETE FROM app_config WHERE key = ?", key)?;
+        db::config::delete_config(&state.pool, key).await?;
     }
     // Drop live credentials so webhooks fail closed and workers stop minting tokens.
     crate::bot::clear_bot_config();

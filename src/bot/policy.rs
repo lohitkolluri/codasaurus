@@ -63,29 +63,36 @@ impl PolicyPack {
         };
 
         if let Some(pool) = pool {
-            if let Ok(Some(v)) = crate::db::config::get_config(pool, "default_severity").await {
-                if matches!(v.as_str(), "blocking" | "warning" | "info") {
-                    pack.min_severity = v;
+            // One snapshot (cache-warmed) instead of six keyed round-trips.
+            if let Ok(entries) = crate::db::config::get_all_config(pool).await {
+                let map: std::collections::HashMap<&str, &str> = entries
+                    .iter()
+                    .map(|e| (e.key.as_str(), e.value.as_str()))
+                    .collect();
+                if let Some(v) = map.get("default_severity") {
+                    if matches!(*v, "blocking" | "warning" | "info") {
+                        pack.min_severity = (*v).to_string();
+                    }
                 }
-            }
-            if let Ok(Some(v)) = crate::db::config::get_config(pool, "max_warnings").await {
-                if let Ok(n) = v.parse() {
-                    pack.max_warnings = n;
+                if let Some(v) = map.get("max_warnings") {
+                    if let Ok(n) = v.parse() {
+                        pack.max_warnings = n;
+                    }
                 }
-            }
-            if let Ok(Some(v)) = crate::db::config::get_config(pool, "max_blocking").await {
-                if let Ok(n) = v.parse() {
-                    pack.max_blocking = n;
+                if let Some(v) = map.get("max_blocking") {
+                    if let Ok(n) = v.parse() {
+                        pack.max_blocking = n;
+                    }
                 }
-            }
-            if let Ok(Some(v)) = crate::db::config::get_config(pool, "forbidden_paths").await {
-                pack.forbidden_paths = parse_path_list(&v);
-            }
-            if let Ok(Some(v)) = crate::db::config::get_config(pool, "request_reviewers").await {
-                pack.request_reviewers = parse_bool(&v, true);
-            }
-            if let Ok(Some(v)) = crate::db::config::get_config(pool, "create_check_run").await {
-                pack.create_check_run = parse_bool(&v, true);
+                if let Some(v) = map.get("forbidden_paths") {
+                    pack.forbidden_paths = parse_path_list(v);
+                }
+                if let Some(v) = map.get("request_reviewers") {
+                    pack.request_reviewers = parse_bool(v, true);
+                }
+                if let Some(v) = map.get("create_check_run") {
+                    pack.create_check_run = parse_bool(v, true);
+                }
             }
             // review_strictness is applied by the caller via strictness::apply_to_pack
         }

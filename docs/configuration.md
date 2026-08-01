@@ -10,7 +10,7 @@ Codasaurus merges **environment variables**, optional **TOML**, and **dashboard 
 
 **Precedence (tunables mirrored in Settings):** host/compose env wins on process start when set; otherwise values from **Settings** (DB) are applied. Saving in the dashboard updates the DB and the live process env for most knobs. `queue_workers` and `max_concurrent_reviews` need a restart to fully apply.
 
-**Not exposed in the dashboard (infra / bind-time only):** `DATABASE_URL`, `PORT` / `HOST`, `CODASAURUS_DATA_DIR`, `CODASAURUS_DB_MAX_CONNECTIONS`, `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS`, `CODASAURUS_FREE_TIER`, `CODASAURUS_CONFIG`, `CODASAURUS_SKIP_FRONTEND_BUILD`.
+**Not exposed in the dashboard (infra / bind-time only):** `DATABASE_URL`, `PORT` / `HOST`, `CODASAURUS_DATA_DIR`, `CODASAURUS_DB_MAX_CONNECTIONS`, `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS`, `CODASAURUS_CONFIG_CACHE_TTL_SECS`, `CODASAURUS_FREE_TIER`, `CODASAURUS_CONFIG`, `CODASAURUS_SKIP_FRONTEND_BUILD`.
 
 GitHub App credentials: env → DB (wizard). Detector toggles and policy prefer DB overlays when present.
 
@@ -31,6 +31,7 @@ codasaurus version
 | `DATABASE_URL`                       | recommended         | Postgres URL (default `postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus`)                                                                             |
 | `CODASAURUS_DB_MAX_CONNECTIONS`      | no                  | Pool size (default `16`, or `3` on free/Render/Neon hosts)                                                                                                      |
 | `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS` | no                  | Wait for a free connection (default `30`, or `60` on free hosts)                                                                                                |
+| `CODASAURUS_CONFIG_CACHE_TTL_SECS`   | no                  | In-process `app_config` cache TTL (default `60`). `0` disables. Write-through on this process; TTL covers multi-replica lag                                     |
 | `CODASAURUS_FREE_TIER`               | no                  | `1` forces free-tier pool + concurrency defaults                                                                                                                |
 | `CODASAURUS_DATA_DIR`                | no                  | Data directory (Docker: `/data`)                                                                                                                                |
 | `PORT` / `--port`                    | no                  | Listen port (default `3000`)                                                                                                                                    |
