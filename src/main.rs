@@ -55,9 +55,18 @@ fn main() -> Result<()> {
                     .and_then(|p| p.parse().ok())
                     .unwrap_or(3000)
             });
-            let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-                "postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus".into()
-            });
+            let database_url = match std::env::var("DATABASE_URL") {
+                Ok(u) if !u.trim().is_empty() => u,
+                _ if std::env::var_os("RENDER").is_some()
+                    || std::env::var_os("RENDER_SERVICE_ID").is_some() =>
+                {
+                    anyhow::bail!(
+                        "DATABASE_URL is required on Render. Link a Postgres database \
+                         (use the Internal Database URL) or set DATABASE_URL in the service env."
+                    );
+                }
+                _ => "postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus".into(),
+            };
 
             let bot_config =
                 std::env::var("GITHUB_APP_ID")
