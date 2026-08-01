@@ -57,9 +57,9 @@
   <WizardShell
     showProgress={false}
     title="Set up Codasaurus"
-    subtitle="Self-hosted PR review in four short steps. You'll review your first pull request in about five minutes."
+    subtitle="Database, LLM (optional), GitHub App, then your first owner account."
   >
-    <div class="wizard-time" aria-hidden="true">About 5 minutes · resume anytime</div>
+    <div class="wizard-time" aria-hidden="true">About 5 minutes. You can resume later.</div>
 
     <ul class="wiz-hub-list">
       {#each SETUP_STEPS as step, i}

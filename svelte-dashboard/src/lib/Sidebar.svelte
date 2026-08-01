@@ -29,8 +29,10 @@
 
 <aside class="app-sidebar">
   <div class="sidebar-logo">
-    <BrandMark size={28} />
-    <span>Codasaurus</span>
+    <a href="/app/dashboard" use:link class="sidebar-brand" aria-label="Codasaurus dashboard">
+      <BrandMark size={28} />
+      <span>Codasaurus</span>
+    </a>
   </div>
   <nav aria-label="Primary">
     <ul class="sidebar-nav">
@@ -63,12 +65,24 @@
   .sidebar-logo {
     display: flex;
     align-items: center;
-    gap: 8px;
     padding: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 16px;
     font-weight: 700;
     letter-spacing: -0.02em;
-    border-bottom: 1px solid var(--border);
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .sidebar-brand:hover {
+    text-decoration: none;
+    opacity: 0.85;
   }
 
   .sidebar-footer {

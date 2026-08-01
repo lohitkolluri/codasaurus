@@ -133,7 +133,10 @@
     </div>
 
     <p class="wizard-hint" style="text-align:center;margin-top:16px">
-      Need the docs? See <code>docs/setup-onboarding.md</code> and <code>docs/setup-github-app.md</code>.
+      Docs:
+      <a href="https://github.com/lohitkolluri/codasaurus/blob/main/docs/setup-onboarding.md" target="_blank" rel="noopener noreferrer">setup-onboarding</a>
+      and
+      <a href="https://github.com/lohitkolluri/codasaurus/blob/main/docs/setup-github-app.md" target="_blank" rel="noopener noreferrer">setup-github-app</a>.
     </p>
   </WizardShell>
 {/if}

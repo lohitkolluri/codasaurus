@@ -46,8 +46,3 @@ export function avatarUrl(email, size = 64) {
   });
   return `https://api.dicebear.com/9.x/bottts/svg?${params.toString()}`;
 }
-
-/** @deprecated use avatarUrl — kept for any leftover imports */
-export function identiconSvg(email, size = 64) {
-  return avatarUrl(email, size);
-}

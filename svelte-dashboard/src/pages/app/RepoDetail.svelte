@@ -124,7 +124,7 @@
       </p>
     </div>
 
-    <div class="card">
+    <div class="card static">
       <h3>Detectors</h3>
       <div class="detector-grid">
         {#each Object.entries(detectors) as [key, val]}
@@ -146,7 +146,7 @@
       {/if}
     </div>
 
-    <div class="card">
+    <div class="card static">
       <h3>LLM Review</h3>
       <div class="llm-row">
         <label class="toggle">
@@ -161,7 +161,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card static">
       <h3>Automation</h3>
       <div class="llm-row">
         <label class="toggle">

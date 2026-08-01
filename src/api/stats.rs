@@ -136,7 +136,7 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
         );
     }
 
-    // Team analytics: daily series, detector hits, weekly digest summary.
+    // Team analytics: daily series, detector hits, weekly digest + prior-week deltas.
     #[derive(sqlx::FromRow)]
     struct DayCount {
         day: chrono::NaiveDate,
@@ -147,7 +147,19 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
         DayCount,
         "SELECT (created_at AT TIME ZONE 'UTC')::date AS day, COUNT(*)::bigint AS count
          FROM reviews
-         WHERE created_at >= NOW() - INTERVAL '14 days'
+         WHERE created_at >= (NOW() AT TIME ZONE 'UTC')::date - INTERVAL '13 days'
+         GROUP BY 1
+         ORDER BY 1 ASC"
+    )
+    .unwrap_or_default();
+
+    let findings_by_day = crate::db::db_fetch_all!(
+        &state.pool,
+        DayCount,
+        "SELECT (r.created_at AT TIME ZONE 'UTC')::date AS day, COUNT(*)::bigint AS count
+         FROM findings f
+         INNER JOIN reviews r ON r.id = f.review_id
+         WHERE r.created_at >= (NOW() AT TIME ZONE 'UTC')::date - INTERVAL '13 days'
          GROUP BY 1
          ORDER BY 1 ASC"
     )
@@ -171,6 +183,21 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
     )
     .unwrap_or_default();
 
+    #[derive(sqlx::FromRow)]
+    struct StatusCount {
+        status: String,
+        count: i64,
+    }
+    let outcomes_7d = crate::db::db_fetch_all!(
+        &state.pool,
+        StatusCount,
+        "SELECT status, COUNT(*)::bigint AS count
+         FROM reviews
+         WHERE created_at >= NOW() - INTERVAL '7 days'
+         GROUP BY status"
+    )
+    .unwrap_or_default();
+
     let findings_last_7: i64 = crate::db::db_scalar!(
         &state.pool,
         i64,
@@ -180,25 +207,101 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
     )
     .unwrap_or(0);
 
+    let findings_prev_7: i64 = crate::db::db_scalar!(
+        &state.pool,
+        i64,
+        "SELECT COUNT(*) FROM findings f
+         INNER JOIN reviews r ON r.id = f.review_id
+         WHERE r.created_at >= NOW() - INTERVAL '14 days'
+           AND r.created_at < NOW() - INTERVAL '7 days'"
+    )
+    .unwrap_or(0);
+
+    let reviews_prev_7: i64 = crate::db::db_scalar!(
+        &state.pool,
+        i64,
+        "SELECT COUNT(*) FROM reviews
+         WHERE created_at >= NOW() - INTERVAL '14 days'
+           AND created_at < NOW() - INTERVAL '7 days'"
+    )
+    .unwrap_or(0);
+
+    let dismissals_prev_7: i64 = crate::db::db_scalar!(
+        &state.pool,
+        i64,
+        "SELECT COUNT(*) FROM dismissed_findings
+         WHERE dismissed_at >= NOW() - INTERVAL '14 days'
+           AND dismissed_at < NOW() - INTERVAL '7 days'"
+    )
+    .unwrap_or(0);
+
+    let pass_rate_7d: Option<f64> = crate::db::db_scalar!(
+        &state.pool,
+        Option<f64>,
+        "SELECT AVG(CASE WHEN status = 'passed' THEN 100.0 WHEN status = 'failed' THEN 0.0 ELSE NULL END)
+         FROM reviews
+         WHERE created_at >= NOW() - INTERVAL '7 days'"
+    )
+    .ok()
+    .flatten();
+
+    let pass_rate_prev_7d: Option<f64> = crate::db::db_scalar!(
+        &state.pool,
+        Option<f64>,
+        "SELECT AVG(CASE WHEN status = 'passed' THEN 100.0 WHEN status = 'failed' THEN 0.0 ELSE NULL END)
+         FROM reviews
+         WHERE created_at >= NOW() - INTERVAL '14 days'
+           AND created_at < NOW() - INTERVAL '7 days'"
+    )
+    .ok()
+    .flatten();
+
     if let Some(obj) = core.as_object_mut() {
-        let series: Vec<serde_json::Value> = reviews_by_day
-            .into_iter()
-            .map(|d| {
-                json!({
-                    "day": d.day.to_string(),
-                    "reviews": d.count,
-                })
-            })
-            .collect();
+        let today = chrono::Utc::now().date_naive();
+        let start = today - chrono::Duration::days(13);
+        let review_map: std::collections::HashMap<_, _> =
+            reviews_by_day.into_iter().map(|d| (d.day, d.count)).collect();
+        let finding_map: std::collections::HashMap<_, _> =
+            findings_by_day.into_iter().map(|d| (d.day, d.count)).collect();
+
+        let mut series = Vec::with_capacity(14);
+        for offset in 0..14 {
+            let day = start + chrono::Duration::days(offset);
+            series.push(json!({
+                "day": day.to_string(),
+                "reviews": review_map.get(&day).copied().unwrap_or(0),
+                "findings": finding_map.get(&day).copied().unwrap_or(0),
+            }));
+        }
+
+        let detector_total: i64 = findings_by_detector.iter().map(|d| d.count).sum();
         let detectors: Vec<serde_json::Value> = findings_by_detector
             .into_iter()
             .map(|d| {
+                let share = if detector_total == 0 {
+                    0.0
+                } else {
+                    (d.count as f64 / detector_total as f64) * 100.0
+                };
                 json!({
                     "detector": d.detector,
                     "count": d.count,
+                    "share_pct": share,
                 })
             })
             .collect();
+
+        let mut passed_7d = 0i64;
+        let mut failed_7d = 0i64;
+        let mut other_7d = 0i64;
+        for row in outcomes_7d {
+            match row.status.as_str() {
+                "passed" => passed_7d = row.count,
+                "failed" => failed_7d = row.count,
+                _ => other_7d += row.count,
+            }
+        }
+
         let dismiss_week = obj
             .get("dismissals_last_7_days")
             .and_then(|v| v.as_i64())
@@ -212,18 +315,29 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
         } else {
             Some((dismiss_week as f64 / findings_last_7 as f64) * 100.0)
         };
+
         obj.insert(
             "analytics".into(),
             json!({
                 "reviews_by_day": series,
                 "findings_by_detector": detectors,
                 "findings_last_7_days": findings_last_7,
+                "findings_prev_7_days": findings_prev_7,
+                "reviews_prev_7_days": reviews_prev_7,
+                "dismissals_prev_7_days": dismissals_prev_7,
                 "dismiss_rate_last_7_days": dismiss_rate,
+                "pass_rate_7d": pass_rate_7d,
+                "pass_rate_prev_7d": pass_rate_prev_7d,
+                "outcomes_7d": {
+                    "passed": passed_7d,
+                    "failed": failed_7d,
+                    "other": other_7d,
+                },
                 "weekly_digest": {
                     "reviews": reviews_week,
                     "findings": findings_last_7,
                     "dismissals": dismiss_week,
-                    "note": "Postgres-backed rollup for the last 7 days. Open the dashboard after Render wake.",
+                    "note": "Postgres-backed rollup for the last 7 days vs prior 7 days.",
                 },
             }),
         );

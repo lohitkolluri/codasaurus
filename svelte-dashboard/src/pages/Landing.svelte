@@ -60,10 +60,10 @@
     </header>
 
     <main class="landing-hero">
-      <p class="landing-eyebrow">Self-hosted GitHub App</p>
+      <p class="landing-eyebrow">GitHub App</p>
       <h1>Codasaurus</h1>
       <p class="landing-lead">
-        PR review that reads the diff — Tier-1 detectors first, your LLM only when you ask.
+        Self-hosted PR review. Detectors run on every diff; your LLM stays optional (BYOK).
       </p>
       <div class="landing-ctas">
         <a class="landing-cta" href="#/login">Open dashboard</a>
@@ -77,7 +77,7 @@
     </main>
 
     <footer class="landing-foot">
-      <p>Free forever<span aria-hidden="true"> · </span>No seat tax<span aria-hidden="true"> · </span>Learns in your Postgres</p>
+      <p>AGPL · free to self-host · data stays in your Postgres</p>
     </footer>
   </div>
 {:else}

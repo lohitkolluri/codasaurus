@@ -43,12 +43,12 @@
       <p class="eyebrow">Overview</p>
       <h1 class="page-title">Dashboard</h1>
       <p class="page-description">
-        What needs attention right now. Deep charts live on Stats.
+        Active repos, today's reviews, and recent PRs. Charts are on Stats.
       </p>
     </div>
     <div class="dashboard-hero-actions">
-      <a class="primary" href="#/app/stats" use:link>Open stats</a>
-      <a href="#/app/repos" use:link>Repositories</a>
+      <a class="btn" href="#/app/stats" use:link>Stats</a>
+      <a class="btn" href="#/app/repos" use:link>Repositories</a>
     </div>
   </div>
 

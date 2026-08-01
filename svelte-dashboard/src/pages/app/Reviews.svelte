@@ -83,6 +83,7 @@
             <option value="">All</option>
             <option value="passed">Passed</option>
             <option value="failed">Failed</option>
+            <option value="pending">Pending</option>
           </select>
         </div>
       </div>

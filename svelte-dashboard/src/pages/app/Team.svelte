@@ -119,7 +119,7 @@
         role: inviteRole,
       });
       lastInviteUrl = res.url || "";
-      setMsg("Invite created — copy and share the link.");
+      setMsg("Invite created. Copy and share the link.");
       inviteEmail = "";
       await loadTeam();
     } catch (err) {
@@ -135,7 +135,7 @@
       await navigator.clipboard.writeText(lastInviteUrl);
       setMsg("Invite link copied");
     } catch {
-      setMsg("Copy failed — select the URL manually.", true);
+      setMsg("Copy failed. Select the URL manually.", true);
     }
   }
 
@@ -205,7 +205,7 @@
       <p class="eyebrow">Access</p>
       <h1 class="page-title">Team</h1>
       <p class="page-description">
-        Owners, maintainers, and viewers. Invite with a shareable link — no email server required.
+        Owners, maintainers, and viewers. Invite with a shareable link (no SMTP).
       </p>
     </div>
     {#if $isOwner}
@@ -499,7 +499,7 @@
               {/if}
             </div>
           {:else}
-            <p class="muted">Signed in with SSO — password is managed by your identity provider.</p>
+            <p class="muted">Signed in with SSO. Password is managed by your identity provider.</p>
           {/if}
         </div>
       {/if}

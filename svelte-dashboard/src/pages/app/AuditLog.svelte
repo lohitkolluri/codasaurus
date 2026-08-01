@@ -71,6 +71,12 @@
             <option value="installation.deleted">Installation deleted</option>
             <option value="settings.updated">Settings updated</option>
             <option value="user.login">User login</option>
+            <option value="user.invite">Invite created</option>
+            <option value="user.invite_revoke">Invite revoked</option>
+            <option value="user.role_change">Role changed</option>
+            <option value="user.remove">Member removed</option>
+            <option value="user.bootstrap_transfer">Bootstrap transfer</option>
+            <option value="user.accept">Invite accepted</option>
             <option value="github.config_cleared">GitHub config cleared</option>
           </select>
         </div>

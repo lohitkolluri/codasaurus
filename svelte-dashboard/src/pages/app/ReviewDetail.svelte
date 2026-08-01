@@ -41,10 +41,16 @@
   async function loadReview(id) {
     loading = true;
     error = "";
+    selectedFile = null;
     try {
       const data = await api.get(`/api/reviews/${id}`);
       review = data.review ?? null;
       allFindings = data.findings ?? [];
+      // Open the first changed file so findings aren't behind an extra click.
+      if (allFindings.length > 0) {
+        const first = allFindings.find((f) => f.file_path || f.file);
+        if (first) selectedFile = first.file_path ?? first.file;
+      }
     } catch (err) {
       error = err.message || "Failed to load review";
     } finally {

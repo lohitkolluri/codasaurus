@@ -217,6 +217,7 @@
     if (loc.includes("/settings/github")) activeTab = "connections";
     else if (loc.includes("/settings/runtime") || loc.includes("/settings/system")) activeTab = "system";
     else if (loc.includes("/settings/oidc") || loc.includes("/settings/auth")) activeTab = "connections";
+    else if (loc.includes("/settings/learning")) activeTab = "learning";
   }
 
   async function changePassword() {
@@ -414,7 +415,7 @@
         await api.put("/api/settings/metrics_token", { value: metricsToken });
       }
       if (failed > 0) systemMsg = `Save failed (${failed} errors)`;
-      else if (restart) systemMsg = "Saved — restart to apply worker/concurrency changes";
+      else if (restart) systemMsg = "Saved. Restart the process to apply worker or concurrency changes.";
       else systemMsg = "Saved";
     } catch (err) {
       systemMsg = err.message || "Save failed";
@@ -524,7 +525,7 @@
     <div class="page-toolbar compact settings-hero">
       <div>
         <h1 class="page-title">Settings</h1>
-        <p class="page-description">Common options first. Advanced knobs stay tucked away.</p>
+        <p class="page-description">Common options first. Rare knobs are under Advanced.</p>
       </div>
       <label class="settings-filter" for="settings-filter">
         <span class="sr-only">Filter settings</span>
@@ -1106,7 +1107,7 @@
               {#if pwMsg}<span class="save-msg" class:error={pwMsg !== "Password updated"}>{pwMsg}</span>{/if}
             </div>
           {:else}
-            <p class="empty-note">SSO account — password is managed by your identity provider.</p>
+            <p class="empty-note">SSO account. Password is managed by your identity provider.</p>
           {/if}
         </section>
 

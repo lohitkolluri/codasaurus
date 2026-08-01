@@ -125,7 +125,7 @@
         <div>
           <h1 class="page-title">Repositories</h1>
           <p class="page-description">
-            Synced repos start inactive. Enable only what you want reviewed so LLM spend stays intentional.
+        Synced repos start inactive. Enable only the ones you want reviewed.
           </p>
         </div>
         <div class="toolbar-actions">
@@ -163,7 +163,16 @@
     {:else if loading}
       <!-- spinner -->
     {:else if repos.length === 0}
-      <EmptyState message="No repositories configured. Install the GitHub App to get started." />
+      <EmptyState
+        message="No repositories yet. Install the GitHub App, then sync."
+        actionLabel="Install on GitHub"
+        onAction={installRepo}
+      />
+      <div class="repos-empty-actions">
+        <button type="button" onclick={syncRepos} disabled={syncing || !canManage}>
+          {syncing ? "Syncing…" : "Sync repos"}
+        </button>
+      </div>
     {:else}
       <div class="page-panel-scroll">
         <table>
@@ -171,7 +180,7 @@
             <tr>
               <th>Repository</th>
               <th>Default Branch</th>
-              <th>Last Review</th>
+              <th>Updated</th>
               <th style="width:100px">Status</th>
             </tr>
           </thead>
@@ -233,6 +242,11 @@
     margin-top: 12px;
     align-items: center;
     flex-wrap: wrap;
+  }
+  .repos-empty-actions {
+    display: flex;
+    justify-content: center;
+    margin-top: 12px;
   }
   .search-bar input {
     flex: 1;
