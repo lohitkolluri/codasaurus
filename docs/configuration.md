@@ -14,12 +14,13 @@ codasaurus version
 
 ### Core
 
-| Variable              | Required            | Description                                                                             |
-| --------------------- | ------------------- | --------------------------------------------------------------------------------------- |
-| `DATABASE_URL`        | no                  | Default SQLite file URL, e.g. `sqlite:///data/codasaurus.db?mode=rwc` or `postgres://…` |
-| `CODASAURUS_DATA_DIR` | no                  | Data directory (Docker: `/data`)                                                        |
-| `PORT` / `--port`     | no                  | Listen port (default `3000`)                                                            |
-| `PUBLIC_URL`          | recommended in prod | Canonical HTTPS origin for GitHub manifest callbacks                                    |
+| Variable                        | Required            | Description                                                                         |
+| ------------------------------- | ------------------- | ----------------------------------------------------------------------------------- |
+| `DATABASE_URL`                  | recommended         | Postgres URL (default `postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus`) |
+| `CODASAURUS_DB_MAX_CONNECTIONS` | no                  | Pool size (default `16`, clamped 2–64)                                              |
+| `CODASAURUS_DATA_DIR`           | no                  | Data directory (Docker: `/data`)                                                    |
+| `PORT` / `--port`               | no                  | Listen port (default `3000`)                                                        |
+| `PUBLIC_URL`                    | recommended in prod | Canonical HTTPS origin for GitHub manifest callbacks                                |
 
 ### GitHub App
 
@@ -50,14 +51,14 @@ Dashboard **Settings → LLM** writes `llm_provider`, `llm_model`, `llm_model_ch
 
 ### LLM cost controls
 
-| Knob                                        | Default             | Effect                                                            |
-| ------------------------------------------- | ------------------- | ----------------------------------------------------------------- |
-| Repo `config_json.auto_review_diff`         | **off (opt-in)**    | Webhook auto `review_diff` (largest cost)                         |
-| Skip when Tier-1 blocks                     | always              | No auto improve if review already holds                           |
-| Skip lockfile / vendor / generated-only PRs | always              | No auto improve on low-signal paths                               |
-| Hunk filter                                 | always              | Lockfiles, `vendor/`, `dist/`, maps, binaries stripped before LLM |
-| Two-tier models                             | on                  | Strong for `review_diff`; cheap for text helpers                  |
-| Prompt caching                              | Claude / OpenRouter | `cache_control` on stable system prefixes when supported          |
+| Knob                                        | Default             | Effect                                                              |
+| ------------------------------------------- | ------------------- | ------------------------------------------------------------------- |
+| Repo `config_json.auto_review_diff`         | **off (opt-in)**    | Webhook auto `review_diff` (largest cost)                           |
+| Skip when Tier-1 blocks                     | always              | No auto improve if review already holds                             |
+| Skip lockfile / vendor / generated-only PRs | always              | No auto improve on low-signal paths                                 |
+| Hunk filter                                 | always              | Lockfiles, `vendor/`, `dist/`, maps, binaries stripped before LLM   |
+| Two-tier models                             | on                  | Strong for `review_diff`; cheap for text helpers                    |
+| Prompt caching                              | Claude / OpenRouter | `cache_control` on stable system prefixes when supported            |
 | Confidence gate                             | always              | Drop `low` confidence LLM issues; downgrade critical without `high` |
 | Citation / rationale                        | always              | Short description required; non-info needs a line citation          |
 | Daily BudgetGuard                           | off (`0`)           | Hard-block LLM when estimated last-day spend ≥ cap                  |
@@ -94,7 +95,7 @@ Local admin users are created in the [onboarding wizard](setup-onboarding.md).
 | Webhook dedup    | `webhook_deliveries` PK; rows pruned after **14 days**.                                                                                                                                                                |
 | Sessions         | **7 days**; purged on lookup and by worker maintenance.                                                                                                                                                                |
 | Review jobs      | Terminal `done`/`failed` purged after **30 days**.                                                                                                                                                                     |
-| DB indexes       | `findings(detector)`, `dismissed_findings(detector)`, `webhook_deliveries(received_at)`, `review_jobs(status, updated_at)` (v9); `agent_events` (v10).                                                                |
+| DB indexes       | `findings(detector)`, `dismissed_findings(detector)`, `webhook_deliveries(received_at)`, `review_jobs(status, updated_at)` (v9); `agent_events` (v10).                                                                 |
 
 ### Pattern-first (reduce LLM)
 
@@ -127,7 +128,6 @@ Per-repo overlays and policy packs are edited in the dashboard (`config_json`, f
 
 ```bash
 docker compose up
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml up
 ```
 
-See [operations-backup-restore.md](operations-backup-restore.md) for volumes and HA notes.
+Compose starts Postgres 16 and Codasaurus with `DATABASE_URL` already wired. Details: [database.md](database.md). Backups: [operations-backup-restore.md](operations-backup-restore.md).

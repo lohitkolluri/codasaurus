@@ -1,4 +1,4 @@
-//! Durable review job queue (SQLite or Postgres SKIP LOCKED).
+//! Durable review job queue (Postgres `FOR UPDATE SKIP LOCKED`).
 
 use crate::db::{db_execute, db_fetch_one, db_scalar, DbPool};
 use anyhow::Result;
@@ -27,7 +27,7 @@ pub async fn enqueue(
         pool,
         (i64,),
         "INSERT INTO review_jobs (repo, pr_number, head_sha, installation_id, action, status, attempts, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'pending', 0, datetime('now'), datetime('now'))
+         VALUES (?, ?, ?, ?, ?, 'pending', 0, NOW(), NOW())
          ON CONFLICT(repo, pr_number, head_sha) DO UPDATE SET
            status = CASE
              WHEN review_jobs.status IN ('done', 'failed') THEN 'pending'
@@ -35,7 +35,7 @@ pub async fn enqueue(
            END,
            installation_id = excluded.installation_id,
            action = excluded.action,
-           updated_at = datetime('now')
+           updated_at = NOW()
          RETURNING id",
         repo,
         pr_number,
@@ -49,51 +49,29 @@ pub async fn enqueue(
 
 /// Atomically claim the oldest pending (or stale running) job.
 pub async fn claim_next(pool: &DbPool, stale_secs: i64) -> Result<Option<ReviewJob>> {
-    let row = match pool {
-        DbPool::Postgres(p) => {
-            let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(stale_secs))
-                .format("%Y-%m-%d %H:%M:%S")
-                .to_string();
-            sqlx::query_as::<_, (i64, String, i64, String, Option<i64>, String, i64)>(
-                "UPDATE review_jobs SET
-                   status = 'running',
-                   attempts = attempts + 1,
-                   updated_at = CURRENT_TIMESTAMP::text
-                 WHERE id = (
-                   SELECT id FROM review_jobs
-                   WHERE status = 'pending'
-                      OR (status = 'running' AND updated_at < $1)
-                   ORDER BY created_at ASC
-                   LIMIT 1
-                   FOR UPDATE SKIP LOCKED
-                 )
-                 RETURNING id, repo, pr_number, head_sha, installation_id, action, attempts",
-            )
-            .bind(&cutoff)
-            .fetch_optional(p)
-            .await?
-        }
-        DbPool::Sqlite(p) => {
-            let stale = format!("-{stale_secs} seconds");
-            sqlx::query_as::<_, (i64, String, i64, String, Option<i64>, String, i64)>(
-                "UPDATE review_jobs SET
-                   status = 'running',
-                   attempts = attempts + 1,
-                   updated_at = datetime('now')
-                 WHERE id = (
-                   SELECT id FROM review_jobs
-                   WHERE status = 'pending'
-                      OR (status = 'running' AND updated_at < datetime('now', ?))
-                   ORDER BY created_at ASC
-                   LIMIT 1
-                 )
-                 RETURNING id, repo, pr_number, head_sha, installation_id, action, attempts",
-            )
-            .bind(&stale)
-            .fetch_optional(p)
-            .await?
-        }
-    };
+    // Partial indexes on pending/running keep this hot path index-friendly.
+    let row = sqlx::query_as::<_, (i64, String, i64, String, Option<i64>, String, i64)>(
+        "UPDATE review_jobs SET
+           status = 'running',
+           attempts = attempts + 1,
+           updated_at = NOW()
+         WHERE id = (
+           SELECT id FROM review_jobs
+           WHERE status = 'pending'
+              OR (status = 'running'
+                  AND updated_at < NOW() - ($1::bigint * INTERVAL '1 second'))
+           ORDER BY
+             CASE WHEN status = 'pending' THEN 0 ELSE 1 END,
+             CASE WHEN status = 'pending' THEN created_at ELSE updated_at END
+           ASC
+           LIMIT 1
+           FOR UPDATE SKIP LOCKED
+         )
+         RETURNING id, repo, pr_number, head_sha, installation_id, action, attempts",
+    )
+    .bind(stale_secs)
+    .fetch_optional(pool.as_pg())
+    .await?;
 
     Ok(row.map(
         |(id, repo, pr_number, head_sha, installation_id, action, attempts)| ReviewJob {
@@ -111,7 +89,7 @@ pub async fn claim_next(pool: &DbPool, stale_secs: i64) -> Result<Option<ReviewJ
 pub async fn mark_done(pool: &DbPool, id: i64) -> Result<()> {
     db_execute!(
         pool,
-        "UPDATE review_jobs SET status = 'done', updated_at = datetime('now'), last_error = NULL WHERE id = ?",
+        "UPDATE review_jobs SET status = 'done', updated_at = NOW(), last_error = NULL WHERE id = ?",
         id
     )?;
     crate::metrics::record_queue_completed();
@@ -122,7 +100,7 @@ pub async fn mark_failed(pool: &DbPool, id: i64, err: &str) -> Result<()> {
     let msg: String = err.chars().take(500).collect();
     db_execute!(
         pool,
-        "UPDATE review_jobs SET status = 'failed', updated_at = datetime('now'), last_error = ? WHERE id = ?",
+        "UPDATE review_jobs SET status = 'failed', updated_at = NOW(), last_error = ? WHERE id = ?",
         &msg,
         id
     )?;
@@ -140,7 +118,7 @@ pub async fn requeue_if_retryable(
     }
     db_execute!(
         pool,
-        "UPDATE review_jobs SET status = 'pending', updated_at = datetime('now') WHERE id = ? AND status = 'failed'",
+        "UPDATE review_jobs SET status = 'pending', updated_at = NOW() WHERE id = ? AND status = 'failed'",
         id
     )?;
     Ok(())

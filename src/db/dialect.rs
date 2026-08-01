@@ -1,16 +1,7 @@
-//! SQLite → Postgres SQL adaptation for runtime queries.
+//! Adapt `?` placeholders and common datetime helpers to Postgres SQL.
 
-use super::Backend;
-
-/// Adapt a SQLite-flavoured statement for the active backend.
-pub fn prepare(sql: &str, backend: Backend) -> String {
-    match backend {
-        Backend::Sqlite => sql.to_string(),
-        Backend::Postgres => to_pg(sql),
-    }
-}
-
-fn to_pg(sql: &str) -> String {
+/// Rewrite query text for Postgres (`$n` placeholders, `CURRENT_TIMESTAMP`, …).
+pub fn prepare(sql: &str) -> String {
     let mut s = sql.to_string();
 
     // Literal datetime offsets (must run before generic datetime('now')).
@@ -36,7 +27,6 @@ fn to_pg(sql: &str) -> String {
     );
     s = s.replace("datetime('now')", "CURRENT_TIMESTAMP");
 
-    // Prefer explicit ON CONFLICT in call sites; strip INSERT OR IGNORE prefix.
     s = s.replace("INSERT OR IGNORE INTO", "INSERT INTO");
 
     qmark_to_dollar(&s)
@@ -83,19 +73,19 @@ mod tests {
 
     #[test]
     fn rewrites_placeholders() {
-        let s = to_pg("SELECT * FROM t WHERE a = ? AND b = ?");
+        let s = prepare("SELECT * FROM t WHERE a = ? AND b = ?");
         assert_eq!(s, "SELECT * FROM t WHERE a = $1 AND b = $2");
     }
 
     #[test]
     fn skips_qmark_in_strings() {
-        let s = to_pg("SELECT '?' FROM t WHERE a = ?");
+        let s = prepare("SELECT '?' FROM t WHERE a = ?");
         assert_eq!(s, "SELECT '?' FROM t WHERE a = $1");
     }
 
     #[test]
     fn rewrites_datetime() {
-        let s = to_pg("UPDATE t SET ts = datetime('now') WHERE id = ?");
+        let s = prepare("UPDATE t SET ts = datetime('now') WHERE id = ?");
         assert!(s.contains("CURRENT_TIMESTAMP"));
         assert!(s.contains("$1"));
     }

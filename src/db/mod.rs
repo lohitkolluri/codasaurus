@@ -12,50 +12,29 @@ pub mod users;
 pub use models::*;
 
 use sqlx::postgres::PgPoolOptions;
-use sqlx::sqlite::SqlitePoolOptions;
-use sqlx::{PgPool, SqlitePool};
+use sqlx::PgPool;
+use std::time::Duration;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Backend {
-    Sqlite,
-    Postgres,
-}
-
-/// Dual-backend pool: SQLite (default) or Postgres (production HA).
+/// PostgreSQL connection pool (sole durable store).
 #[derive(Clone)]
-pub enum DbPool {
-    Sqlite(SqlitePool),
-    Postgres(PgPool),
-}
+pub struct DbPool(PgPool);
 
 impl DbPool {
-    pub fn backend(&self) -> Backend {
-        match self {
-            Self::Sqlite(_) => Backend::Sqlite,
-            Self::Postgres(_) => Backend::Postgres,
-        }
+    pub fn as_pg(&self) -> &PgPool {
+        &self.0
     }
 
-    pub fn is_postgres(&self) -> bool {
-        matches!(self, Self::Postgres(_))
-    }
-
+    /// Adapt `?` placeholders and datetime helpers to Postgres SQL.
     pub fn prepare_sql(&self, sql: &str) -> String {
-        dialect::prepare(sql, self.backend())
+        dialect::prepare(sql)
     }
 
     /// Lightweight connectivity probe.
     pub async fn ping(&self) -> Result<(), sqlx::Error> {
-        match self {
-            Self::Sqlite(p) => sqlx::query_scalar::<_, i64>("SELECT 1")
-                .fetch_one(p)
-                .await
-                .map(|_| ()),
-            Self::Postgres(p) => sqlx::query_scalar::<_, i64>("SELECT 1")
-                .fetch_one(p)
-                .await
-                .map(|_| ()),
-        }
+        sqlx::query_scalar::<_, i64>("SELECT 1")
+            .fetch_one(self.as_pg())
+            .await
+            .map(|_| ())
     }
 }
 
@@ -90,24 +69,47 @@ pub fn normalize_database_url(raw: &str) -> String {
     raw.to_string()
 }
 
-/// Create a pool from `DATABASE_URL` (sqlite:// or postgres://), run migrations.
+/// Create a Postgres pool from `DATABASE_URL` and run migrations.
 pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
     let normalized = normalize_database_url(database_url);
-    if normalized.starts_with("postgres://") || normalized.starts_with("postgresql://") {
-        let pool = PgPoolOptions::new()
-            .max_connections(20)
-            .connect(&normalized)
-            .await?;
-        migrations::run_migrations_postgres(&pool).await?;
-        Ok(DbPool::Postgres(pool))
-    } else {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(8)
-            .connect(&normalized)
-            .await?;
-        migrations::run_migrations_sqlite(&pool).await?;
-        Ok(DbPool::Sqlite(pool))
+    if !normalized.starts_with("postgres://") && !normalized.starts_with("postgresql://") {
+        return Err(sqlx::Error::Configuration(
+            format!(
+                "DATABASE_URL must be a postgres:// or postgresql:// URL (got {})",
+                if normalized.is_empty() {
+                    "empty".into()
+                } else {
+                    normalized
+                        .split(':')
+                        .next()
+                        .unwrap_or("unknown")
+                        .to_string()
+                        + "://"
+                }
+            )
+            .into(),
+        ));
     }
+
+    // Size for API + review workers without oversubscribing Postgres.
+    // Formula guidance: ~(cores×2)+spindle; we cap at 16 for single-node self-host.
+    let max_connections = std::env::var("CODASAURUS_DB_MAX_CONNECTIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(16u32)
+        .clamp(2, 64);
+
+    let pool = PgPoolOptions::new()
+        .max_connections(max_connections)
+        .min_connections(1)
+        .acquire_timeout(Duration::from_secs(5))
+        .idle_timeout(Duration::from_secs(600))
+        .max_lifetime(Duration::from_secs(1800))
+        .test_before_acquire(false)
+        .connect(&normalized)
+        .await?;
+    migrations::run_migrations(&pool).await?;
+    Ok(DbPool(pool))
 }
 
 mod macros;

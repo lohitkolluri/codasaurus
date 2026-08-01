@@ -35,7 +35,7 @@ async fn require_setup_open_or_admin(
 
 #[derive(Deserialize)]
 pub struct DatabaseBody {
-    pub provider: String, // "sqlite" | "postgres"
+    pub provider: String, // "postgres"
     pub url: String,
 }
 
@@ -98,7 +98,7 @@ pub struct AdminBody {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/status", get(setup_status))
-        .route("/database", post(setup_database))
+        .route("/database", get(get_database_status).post(setup_database))
         .route("/llm", get(get_llm_config).post(setup_llm))
         .route("/github/manifest-page", get(github_manifest_page))
         .route("/github/manifest-url", get(github_manifest_url))
@@ -130,12 +130,8 @@ pub struct SetupStatus {
 async fn setup_status(State(state): State<AppState>) -> Result<Json<SetupStatus>, ApiError> {
     use db::config::get_config;
 
-    let database = get_config(&state.pool, "database_provider")
-        .await
-        .ok()
-        .flatten()
-        .is_some()
-        || std::env::var("DATABASE_URL").is_ok();
+    // Serving implies Postgres is already connected; also honor wizard / env markers.
+    let database = true;
 
     // Check both DB config and env vars for GitHub. If GITHUB_APP_ID is set
     // in the environment, the bot is already configured at startup — no need
@@ -180,6 +176,63 @@ async fn setup_status(State(state): State<AppState>) -> Result<Json<SetupStatus>
     }))
 }
 
+/// GET /api/v1/setup/database — live Postgres connection summary for the wizard.
+async fn get_database_status(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    state
+        .pool
+        .ping()
+        .await
+        .map_err(|e| ApiError::internal(format!("Postgres ping failed: {e}")))?;
+
+    let (version,): (String,) = sqlx::query_as("SELECT version()")
+        .fetch_one(state.pool.as_pg())
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let short_version = version
+        .split_whitespace()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let url = std::env::var("DATABASE_URL").unwrap_or_default();
+    let (host, database) = redact_pg_url(&url);
+
+    Ok(Json(json!({
+        "connected": true,
+        "provider": "postgres",
+        "host": host,
+        "database": database,
+        "server_version": short_version,
+        "hint": "Runtime always uses DATABASE_URL from the Codasaurus process. Compose starts Postgres for you.",
+    })))
+}
+
+fn redact_pg_url(raw: &str) -> (String, String) {
+    let Ok(parsed) = url::Url::parse(raw) else {
+        return ("(unknown)".into(), "(unknown)".into());
+    };
+    let host = parsed
+        .host_str()
+        .map(|h| {
+            if let Some(port) = parsed.port() {
+                format!("{h}:{port}")
+            } else {
+                h.to_string()
+            }
+        })
+        .unwrap_or_else(|| "(socket)".into());
+    let database = parsed.path().trim_start_matches('/').to_string();
+    let database = if database.is_empty() {
+        "(default)".into()
+    } else {
+        database
+    };
+    (host, database)
+}
+
 /// POST /api/v1/setup/database
 async fn setup_database(
     State(state): State<AppState>,
@@ -190,64 +243,45 @@ async fn setup_database(
     let provider = body.provider.to_lowercase();
 
     match provider.as_str() {
-        "sqlite" => {
-            // SQLite is already connected via DATABASE_URL at startup.
-            // Validate by running a query on the existing pool instead of
-            // creating a new connection (which would use a relative path
-            // from the CWD inside the container).
+        "postgres" | "" => {
+            // Always verify the live pool first (Compose / env boots).
             state
                 .pool
                 .ping()
                 .await
-                .map_err(|e| ApiError::bad_request(format!("Test query failed: {e}")))?;
+                .map_err(|e| ApiError::bad_request(format!("Live Postgres ping failed: {e}")))?;
 
-            // Use the DATABASE_URL from env for the stored config so it
-            // matches what the server actually uses at startup, falling
-            // back to the body URL as a reasonable default.
-            let db_url = std::env::var("DATABASE_URL").unwrap_or(body.url);
+            let mut message = "Connected to PostgreSQL".to_string();
 
-            // Store config
-            db::config::set_config(&state.pool, "database_provider", "sqlite").await?;
-            db::config::set_config(&state.pool, "database_url", &db_url).await?;
-
-            Ok(Json(SetupResponse {
-                status: "ok".into(),
-                message: Some("SQLite connection verified".into()),
-                test_passed: Some(true),
-            }))
-        }
-        "postgres" => {
-            if !body.url.starts_with("postgres://") && !body.url.starts_with("postgresql://") {
-                return Err(ApiError::bad_request(
-                    "Postgres URL must start with postgres:// or postgresql://",
-                ));
+            if !body.url.is_empty() {
+                if !body.url.starts_with("postgres://") && !body.url.starts_with("postgresql://") {
+                    return Err(ApiError::bad_request(
+                        "Postgres URL must start with postgres:// or postgresql://",
+                    ));
+                }
+                let db_url = crate::db::normalize_database_url(&body.url);
+                let test_pool = sqlx::PgPool::connect(&db_url)
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("Cannot connect: {e}")))?;
+                sqlx::query_scalar::<_, i64>("SELECT 1")
+                    .fetch_one(&test_pool)
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("Test query failed: {e}")))?;
+                test_pool.close().await;
+                db::config::set_config(&state.pool, "database_url", &db_url).await?;
+                message = "Postgres URL validated and saved as preference".into();
             }
 
-            let db_url = crate::db::normalize_database_url(&body.url);
-
-            // Try connecting
-            let test_pool = sqlx::PgPool::connect(&db_url)
-                .await
-                .map_err(|e| ApiError::bad_request(format!("Cannot connect: {e}")))?;
-
-            sqlx::query_scalar::<_, i64>("SELECT 1")
-                .fetch_one(&test_pool)
-                .await
-                .map_err(|e| ApiError::bad_request(format!("Test query failed: {e}")))?;
-
-            test_pool.close().await;
-
             db::config::set_config(&state.pool, "database_provider", "postgres").await?;
-            db::config::set_config(&state.pool, "database_url", &db_url).await?;
 
             Ok(Json(SetupResponse {
                 status: "ok".into(),
-                message: Some("Postgres connection verified".into()),
+                message: Some(message),
                 test_passed: Some(true),
             }))
         }
         other => Err(ApiError::bad_request(format!(
-            "Unsupported database provider: {other}. Use 'sqlite' or 'postgres'."
+            "Unsupported database provider: {other}. Codasaurus requires PostgreSQL."
         ))),
     }
 }

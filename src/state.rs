@@ -2,19 +2,8 @@
 
 use crate::db::{db_execute, db_fetch_optional, db_scalar_optional, DbPool};
 use anyhow::Result;
-use std::path::PathBuf;
-use std::sync::{LazyLock, OnceLock};
-use tokio::runtime::{Handle, Runtime};
-
-static FALLBACK_RT: LazyLock<Runtime> =
-    LazyLock::new(|| Runtime::new().expect("failed to create fallback tokio runtime"));
-
-fn block_on<F: std::future::Future>(fut: F) -> F::Output {
-    match Handle::try_current() {
-        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(fut)),
-        Err(_) => FALLBACK_RT.block_on(fut),
-    }
-}
+use chrono::{DateTime, Utc};
+use std::sync::OnceLock;
 
 const STALE_CLAIM_SECS: i64 = 600;
 
@@ -35,25 +24,6 @@ pub struct ReviewState {
 impl ReviewState {
     pub fn from_pool(pool: &DbPool) -> Self {
         Self { pool: pool.clone() }
-    }
-
-    pub fn open() -> Result<Self> {
-        Self::open_at(Self::db_path()?)
-    }
-
-    fn open_at(path: PathBuf) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let url = format!("sqlite://{}?mode=rwc", path.display());
-        let pool = block_on(crate::db::create_pool(&url))?;
-        let store = Self { pool };
-        // create_pool already migrates app schema; ensure lease tables exist via migrations.
-        Ok(store)
-    }
-
-    fn db_path() -> Result<PathBuf> {
-        Ok(crate::storage::data_dir().join("review_state.db"))
     }
 
     fn comment_key(repo: &str, pr_number: i64, kind: &str) -> String {
@@ -130,10 +100,10 @@ impl ReviewState {
         let owner = lease_owner_id();
         if let Some(row) = db_fetch_optional!(
             &self.pool,
-            (String, String, String, String),
+            (String, String, DateTime<Utc>, String),
             "SELECT head_sha,
                     COALESCE(status, 'completed'),
-                    COALESCE(created_at, datetime('now')),
+                    COALESCE(created_at, NOW()),
                     COALESCE(lease_owner, '')
              FROM reviewed_commits WHERE repo_pr = ?",
             &key
@@ -143,34 +113,35 @@ impl ReviewState {
                 if status == "completed" {
                     return Ok(false);
                 }
-                if status == "in_progress" && lease_owner != owner && !is_claim_stale(&created_at) {
+                if status == "in_progress" && lease_owner != owner && !is_claim_stale(created_at) {
                     return Ok(false);
                 }
-                if status == "in_progress" && lease_owner == owner && !is_claim_stale(&created_at) {
+                if status == "in_progress" && lease_owner == owner && !is_claim_stale(created_at) {
                     return Ok(false);
                 }
             }
         }
 
-        let stale = format!("-{STALE_CLAIM_SECS} seconds");
-        let result = db_execute!(
-            &self.pool,
+        let result = sqlx::query(
             "INSERT INTO reviewed_commits (repo_pr, head_sha, status, lease_owner, created_at)
-             VALUES (?, ?, 'in_progress', ?, datetime('now'))
+             VALUES ($1, $2, 'in_progress', $3, NOW())
              ON CONFLICT(repo_pr) DO UPDATE SET
                head_sha = excluded.head_sha,
                status = 'in_progress',
                lease_owner = excluded.lease_owner,
-               created_at = datetime('now')
+               created_at = NOW()
              WHERE reviewed_commits.head_sha != excluded.head_sha
                 OR reviewed_commits.status != 'in_progress'
                 OR reviewed_commits.lease_owner = excluded.lease_owner
-                OR reviewed_commits.created_at < datetime('now', ?)",
-            &key,
-            sha,
-            owner,
-            &stale
-        )?;
+                OR reviewed_commits.created_at < NOW() - ($4::bigint * INTERVAL '1 second')",
+        )
+        .bind(&key)
+        .bind(sha)
+        .bind(owner)
+        .bind(STALE_CLAIM_SECS)
+        .execute(self.pool.as_pg())
+        .await?
+        .rows_affected();
 
         Ok(result > 0)
     }
@@ -186,12 +157,12 @@ impl ReviewState {
         db_execute!(
             &self.pool,
             "INSERT INTO reviewed_commits (repo_pr, head_sha, status, lease_owner, created_at)
-             VALUES (?, ?, 'completed', ?, datetime('now'))
+             VALUES (?, ?, 'completed', ?, NOW())
              ON CONFLICT(repo_pr) DO UPDATE SET
                head_sha = excluded.head_sha,
                status = 'completed',
                lease_owner = excluded.lease_owner,
-               created_at = datetime('now')",
+               created_at = NOW()",
             &key,
             sha,
             owner
@@ -202,29 +173,23 @@ impl ReviewState {
     pub async fn release_sha_claim(&self, repo: &str, pr_number: i64, sha: &str) -> Result<()> {
         let key = format!("{repo}/{pr_number}");
         let owner = lease_owner_id();
-        let stale = format!("-{STALE_CLAIM_SECS} seconds");
-        db_execute!(
-            &self.pool,
+        sqlx::query(
             "DELETE FROM reviewed_commits
-             WHERE repo_pr = ? AND head_sha = ? AND status = 'in_progress'
-               AND (lease_owner = ? OR lease_owner = '' OR created_at < datetime('now', ?))",
-            &key,
-            sha,
-            owner,
-            &stale
-        )?;
+             WHERE repo_pr = $1 AND head_sha = $2 AND status = 'in_progress'
+               AND (lease_owner = $3 OR lease_owner = ''
+                    OR created_at < NOW() - ($4::bigint * INTERVAL '1 second'))",
+        )
+        .bind(&key)
+        .bind(sha)
+        .bind(owner)
+        .bind(STALE_CLAIM_SECS)
+        .execute(self.pool.as_pg())
+        .await?;
         Ok(())
     }
 }
 
-fn is_claim_stale(created_at: &str) -> bool {
-    let Ok(naive) = chrono::NaiveDateTime::parse_from_str(
-        &created_at.chars().take(19).collect::<String>(),
-        "%Y-%m-%d %H:%M:%S",
-    ) else {
-        return true;
-    };
-    let created = naive.and_utc();
-    let age = chrono::Utc::now().signed_duration_since(created);
+fn is_claim_stale(created_at: DateTime<Utc>) -> bool {
+    let age = Utc::now().signed_duration_since(created_at);
     age.num_seconds() >= STALE_CLAIM_SECS
 }

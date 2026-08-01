@@ -33,7 +33,7 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
         pr_number: i64,
         pr_title: Option<String>,
         status: String,
-        created_at: String,
+        created_at: chrono::DateTime<chrono::Utc>,
     }
 
     let recent_activity = crate::db::db_fetch_all!(

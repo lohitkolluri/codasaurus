@@ -18,7 +18,7 @@ pub mod stale_api;
 pub mod style;
 pub mod vulnerabilities;
 
-/// Cached LearningStore — opened once and reused to avoid repeated SQLite connections.
+/// Cached LearningStore — opened once and reused against the shared Postgres pool.
 static LEARNING_STORE: LazyLock<Mutex<Option<LearningStore>>> = LazyLock::new(|| Mutex::new(None));
 
 /// A single finding from a detector
@@ -147,15 +147,13 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config) -> Findings {
 
     // Guidelines run via detect_remote on the bot path (GitHub Contents), not local git.
 
-    // Prefer shared app DB pool (bot/serve) so dismissals stick; fall back to sidecar file.
+    // Prefer shared app DB pool so dismissals stick across replicas.
     match LEARNING_STORE.lock() {
         Ok(mut guard) => {
             if guard.is_none() {
-                *guard = if let Some(pool) = crate::bot::CONFIG_POOL.get() {
-                    Some(LearningStore::from_pool(pool))
-                } else {
-                    LearningStore::open().ok()
-                };
+                if let Some(pool) = crate::bot::CONFIG_POOL.get() {
+                    *guard = Some(LearningStore::from_pool(pool));
+                }
             }
             if let Some(ref store) = *guard {
                 match store.filter_findings(&all.findings) {

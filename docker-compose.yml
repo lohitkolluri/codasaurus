@@ -1,4 +1,19 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: codasaurus
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-codasaurus}
+      POSTGRES_DB: codasaurus
+    volumes:
+      - codasaurus-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codasaurus"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   codasaurus:
     build:
       context: .
@@ -6,7 +21,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - DATABASE_URL=${DATABASE_URL:-sqlite:///data/codasaurus.db?mode=rwc}
+      - DATABASE_URL=postgres://codasaurus:${POSTGRES_PASSWORD:-codasaurus}@postgres:5432/codasaurus
       - CODASAURUS_DATA_DIR=/data
       - PORT=3000
       - GITHUB_APP_ID=${GITHUB_APP_ID:-}
@@ -17,9 +32,17 @@ services:
       - CODASAURUS_MODEL=${CODASAURUS_MODEL:-}
       - CODASAURUS_BASE_URL=${CODASAURUS_BASE_URL:-}
       - CODASAURUS_MAX_CONCURRENT_REVIEWS=${CODASAURUS_MAX_CONCURRENT_REVIEWS:-4}
+      - OIDC_ISSUER=${OIDC_ISSUER:-}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET:-}
+      - OIDC_REDIRECT_URI=${OIDC_REDIRECT_URI:-}
+      - PUBLIC_URL=${PUBLIC_URL:-http://localhost:3000}
+      - JIRA_BASE_URL=${JIRA_BASE_URL:-}
+      - JIRA_EMAIL=${JIRA_EMAIL:-}
+      - JIRA_API_TOKEN=${JIRA_API_TOKEN:-}
+      - LINEAR_API_KEY=${LINEAR_API_KEY:-}
     volumes:
       - codasaurus-data:/data
-    # Writable temp for SQLite WAL / uploads when rootfs is read-only
     tmpfs:
       - /tmp:size=64M,mode=1777
     init: true
@@ -29,6 +52,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "codasaurus", "health", "--port", "3000"]
       interval: 30s
@@ -48,3 +74,4 @@ services:
 
 volumes:
   codasaurus-data:
+  codasaurus-pg:

@@ -59,7 +59,7 @@ pub async fn promote_dismissal_to_rule(
         message_pattern: msg_pat,
         action: RuleAction::Ignore,
         reason: format!("auto-learned after {count} dismissals of `{detector}`"),
-        created_at: String::new(),
+        created_at: chrono::Utc::now(),
     };
     store.add_rule_async(&rule).await?;
     Ok(())
@@ -141,7 +141,7 @@ pub async fn mine_pr_comment_feedback(
                     message_pattern: None,
                     action: RuleAction::Ignore,
                     reason: format!("mined false-positive signal on PR #{pr_number}"),
-                    created_at: String::new(),
+                    created_at: chrono::Utc::now(),
                 };
                 store.add_rule_async(&rule).await?;
                 learned += 1;
@@ -155,7 +155,7 @@ pub async fn mine_pr_comment_feedback(
                     message_pattern: None,
                     action: RuleAction::AlwaysWarn,
                     reason: format!("mined pushback signal on PR #{pr_number}"),
-                    created_at: String::new(),
+                    created_at: chrono::Utc::now(),
                 };
                 store.add_rule_async(&rule).await?;
                 learned += 1;

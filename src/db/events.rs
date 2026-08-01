@@ -43,19 +43,19 @@ pub async fn spend_usd_last_day(pool: &DbPool) -> f64 {
         "SELECT COALESCE(SUM(cost_usd_est), 0)
          FROM agent_events
          WHERE event_type = 'llm.call'
-           AND ts >= datetime('now', '-1 day')"
+           AND ts >= NOW() - INTERVAL '1 day'"
     )
     .unwrap_or(0.0)
 }
 
 /// Drop old event rows (retention).
 pub async fn prune_older_than_days(pool: &DbPool, days: i64) {
-    let clause = format!("-{days} days");
-    if let Err(e) = db_execute!(
-        pool,
-        "DELETE FROM agent_events WHERE ts < datetime('now', ?)",
-        &clause
-    ) {
+    if let Err(e) =
+        sqlx::query("DELETE FROM agent_events WHERE ts < NOW() - ($1::bigint * INTERVAL '1 day')")
+            .bind(days)
+            .execute(pool.as_pg())
+            .await
+    {
         tracing::debug!(error = %e, "agent_events prune skipped");
     }
 }

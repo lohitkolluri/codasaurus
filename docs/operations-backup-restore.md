@@ -1,54 +1,34 @@
 # Operations — backup & restore
 
-State lives in **SQLite** (default) or **Postgres** (`DATABASE_URL=postgres://…`). Treat the database and your secret store as the recovery unit.
+State lives in **PostgreSQL** (`DATABASE_URL=postgres://…`). Treat the database and your secret store as the recovery unit. Schema and pool details: [database.md](database.md).
 
 ## What to back up
 
-| Target | Contents |
-| --- | --- |
-| `CODASAURUS_DATA_DIR` / Docker `/data` | `codasaurus.db` (+ `-wal` / `-shm` if copying a hot file naively) |
-| Postgres volume / managed instance | Full database |
-| Secrets store / vault | `GITHUB_APP_*`, webhook secret, LLM keys, `OIDC_*`, admin password |
+| Target                                 | Contents                                                           |
+| -------------------------------------- | ------------------------------------------------------------------ |
+| Postgres volume / managed instance     | Full database (reviews, jobs, sessions, learning, config)          |
+| `CODASAURUS_DATA_DIR` / Docker `/data` | Non-DB artifacts only (if any)                                     |
+| Secrets store / vault                  | `GITHUB_APP_*`, webhook secret, LLM keys, `OIDC_*`, admin password |
 
-In that DB: repos, reviews, findings, dismissals, learned rules, sessions, job queue, and dashboard config keys.
+In that DB: repos, reviews, findings, dismissals, learned rules, sessions, job queue, `agent_events`, and dashboard config keys.
 
-## SQLite — online backup
-
-```bash
-# Prefer the backup API over raw file copy while the process is running
-sqlite3 /data/codasaurus.db "PRAGMA wal_checkpoint(TRUNCATE);"
-sqlite3 /data/codasaurus.db ".backup '/backup/codasaurus-$(date +%Y%m%d).db'"
-```
-
-**Restore**
-
-1. Stop Codasaurus.
-2. Replace `codasaurus.db` with the backup file.
-3. Remove stale WAL sidecars: `rm -f codasaurus.db-wal codasaurus.db-shm`.
-4. Start Codasaurus.
-
-## Postgres
+## Postgres backup & restore
 
 ```bash
 pg_dump "$DATABASE_URL" -Fc -f "codasaurus-$(date +%Y%m%d).dump"
 
-# restore (example with Compose overlay)
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml stop codasaurus
+# restore (example with Compose)
+docker compose stop codasaurus
 pg_restore -d "$DATABASE_URL" --clean --if-exists codasaurus-YYYYMMDD.dump
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml start codasaurus
+docker compose start codasaurus
 ```
 
 ## Multi-replica / HA
 
-| Backend | Guidance |
-| --- | --- |
-| SQLite | Single writer only — one Codasaurus replica |
-| Postgres | HA path: `FOR UPDATE SKIP LOCKED` + SHA leases for review ownership |
-
-Compose overlay:
+Postgres is the HA path: `FOR UPDATE SKIP LOCKED` on the job queue plus SHA leases for review ownership. Point every replica at the same `DATABASE_URL`.
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+docker compose up -d
 ```
 
 ## Health & metrics
@@ -64,7 +44,7 @@ Docker healthcheck runs `codasaurus health --port 3000`.
 
 ## Disaster checklist
 
-1. Restore DB from last known-good backup.
+1. Restore Postgres from last known-good backup.
 2. Restore secrets (App PEM + webhook secret must match the GitHub App).
 3. Confirm `PUBLIC_URL` / reverse proxy still match webhook URLs.
 4. `curl /health` → open a test PR → confirm a walkthrough comment lands.

@@ -88,7 +88,7 @@ pub async fn update_review(
     match (
         update.status.as_deref(),
         update.summary_json.as_deref(),
-        update.completed_at.as_deref(),
+        update.completed_at,
     ) {
         (Some(status), Some(sj), Some(ca)) => {
             db_execute!(
@@ -175,59 +175,72 @@ pub async fn create_findings_batch(
     if findings.is_empty() {
         return Ok(());
     }
-    let sql = "INSERT INTO findings (review_id, fingerprint, file_path, line_start, line_end, column_start, column_end, severity, detector, rule_id, message, suggested_fix, code_snippet, context, category)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-    match pool {
-        DbPool::Sqlite(p) => {
-            let mut tx = p.begin().await?;
-            for finding in findings {
-                sqlx::query(sql)
-                    .bind(finding.review_id)
-                    .bind(&finding.fingerprint)
-                    .bind(&finding.file_path)
-                    .bind(finding.line_start)
-                    .bind(finding.line_end)
-                    .bind(finding.column_start)
-                    .bind(finding.column_end)
-                    .bind(&finding.severity)
-                    .bind(&finding.detector)
-                    .bind(&finding.rule_id)
-                    .bind(&finding.message)
-                    .bind(&finding.suggested_fix)
-                    .bind(&finding.code_snippet)
-                    .bind(&finding.context)
-                    .bind(&finding.category)
-                    .execute(&mut *tx)
-                    .await?;
-            }
-            tx.commit().await?;
-        }
-        DbPool::Postgres(p) => {
-            let sql = pool.prepare_sql(sql);
-            let mut tx = p.begin().await?;
-            for finding in findings {
-                sqlx::query(&sql)
-                    .bind(finding.review_id)
-                    .bind(&finding.fingerprint)
-                    .bind(&finding.file_path)
-                    .bind(finding.line_start)
-                    .bind(finding.line_end)
-                    .bind(finding.column_start)
-                    .bind(finding.column_end)
-                    .bind(&finding.severity)
-                    .bind(&finding.detector)
-                    .bind(&finding.rule_id)
-                    .bind(&finding.message)
-                    .bind(&finding.suggested_fix)
-                    .bind(&finding.code_snippet)
-                    .bind(&finding.context)
-                    .bind(&finding.category)
-                    .execute(&mut *tx)
-                    .await?;
-            }
-            tx.commit().await?;
-        }
+
+    // Single multi-row INSERT via UNNEST — one round-trip per review.
+    let mut review_ids = Vec::with_capacity(findings.len());
+    let mut fingerprints: Vec<Option<String>> = Vec::with_capacity(findings.len());
+    let mut file_paths = Vec::with_capacity(findings.len());
+    let mut line_starts: Vec<Option<i64>> = Vec::with_capacity(findings.len());
+    let mut line_ends: Vec<Option<i64>> = Vec::with_capacity(findings.len());
+    let mut column_starts: Vec<Option<i64>> = Vec::with_capacity(findings.len());
+    let mut column_ends: Vec<Option<i64>> = Vec::with_capacity(findings.len());
+    let mut severities = Vec::with_capacity(findings.len());
+    let mut detectors = Vec::with_capacity(findings.len());
+    let mut rule_ids: Vec<Option<String>> = Vec::with_capacity(findings.len());
+    let mut messages = Vec::with_capacity(findings.len());
+    let mut suggested_fixes: Vec<Option<String>> = Vec::with_capacity(findings.len());
+    let mut code_snippets: Vec<Option<String>> = Vec::with_capacity(findings.len());
+    let mut contexts: Vec<Option<String>> = Vec::with_capacity(findings.len());
+    let mut categories: Vec<Option<String>> = Vec::with_capacity(findings.len());
+
+    for f in findings {
+        review_ids.push(f.review_id);
+        fingerprints.push(f.fingerprint.clone());
+        file_paths.push(f.file_path.clone());
+        line_starts.push(f.line_start);
+        line_ends.push(f.line_end);
+        column_starts.push(f.column_start);
+        column_ends.push(f.column_end);
+        severities.push(f.severity.clone());
+        detectors.push(f.detector.clone());
+        rule_ids.push(f.rule_id.clone());
+        messages.push(f.message.clone());
+        suggested_fixes.push(f.suggested_fix.clone());
+        code_snippets.push(f.code_snippet.clone());
+        contexts.push(f.context.clone());
+        categories.push(f.category.clone());
     }
+
+    sqlx::query(
+        "INSERT INTO findings (
+            review_id, fingerprint, file_path, line_start, line_end,
+            column_start, column_end, severity, detector, rule_id,
+            message, suggested_fix, code_snippet, context, category
+         )
+         SELECT * FROM UNNEST(
+            $1::bigint[], $2::text[], $3::text[], $4::bigint[], $5::bigint[],
+            $6::bigint[], $7::bigint[], $8::text[], $9::text[], $10::text[],
+            $11::text[], $12::text[], $13::text[], $14::text[], $15::text[]
+         )",
+    )
+    .bind(&review_ids)
+    .bind(&fingerprints)
+    .bind(&file_paths)
+    .bind(&line_starts)
+    .bind(&line_ends)
+    .bind(&column_starts)
+    .bind(&column_ends)
+    .bind(&severities)
+    .bind(&detectors)
+    .bind(&rule_ids)
+    .bind(&messages)
+    .bind(&suggested_fixes)
+    .bind(&code_snippets)
+    .bind(&contexts)
+    .bind(&categories)
+    .execute(pool.as_pg())
+    .await?;
+
     Ok(())
 }
 
@@ -239,20 +252,13 @@ pub async fn get_stats(pool: &DbPool) -> Result<serde_json::Value, sqlx::Error> 
         true
     )?;
 
-    let total_reviews_today: i64 = if pool.is_postgres() {
-        db_scalar!(
-            pool,
-            i64,
-            "SELECT COUNT(*) FROM reviews WHERE created_at::date = CURRENT_DATE"
-        )?
-    } else {
-        db_scalar!(
-            pool,
-            i64,
-            "SELECT COUNT(*) FROM reviews
-             WHERE created_at >= date('now') AND created_at < date('now', '+1 day')"
-        )?
-    };
+    let total_reviews_today: i64 = db_scalar!(
+        pool,
+        i64,
+        "SELECT COUNT(*) FROM reviews
+         WHERE created_at >= CURRENT_DATE
+           AND created_at < CURRENT_DATE + INTERVAL '1 day'"
+    )?;
 
     let pass_rate: Option<f64> = db_scalar!(
         pool,

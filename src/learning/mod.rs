@@ -37,5 +37,5 @@ pub struct LearnedRule {
     pub message_pattern: Option<String>,
     pub action: RuleAction,
     pub reason: String,
-    pub created_at: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }

@@ -79,23 +79,11 @@ async fn list_reviews(
             .join(",");
         let sql = format!("SELECT id, full_name FROM repos WHERE id IN ({placeholders})");
         let prepared = state.pool.prepare_sql(&sql);
-        let rows: Result<Vec<(i64, String)>, _> = match &state.pool {
-            crate::db::DbPool::Sqlite(p) => {
-                let mut q = sqlx::query_as::<_, (i64, String)>(&prepared);
-                for id in &unique_ids {
-                    q = q.bind(id);
-                }
-                q.fetch_all(p).await
-            }
-            crate::db::DbPool::Postgres(p) => {
-                let mut q = sqlx::query_as::<_, (i64, String)>(&prepared);
-                for id in &unique_ids {
-                    q = q.bind(id);
-                }
-                q.fetch_all(p).await
-            }
-        };
-        if let Ok(rows) = rows {
+        let mut q = sqlx::query_as::<_, (i64, String)>(&prepared);
+        for id in &unique_ids {
+            q = q.bind(id);
+        }
+        if let Ok(rows) = q.fetch_all(state.pool.as_pg()).await {
             for (id, name) in rows {
                 name_by_id.insert(id, name);
             }

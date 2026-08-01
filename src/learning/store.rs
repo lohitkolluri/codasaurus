@@ -1,6 +1,5 @@
 use crate::db::{db_execute, db_fetch_all, db_scalar, DbPool};
 use anyhow::Result;
-use std::path::PathBuf;
 use std::sync::LazyLock;
 use tokio::runtime::{Handle, Runtime};
 
@@ -16,7 +15,7 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
     }
 }
 
-/// Persistent store for feedback learning
+/// Persistent store for feedback learning (shared Postgres pool).
 pub struct LearningStore {
     pool: DbPool,
 }
@@ -24,23 +23,6 @@ pub struct LearningStore {
 impl LearningStore {
     pub fn from_pool(pool: &DbPool) -> Self {
         Self { pool: pool.clone() }
-    }
-
-    pub fn open() -> Result<Self> {
-        Self::open_at(Self::db_path()?)
-    }
-
-    fn open_at(path: PathBuf) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let url = format!("sqlite://{}?mode=rwc", path.display());
-        let pool = block_on(crate::db::create_pool(&url))?;
-        Ok(Self { pool })
-    }
-
-    fn db_path() -> Result<PathBuf> {
-        Ok(crate::storage::data_dir().join("learnings.db"))
     }
 
     pub fn dismiss(&self, finding: &Finding) -> Result<()> {
@@ -128,7 +110,7 @@ impl LearningStore {
             message_pattern: Option<String>,
             action: String,
             reason: String,
-            created_at: String,
+            created_at: chrono::DateTime<chrono::Utc>,
         }
         let rows: Vec<Row> = db_fetch_all!(
             &self.pool,
@@ -203,22 +185,11 @@ impl LearningStore {
                 "SELECT fingerprint FROM dismissed_findings WHERE fingerprint IN ({placeholders})"
             );
             let prepared = self.pool.prepare_sql(&sql);
-            let rows: Vec<(String,)> = match &self.pool {
-                DbPool::Sqlite(p) => {
-                    let mut q = sqlx::query_as::<_, (String,)>(&prepared);
-                    for fp in chunk {
-                        q = q.bind(fp);
-                    }
-                    q.fetch_all(p).await?
-                }
-                DbPool::Postgres(p) => {
-                    let mut q = sqlx::query_as::<_, (String,)>(&prepared);
-                    for fp in chunk {
-                        q = q.bind(fp);
-                    }
-                    q.fetch_all(p).await?
-                }
-            };
+            let mut q = sqlx::query_as::<_, (String,)>(&prepared);
+            for fp in chunk {
+                q = q.bind(fp);
+            }
+            let rows: Vec<(String,)> = q.fetch_all(self.pool.as_pg()).await?;
             for (fp,) in rows {
                 dismissed_set.insert(fp);
             }
@@ -300,46 +271,5 @@ impl LearningStore {
                 Some(out)
             })
             .collect())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::detectors::Finding;
-
-    #[test]
-    fn test_learning_store_open() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = LearningStore::open_at(dir.path().join("learnings.db"));
-        assert!(store.is_ok(), "learning store should open");
-    }
-
-    #[test]
-    fn test_dismiss_and_filter() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = LearningStore::open_at(dir.path().join("learnings.db")).unwrap();
-
-        let finding = Finding {
-            detector: "test-detector".to_string(),
-            severity: "warning",
-            file: "test.rs".to_string(),
-            line: 10,
-            column: 0,
-            message: "test finding".to_string(),
-            suggestion: None,
-            evidence: None,
-            codemod: None,
-        };
-
-        let result = store
-            .filter_findings(std::slice::from_ref(&finding))
-            .unwrap();
-        assert_eq!(result.len(), 1);
-
-        store.dismiss(&finding).unwrap();
-
-        let result = store.filter_findings(&[finding]).unwrap();
-        assert_eq!(result.len(), 0);
     }
 }

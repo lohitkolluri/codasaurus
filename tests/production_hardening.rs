@@ -1,4 +1,7 @@
 //! Integration tests for auth, webhook security, config wiring, and retry helpers.
+//!
+//! Requires PostgreSQL. Set `DATABASE_URL` or `CODASAURUS_TEST_DATABASE_URL`
+//! (defaults to `postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus`).
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -8,12 +11,16 @@ use codasaurus::retry::{github_request, RetryConfig};
 use tower::ServiceExt;
 
 async fn test_pool() -> db::DbPool {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("test.db");
-    // Keep dir alive for the process lifetime of this test
-    std::mem::forget(dir);
-    let url = format!("sqlite://{}?mode=rwc", path.display());
-    db::create_pool(&url).await.expect("create test pool")
+    let url = std::env::var("DATABASE_URL")
+        .or_else(|_| std::env::var("CODASAURUS_TEST_DATABASE_URL"))
+        .unwrap_or_else(|_| "postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus".into());
+    db::create_pool(&url)
+        .await
+        .expect("create postgres test pool")
+}
+
+fn unique_email(prefix: &str) -> String {
+    format!("{prefix}-{}@example.com", uuid::Uuid::new_v4().simple())
 }
 
 fn app(pool: db::DbPool) -> axum::Router {
@@ -95,7 +102,8 @@ async fn setup_status_is_public() {
 #[tokio::test]
 async fn setup_admin_freeze_after_first_admin() {
     let pool = test_pool().await;
-    db::users::create_user(&pool, "admin@example.com", "password123", "admin")
+    let email = unique_email("admin");
+    db::users::create_user(&pool, &email, "password123", "admin")
         .await
         .unwrap();
 
@@ -121,16 +129,13 @@ async fn setup_admin_freeze_after_first_admin() {
 #[tokio::test]
 async fn session_tokens_are_random() {
     let pool = test_pool().await;
-    db::users::create_user(&pool, "a@example.com", "password123", "admin")
+    let email = unique_email("sess");
+    db::users::create_user(&pool, &email, "password123", "admin")
         .await
         .unwrap();
 
-    let t1 = db::sessions::create_session(&pool, "a@example.com")
-        .await
-        .unwrap();
-    let t2 = db::sessions::create_session(&pool, "a@example.com")
-        .await
-        .unwrap();
+    let t1 = db::sessions::create_session(&pool, &email).await.unwrap();
+    let t2 = db::sessions::create_session(&pool, &email).await.unwrap();
 
     assert_ne!(t1, t2);
     assert_eq!(t1.len(), 64);
@@ -140,12 +145,11 @@ async fn session_tokens_are_random() {
 #[tokio::test]
 async fn authenticated_settings_ok() {
     let pool = test_pool().await;
-    db::users::create_user(&pool, "a@example.com", "password123", "admin")
+    let email = unique_email("settings");
+    db::users::create_user(&pool, &email, "password123", "admin")
         .await
         .unwrap();
-    let token = db::sessions::create_session(&pool, "a@example.com")
-        .await
-        .unwrap();
+    let token = db::sessions::create_session(&pool, &email).await.unwrap();
 
     let app = app(pool);
     let resp = app
@@ -193,46 +197,25 @@ async fn ssrf_blocks_metadata() {
 #[tokio::test]
 async fn webhook_delivery_dedup_persists() {
     let pool = test_pool().await;
-    let id = "delivery-abc-123";
+    let id = format!("delivery-{}", uuid::Uuid::new_v4());
 
-    // First insert via public API path (ON CONFLICT DO NOTHING).
-    let sql = "INSERT INTO webhook_deliveries (delivery_id) VALUES (?) ON CONFLICT(delivery_id) DO NOTHING";
-    let first = match &pool {
-        codasaurus::db::DbPool::Sqlite(p) => sqlx::query(sql)
-            .bind(id)
-            .execute(p)
-            .await
-            .unwrap()
-            .rows_affected(),
-        codasaurus::db::DbPool::Postgres(p) => {
-            let s = pool.prepare_sql(sql);
-            sqlx::query(&s)
-                .bind(id)
-                .execute(p)
-                .await
-                .unwrap()
-                .rows_affected()
-        }
-    };
+    let sql =
+        "INSERT INTO webhook_deliveries (delivery_id) VALUES (?) ON CONFLICT(delivery_id) DO NOTHING";
+    let prepared = pool.prepare_sql(sql);
+    let first = sqlx::query(&prepared)
+        .bind(&id)
+        .execute(pool.as_pg())
+        .await
+        .unwrap()
+        .rows_affected();
     assert_eq!(first, 1);
 
-    let second = match &pool {
-        codasaurus::db::DbPool::Sqlite(p) => sqlx::query(sql)
-            .bind(id)
-            .execute(p)
-            .await
-            .unwrap()
-            .rows_affected(),
-        codasaurus::db::DbPool::Postgres(p) => {
-            let s = pool.prepare_sql(sql);
-            sqlx::query(&s)
-                .bind(id)
-                .execute(p)
-                .await
-                .unwrap()
-                .rows_affected()
-        }
-    };
+    let second = sqlx::query(&prepared)
+        .bind(&id)
+        .execute(pool.as_pg())
+        .await
+        .unwrap()
+        .rows_affected();
     assert_eq!(second, 0);
 }
 
@@ -240,21 +223,11 @@ async fn webhook_delivery_dedup_persists() {
 async fn review_state_sha_claim_is_exclusive() {
     let pool = test_pool().await;
     let state = codasaurus::state::ReviewState::from_pool(&pool);
+    let repo = format!("owner/repo-{}", uuid::Uuid::new_v4().simple());
 
-    assert!(state
-        .try_claim_sha("owner/repo", 1, "abc123")
-        .await
-        .unwrap());
-    // Same SHA again should fail claim
-    assert!(!state
-        .try_claim_sha("owner/repo", 1, "abc123")
-        .await
-        .unwrap());
-    // New SHA should succeed
-    assert!(state
-        .try_claim_sha("owner/repo", 1, "def456")
-        .await
-        .unwrap());
+    assert!(state.try_claim_sha(&repo, 1, "abc123").await.unwrap());
+    assert!(!state.try_claim_sha(&repo, 1, "abc123").await.unwrap());
+    assert!(state.try_claim_sha(&repo, 1, "def456").await.unwrap());
 }
 
 #[tokio::test]

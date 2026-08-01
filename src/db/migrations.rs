@@ -1,423 +1,17 @@
-use sqlx::{PgPool, SqlitePool};
+//! PostgreSQL schema migrations (sole backend).
 
-/// Active SQLite schema.
-const SQLITE_SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS app_config (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS repos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    github_id BIGINT UNIQUE,
-    full_name TEXT NOT NULL,
-    owner TEXT NOT NULL,
-    name TEXT NOT NULL,
-    default_branch TEXT,
-    installation_id BIGINT NOT NULL,
-    private INTEGER NOT NULL DEFAULT 0,
-    active INTEGER NOT NULL DEFAULT 0,
-    config_json TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_repos_owner ON repos(owner);
-CREATE INDEX IF NOT EXISTS idx_repos_active ON repos(active);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_repos_full_name ON repos(full_name);
-
-CREATE TABLE IF NOT EXISTS reviews (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    repo_id INTEGER NOT NULL REFERENCES repos(id),
-    pr_number BIGINT NOT NULL,
-    pr_title TEXT,
-    pr_author TEXT,
-    pr_base_branch TEXT,
-    pr_head_branch TEXT,
-    pr_head_sha TEXT,
-    status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending', 'running', 'passed', 'failed', 'error')),
-    summary_json TEXT,
-    started_at TEXT,
-    completed_at TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_reviews_repo ON reviews(repo_id);
-CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status);
-CREATE INDEX IF NOT EXISTS idx_reviews_created ON reviews(created_at DESC);
-
-CREATE TABLE IF NOT EXISTS findings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    review_id INTEGER NOT NULL REFERENCES reviews(id),
-    fingerprint TEXT UNIQUE,
-    file_path TEXT NOT NULL,
-    line_start INTEGER,
-    line_end INTEGER,
-    column_start INTEGER,
-    column_end INTEGER,
-    severity TEXT NOT NULL CHECK (severity IN ('blocking', 'warning', 'info')),
-    detector TEXT NOT NULL,
-    rule_id TEXT,
-    message TEXT NOT NULL,
-    suggested_fix TEXT,
-    code_snippet TEXT,
-    context TEXT,
-    category TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_findings_review ON findings(review_id);
-CREATE INDEX IF NOT EXISTS idx_findings_file ON findings(file_path);
-CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
-CREATE INDEX IF NOT EXISTS idx_findings_fingerprint ON findings(fingerprint);
-CREATE INDEX IF NOT EXISTS idx_findings_detector ON findings(detector);
-
-CREATE TABLE IF NOT EXISTS dismissals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fingerprint TEXT NOT NULL REFERENCES findings(fingerprint),
-    dismissed_by TEXT,
-    reason TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(fingerprint)
-);
-
-CREATE TABLE IF NOT EXISTS audit_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_type TEXT NOT NULL,
-    actor TEXT,
-    target_type TEXT,
-    target_id BIGINT,
-    metadata_json TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_log(event_type);
-CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
-
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin', 'viewer')),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS sessions (
-    token TEXT PRIMARY KEY,
-    email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    expires_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
-
-CREATE TABLE IF NOT EXISTS webhook_deliveries (
-    delivery_id TEXT PRIMARY KEY,
-    received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS review_comments (
-    repo_pr TEXT PRIMARY KEY,
-    comment_id INTEGER NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS reviewed_commits (
-    repo_pr TEXT PRIMARY KEY,
-    head_sha TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'completed'
-        CHECK (status IN ('in_progress', 'completed')),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS dismissed_findings (
-    fingerprint TEXT PRIMARY KEY,
-    detector TEXT NOT NULL,
-    file TEXT NOT NULL,
-    line INTEGER NOT NULL,
-    message TEXT NOT NULL,
-    dismissed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS learned_rules (
-    id TEXT PRIMARY KEY,
-    detector TEXT NOT NULL,
-    file_pattern TEXT,
-    message_pattern TEXT,
-    action TEXT NOT NULL DEFAULT 'ignore',
-    reason TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_dismissed_fingerprint ON dismissed_findings(fingerprint);
-CREATE INDEX IF NOT EXISTS idx_dismissed_detector ON dismissed_findings(detector);
-CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector);
-";
-
-const SQLITE_SCHEMA_V3: &str = "
-CREATE TABLE IF NOT EXISTS webhook_deliveries (
-    delivery_id TEXT PRIMARY KEY,
-    received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS review_comments (
-    repo_pr TEXT PRIMARY KEY,
-    comment_id INTEGER NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS reviewed_commits (
-    repo_pr TEXT PRIMARY KEY,
-    head_sha TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'completed'
-        CHECK (status IN ('in_progress', 'completed')),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS dismissed_findings (
-    fingerprint TEXT PRIMARY KEY,
-    detector TEXT NOT NULL,
-    file TEXT NOT NULL,
-    line INTEGER NOT NULL,
-    message TEXT NOT NULL,
-    dismissed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS learned_rules (
-    id TEXT PRIMARY KEY,
-    detector TEXT NOT NULL,
-    file_pattern TEXT,
-    message_pattern TEXT,
-    action TEXT NOT NULL DEFAULT 'ignore',
-    reason TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_dismissed_fingerprint ON dismissed_findings(fingerprint);
-CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector);
-";
-
-pub async fn run_migrations_sqlite(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS schema_version (
-            version BIGINT PRIMARY KEY,
-            applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )",
-    )
-    .execute(pool)
-    .await?;
-
-    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
-        .fetch_one(pool)
-        .await?;
-
-    let current = current.unwrap_or(0);
-
-    if current < 2 {
-        for statement in split_sql(SQLITE_SCHEMA) {
-            sqlx::query(&statement).execute(pool).await?;
-        }
-        for pragma in [
-            "PRAGMA journal_mode = WAL",
-            "PRAGMA synchronous = NORMAL",
-            "PRAGMA cache_size = -8000",
-            "PRAGMA busy_timeout = 5000",
-            "PRAGMA foreign_keys = ON",
-        ] {
-            let _ = sqlx::query(pragma).execute(pool).await;
-        }
-        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (2)")
-            .execute(pool)
-            .await?;
-    }
-
-    if current < 3 {
-        for statement in split_sql(SQLITE_SCHEMA_V3) {
-            sqlx::query(&statement).execute(pool).await?;
-        }
-        // Migrate reviewed_commits: add status column if upgrading from old side DB isn't needed;
-        // main-DB table is created fresh above.
-        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (3)")
-            .execute(pool)
-            .await?;
-    }
-
-    if current < 4 {
-        // Deduplicate before unique index (keep lowest id per full_name).
-        sqlx::query(
-            "DELETE FROM repos WHERE id NOT IN (SELECT MIN(id) FROM repos GROUP BY full_name)",
-        )
-        .execute(pool)
-        .await?;
-        sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS idx_repos_full_name ON repos(full_name)")
-            .execute(pool)
-            .await?;
-        // Bound webhook dedup table growth
-        let _ = sqlx::query(
-            "DELETE FROM webhook_deliveries WHERE received_at < datetime('now', '-14 days')",
-        )
-        .execute(pool)
-        .await;
-        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (4)")
-            .execute(pool)
-            .await?;
-    }
-
-    if current < 5 {
-        for statement in [
-            "CREATE INDEX IF NOT EXISTS idx_reviews_repo_created ON reviews(repo_id, created_at DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_reviews_repo_status ON reviews(repo_id, status)",
-        ] {
-            sqlx::query(statement).execute(pool).await?;
-        }
-        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (5)")
-            .execute(pool)
-            .await?;
-    }
-
-    if current < 6 {
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS review_jobs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                repo TEXT NOT NULL,
-                pr_number INTEGER NOT NULL,
-                head_sha TEXT NOT NULL,
-                installation_id INTEGER,
-                action TEXT NOT NULL DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending', 'running', 'done', 'failed')),
-                attempts INTEGER NOT NULL DEFAULT 0,
-                last_error TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )",
-        )
-        .execute(pool)
-        .await?;
-        sqlx::query(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_review_jobs_repo_pr_sha
-             ON review_jobs(repo, pr_number, head_sha)",
-        )
-        .execute(pool)
-        .await?;
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_review_jobs_status_created
-             ON review_jobs(status, created_at)",
-        )
-        .execute(pool)
-        .await?;
-        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (6)")
-            .execute(pool)
-            .await?;
-    }
-
-    if current < 7 {
-        // Deduplicate reviews before unique (repo, pr, sha) index.
-        sqlx::query(
-            "DELETE FROM findings WHERE review_id NOT IN (
-               SELECT MIN(id) FROM reviews GROUP BY repo_id, pr_number, COALESCE(pr_head_sha, '')
-             )",
-        )
-        .execute(pool)
-        .await?;
-        sqlx::query(
-            "DELETE FROM reviews WHERE id NOT IN (
-               SELECT MIN(id) FROM reviews GROUP BY repo_id, pr_number, COALESCE(pr_head_sha, '')
-             )",
-        )
-        .execute(pool)
-        .await?;
-        // Normalize NULL sha → '' so unique index is effective.
-        sqlx::query("UPDATE reviews SET pr_head_sha = '' WHERE pr_head_sha IS NULL")
-            .execute(pool)
-            .await?;
-        sqlx::query(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_repo_pr_sha
-             ON reviews(repo_id, pr_number, pr_head_sha)",
-        )
-        .execute(pool)
-        .await?;
-        // Multi-replica lease column on reviewed_commits (ignore if already present).
-        let _ = sqlx::query(
-            "ALTER TABLE reviewed_commits ADD COLUMN lease_owner TEXT NOT NULL DEFAULT ''",
-        )
-        .execute(pool)
-        .await;
-        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (7)")
-            .execute(pool)
-            .await?;
-    }
-
-    if current < 8 {
-        let _ =
-            sqlx::query("ALTER TABLE users ADD COLUMN auth_provider TEXT NOT NULL DEFAULT 'local'")
-                .execute(pool)
-                .await;
-        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (8)")
-            .execute(pool)
-            .await?;
-    }
-
-    if current < 9 {
-        for stmt in [
-            "CREATE INDEX IF NOT EXISTS idx_findings_detector ON findings(detector)",
-            "CREATE INDEX IF NOT EXISTS idx_dismissed_detector ON dismissed_findings(detector)",
-            "CREATE INDEX IF NOT EXISTS idx_webhook_received_at ON webhook_deliveries(received_at)",
-            "CREATE INDEX IF NOT EXISTS idx_review_jobs_status_updated ON review_jobs(status, updated_at)",
-        ] {
-            sqlx::query(stmt).execute(pool).await?;
-        }
-        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (9)")
-            .execute(pool)
-            .await?;
-    }
-
-    if current < 10 {
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS agent_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                agent TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                model TEXT,
-                tokens_in INTEGER,
-                tokens_out INTEGER,
-                cost_usd_est REAL,
-                latency_ms INTEGER,
-                outcome TEXT,
-                payload TEXT
-            )",
-        )
-        .execute(pool)
-        .await?;
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_agent_events_ts ON agent_events(ts)")
-            .execute(pool)
-            .await?;
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_agent_events_type_ts ON agent_events(event_type, ts)",
-        )
-        .execute(pool)
-        .await?;
-        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (10)")
-            .execute(pool)
-            .await?;
-    }
-
-    Ok(())
-}
+use sqlx::PgPool;
 
 const PG_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_version (
     version BIGINT PRIMARY KEY,
-    applied_at TEXT NOT NULL DEFAULT (NOW()::text)
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS app_config (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (NOW()::text)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS repos (
@@ -431,12 +25,12 @@ CREATE TABLE IF NOT EXISTS repos (
     private BOOLEAN NOT NULL DEFAULT FALSE,
     active BOOLEAN NOT NULL DEFAULT FALSE,
     config_json TEXT,
-    created_at TEXT NOT NULL DEFAULT (NOW()::text),
-    updated_at TEXT NOT NULL DEFAULT (NOW()::text)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_repos_owner ON repos(owner);
-CREATE INDEX IF NOT EXISTS idx_repos_active ON repos(active);
+CREATE INDEX IF NOT EXISTS idx_repos_active ON repos(active) WHERE active = TRUE;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_repos_full_name ON repos(full_name);
 
 CREATE TABLE IF NOT EXISTS reviews (
@@ -451,12 +45,11 @@ CREATE TABLE IF NOT EXISTS reviews (
     status TEXT NOT NULL DEFAULT 'pending'
         CHECK (status IN ('pending', 'running', 'passed', 'failed', 'error')),
     summary_json TEXT,
-    started_at TEXT,
-    completed_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (NOW()::text)
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_reviews_repo ON reviews(repo_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status);
 CREATE INDEX IF NOT EXISTS idx_reviews_created ON reviews(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reviews_repo_created ON reviews(repo_id, created_at DESC);
@@ -466,7 +59,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_repo_pr_sha
 
 CREATE TABLE IF NOT EXISTS findings (
     id BIGSERIAL PRIMARY KEY,
-    review_id BIGINT NOT NULL REFERENCES reviews(id),
+    review_id BIGINT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
     fingerprint TEXT UNIQUE,
     file_path TEXT NOT NULL,
     line_start INTEGER,
@@ -481,13 +74,11 @@ CREATE TABLE IF NOT EXISTS findings (
     code_snippet TEXT,
     context TEXT,
     category TEXT,
-    created_at TEXT NOT NULL DEFAULT (NOW()::text)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_findings_review ON findings(review_id);
-CREATE INDEX IF NOT EXISTS idx_findings_file ON findings(file_path);
 CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
-CREATE INDEX IF NOT EXISTS idx_findings_fingerprint ON findings(fingerprint);
 CREATE INDEX IF NOT EXISTS idx_findings_detector ON findings(detector);
 
 CREATE TABLE IF NOT EXISTS dismissals (
@@ -495,7 +86,7 @@ CREATE TABLE IF NOT EXISTS dismissals (
     fingerprint TEXT NOT NULL,
     dismissed_by TEXT,
     reason TEXT,
-    created_at TEXT NOT NULL DEFAULT (NOW()::text),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(fingerprint)
 );
 
@@ -506,7 +97,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     target_type TEXT,
     target_id BIGINT,
     metadata_json TEXT,
-    created_at TEXT NOT NULL DEFAULT (NOW()::text)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_event ON audit_log(event_type);
@@ -518,21 +109,21 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL DEFAULT '',
     role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin', 'viewer')),
     auth_provider TEXT NOT NULL DEFAULT 'local',
-    created_at TEXT NOT NULL DEFAULT (NOW()::text)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
     email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
-    created_at TEXT NOT NULL DEFAULT (NOW()::text),
-    expires_at TEXT NOT NULL
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 
 CREATE TABLE IF NOT EXISTS webhook_deliveries (
     delivery_id TEXT PRIMARY KEY,
-    received_at TEXT NOT NULL DEFAULT (NOW()::text)
+    received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_webhook_received_at ON webhook_deliveries(received_at);
@@ -540,7 +131,7 @@ CREATE INDEX IF NOT EXISTS idx_webhook_received_at ON webhook_deliveries(receive
 CREATE TABLE IF NOT EXISTS review_comments (
     repo_pr TEXT PRIMARY KEY,
     comment_id BIGINT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (NOW()::text)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS reviewed_commits (
@@ -549,8 +140,11 @@ CREATE TABLE IF NOT EXISTS reviewed_commits (
     status TEXT NOT NULL DEFAULT 'completed'
         CHECK (status IN ('in_progress', 'completed')),
     lease_owner TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT (NOW()::text)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_reviewed_commits_in_progress
+    ON reviewed_commits (created_at ASC) WHERE status = 'in_progress';
 
 CREATE TABLE IF NOT EXISTS dismissed_findings (
     fingerprint TEXT PRIMARY KEY,
@@ -558,7 +152,7 @@ CREATE TABLE IF NOT EXISTS dismissed_findings (
     file TEXT NOT NULL,
     line INTEGER NOT NULL,
     message TEXT NOT NULL,
-    dismissed_at TEXT NOT NULL DEFAULT (NOW()::text)
+    dismissed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS learned_rules (
@@ -568,10 +162,9 @@ CREATE TABLE IF NOT EXISTS learned_rules (
     message_pattern TEXT,
     action TEXT NOT NULL DEFAULT 'ignore',
     reason TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT (NOW()::text)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_dismissed_fingerprint ON dismissed_findings(fingerprint);
 CREATE INDEX IF NOT EXISTS idx_dismissed_detector ON dismissed_findings(detector);
 CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector);
 
@@ -586,20 +179,22 @@ CREATE TABLE IF NOT EXISTS review_jobs (
         CHECK (status IN ('pending', 'running', 'done', 'failed')),
     attempts INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
-    created_at TEXT NOT NULL DEFAULT (NOW()::text),
-    updated_at TEXT NOT NULL DEFAULT (NOW()::text)
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_review_jobs_repo_pr_sha
     ON review_jobs(repo, pr_number, head_sha);
-CREATE INDEX IF NOT EXISTS idx_review_jobs_status_created
-    ON review_jobs(status, created_at);
-CREATE INDEX IF NOT EXISTS idx_review_jobs_status_updated
-    ON review_jobs(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_review_jobs_pending_created
+    ON review_jobs (created_at ASC) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_review_jobs_running_updated
+    ON review_jobs (updated_at ASC) WHERE status = 'running';
+CREATE INDEX IF NOT EXISTS idx_review_jobs_finished_updated
+    ON review_jobs (updated_at ASC) WHERE status IN ('done', 'failed');
 
 CREATE TABLE IF NOT EXISTS agent_events (
     id BIGSERIAL PRIMARY KEY,
-    ts TEXT NOT NULL DEFAULT (NOW()::text),
+    ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     agent TEXT NOT NULL,
     event_type TEXT NOT NULL,
     model TEXT,
@@ -615,37 +210,13 @@ CREATE INDEX IF NOT EXISTS idx_agent_events_ts ON agent_events(ts);
 CREATE INDEX IF NOT EXISTS idx_agent_events_type_ts ON agent_events(event_type, ts);
 "#;
 
-pub async fn run_migrations_postgres(pool: &PgPool) -> Result<(), sqlx::Error> {
+pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     for statement in split_sql(PG_SCHEMA) {
         sqlx::query(&statement).execute(pool).await?;
     }
     sqlx::query("INSERT INTO schema_version (version) VALUES (8) ON CONFLICT (version) DO NOTHING")
         .execute(pool)
         .await?;
-
-    for stmt in [
-        "CREATE INDEX IF NOT EXISTS idx_findings_detector ON findings(detector)",
-        "CREATE INDEX IF NOT EXISTS idx_dismissed_detector ON dismissed_findings(detector)",
-        "CREATE INDEX IF NOT EXISTS idx_webhook_received_at ON webhook_deliveries(received_at)",
-        "CREATE INDEX IF NOT EXISTS idx_review_jobs_status_updated ON review_jobs(status, updated_at)",
-        "CREATE TABLE IF NOT EXISTS agent_events (
-            id BIGSERIAL PRIMARY KEY,
-            ts TEXT NOT NULL DEFAULT (NOW()::text),
-            agent TEXT NOT NULL,
-            event_type TEXT NOT NULL,
-            model TEXT,
-            tokens_in INTEGER,
-            tokens_out INTEGER,
-            cost_usd_est DOUBLE PRECISION,
-            latency_ms INTEGER,
-            outcome TEXT,
-            payload TEXT
-        )",
-        "CREATE INDEX IF NOT EXISTS idx_agent_events_ts ON agent_events(ts)",
-        "CREATE INDEX IF NOT EXISTS idx_agent_events_type_ts ON agent_events(event_type, ts)",
-    ] {
-        sqlx::query(stmt).execute(pool).await?;
-    }
     sqlx::query("INSERT INTO schema_version (version) VALUES (9) ON CONFLICT (version) DO NOTHING")
         .execute(pool)
         .await?;
@@ -654,7 +225,143 @@ pub async fn run_migrations_postgres(pool: &PgPool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+
+    migrate_v11_timestamptz_and_indexes(pool).await?;
     Ok(())
+}
+
+/// v11: TEXT → TIMESTAMPTZ on existing installs + partial queue/lease indexes.
+async fn migrate_v11_timestamptz_and_indexes(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
+    if current.unwrap_or(0) >= 11 {
+        return Ok(());
+    }
+
+    // Convert timestamp columns that may still be TEXT from older installs.
+    for stmt in [
+        alter_ts("schema_version", "applied_at", false),
+        alter_ts("app_config", "updated_at", false),
+        alter_ts("repos", "created_at", false),
+        alter_ts("repos", "updated_at", false),
+        alter_ts("reviews", "started_at", true),
+        alter_ts("reviews", "completed_at", true),
+        alter_ts("reviews", "created_at", false),
+        alter_ts("findings", "created_at", false),
+        alter_ts("dismissals", "created_at", false),
+        alter_ts("audit_log", "created_at", false),
+        alter_ts("users", "created_at", false),
+        alter_ts("sessions", "created_at", false),
+        alter_ts("sessions", "expires_at", false),
+        alter_ts("webhook_deliveries", "received_at", false),
+        alter_ts("review_comments", "created_at", false),
+        alter_ts("reviewed_commits", "created_at", false),
+        alter_ts("dismissed_findings", "dismissed_at", false),
+        alter_ts("learned_rules", "created_at", false),
+        alter_ts("review_jobs", "created_at", false),
+        alter_ts("review_jobs", "updated_at", false),
+        alter_ts("agent_events", "ts", false),
+    ] {
+        let _ = sqlx::query(stmt).execute(pool).await;
+    }
+
+    for stmt in [
+        "DROP INDEX IF EXISTS idx_reviews_repo",
+        "DROP INDEX IF EXISTS idx_findings_fingerprint",
+        "DROP INDEX IF EXISTS idx_findings_file",
+        "DROP INDEX IF EXISTS idx_dismissed_fingerprint",
+        "DROP INDEX IF EXISTS idx_review_jobs_status_created",
+        "DROP INDEX IF EXISTS idx_review_jobs_status_updated",
+        "DROP INDEX IF EXISTS idx_repos_active",
+        "CREATE INDEX IF NOT EXISTS idx_repos_active ON repos(active) WHERE active = TRUE",
+        "CREATE INDEX IF NOT EXISTS idx_review_jobs_pending_created ON review_jobs (created_at ASC) WHERE status = 'pending'",
+        "CREATE INDEX IF NOT EXISTS idx_review_jobs_running_updated ON review_jobs (updated_at ASC) WHERE status = 'running'",
+        "CREATE INDEX IF NOT EXISTS idx_review_jobs_finished_updated ON review_jobs (updated_at ASC) WHERE status IN ('done', 'failed')",
+        "CREATE INDEX IF NOT EXISTS idx_reviewed_commits_in_progress ON reviewed_commits (created_at ASC) WHERE status = 'in_progress'",
+        // findings.review_id cascade for review cleanup (ignore if already set)
+        "ALTER TABLE findings DROP CONSTRAINT IF EXISTS findings_review_id_fkey",
+        "ALTER TABLE findings ADD CONSTRAINT findings_review_id_fkey FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE",
+    ] {
+        let _ = sqlx::query(stmt).execute(pool).await;
+    }
+
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (11) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+fn alter_ts(table: &str, column: &str, nullable: bool) -> &'static str {
+    // Static strings only — callers pass fixed identifiers.
+    match (table, column, nullable) {
+        ("schema_version", "applied_at", false) => {
+            "ALTER TABLE schema_version ALTER COLUMN applied_at DROP DEFAULT, ALTER COLUMN applied_at TYPE TIMESTAMPTZ USING applied_at::timestamptz, ALTER COLUMN applied_at SET DEFAULT NOW()"
+        }
+        ("app_config", "updated_at", false) => {
+            "ALTER TABLE app_config ALTER COLUMN updated_at DROP DEFAULT, ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at::timestamptz, ALTER COLUMN updated_at SET DEFAULT NOW()"
+        }
+        ("repos", "created_at", false) => {
+            "ALTER TABLE repos ALTER COLUMN created_at DROP DEFAULT, ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at::timestamptz, ALTER COLUMN created_at SET DEFAULT NOW()"
+        }
+        ("repos", "updated_at", false) => {
+            "ALTER TABLE repos ALTER COLUMN updated_at DROP DEFAULT, ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at::timestamptz, ALTER COLUMN updated_at SET DEFAULT NOW()"
+        }
+        ("reviews", "started_at", true) => {
+            "ALTER TABLE reviews ALTER COLUMN started_at TYPE TIMESTAMPTZ USING NULLIF(started_at, '')::timestamptz"
+        }
+        ("reviews", "completed_at", true) => {
+            "ALTER TABLE reviews ALTER COLUMN completed_at TYPE TIMESTAMPTZ USING NULLIF(completed_at, '')::timestamptz"
+        }
+        ("reviews", "created_at", false) => {
+            "ALTER TABLE reviews ALTER COLUMN created_at DROP DEFAULT, ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at::timestamptz, ALTER COLUMN created_at SET DEFAULT NOW()"
+        }
+        ("findings", "created_at", false) => {
+            "ALTER TABLE findings ALTER COLUMN created_at DROP DEFAULT, ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at::timestamptz, ALTER COLUMN created_at SET DEFAULT NOW()"
+        }
+        ("dismissals", "created_at", false) => {
+            "ALTER TABLE dismissals ALTER COLUMN created_at DROP DEFAULT, ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at::timestamptz, ALTER COLUMN created_at SET DEFAULT NOW()"
+        }
+        ("audit_log", "created_at", false) => {
+            "ALTER TABLE audit_log ALTER COLUMN created_at DROP DEFAULT, ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at::timestamptz, ALTER COLUMN created_at SET DEFAULT NOW()"
+        }
+        ("users", "created_at", false) => {
+            "ALTER TABLE users ALTER COLUMN created_at DROP DEFAULT, ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at::timestamptz, ALTER COLUMN created_at SET DEFAULT NOW()"
+        }
+        ("sessions", "created_at", false) => {
+            "ALTER TABLE sessions ALTER COLUMN created_at DROP DEFAULT, ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at::timestamptz, ALTER COLUMN created_at SET DEFAULT NOW()"
+        }
+        ("sessions", "expires_at", false) => {
+            "ALTER TABLE sessions ALTER COLUMN expires_at TYPE TIMESTAMPTZ USING expires_at::timestamptz"
+        }
+        ("webhook_deliveries", "received_at", false) => {
+            "ALTER TABLE webhook_deliveries ALTER COLUMN received_at DROP DEFAULT, ALTER COLUMN received_at TYPE TIMESTAMPTZ USING received_at::timestamptz, ALTER COLUMN received_at SET DEFAULT NOW()"
+        }
+        ("review_comments", "created_at", false) => {
+            "ALTER TABLE review_comments ALTER COLUMN created_at DROP DEFAULT, ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at::timestamptz, ALTER COLUMN created_at SET DEFAULT NOW()"
+        }
+        ("reviewed_commits", "created_at", false) => {
+            "ALTER TABLE reviewed_commits ALTER COLUMN created_at DROP DEFAULT, ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at::timestamptz, ALTER COLUMN created_at SET DEFAULT NOW()"
+        }
+        ("dismissed_findings", "dismissed_at", false) => {
+            "ALTER TABLE dismissed_findings ALTER COLUMN dismissed_at DROP DEFAULT, ALTER COLUMN dismissed_at TYPE TIMESTAMPTZ USING dismissed_at::timestamptz, ALTER COLUMN dismissed_at SET DEFAULT NOW()"
+        }
+        ("learned_rules", "created_at", false) => {
+            "ALTER TABLE learned_rules ALTER COLUMN created_at DROP DEFAULT, ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at::timestamptz, ALTER COLUMN created_at SET DEFAULT NOW()"
+        }
+        ("review_jobs", "created_at", false) => {
+            "ALTER TABLE review_jobs ALTER COLUMN created_at DROP DEFAULT, ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at::timestamptz, ALTER COLUMN created_at SET DEFAULT NOW()"
+        }
+        ("review_jobs", "updated_at", false) => {
+            "ALTER TABLE review_jobs ALTER COLUMN updated_at DROP DEFAULT, ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at::timestamptz, ALTER COLUMN updated_at SET DEFAULT NOW()"
+        }
+        ("agent_events", "ts", false) => {
+            "ALTER TABLE agent_events ALTER COLUMN ts DROP DEFAULT, ALTER COLUMN ts TYPE TIMESTAMPTZ USING ts::timestamptz, ALTER COLUMN ts SET DEFAULT NOW()"
+        }
+        _ => "SELECT 1",
+    }
 }
 
 fn split_sql(sql: &str) -> Vec<String> {

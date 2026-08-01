@@ -74,7 +74,7 @@ async fn is_duplicate_delivery(delivery_id: &str) -> bool {
             if r > 0 {
                 let _ = crate::db::db_execute!(
                     pool,
-                    "DELETE FROM webhook_deliveries WHERE received_at < datetime('now', '-14 days')"
+                    "DELETE FROM webhook_deliveries WHERE received_at < NOW() - INTERVAL '14 days'"
                 );
             }
             r == 0

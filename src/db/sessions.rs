@@ -11,7 +11,7 @@ pub async fn create_session(pool: &DbPool, email: &str) -> Result<String, sqlx::
     db_execute!(
         pool,
         "INSERT INTO sessions (token, email, expires_at)
-         VALUES (?, ?, datetime('now', '+7 days'))",
+         VALUES (?, ?, NOW() + INTERVAL '7 days')",
         &token,
         email
     )?;
@@ -20,16 +20,12 @@ pub async fn create_session(pool: &DbPool, email: &str) -> Result<String, sqlx::
 }
 
 /// Look up a session by token. Returns the email if valid and not expired.
+/// Expired rows are pruned by periodic maintenance — not on the hot auth path.
 pub async fn get_session(pool: &DbPool, token: &str) -> Result<Option<String>, sqlx::Error> {
-    db_execute!(
-        pool,
-        "DELETE FROM sessions WHERE expires_at < datetime('now')"
-    )?;
-
     db_scalar_optional!(
         pool,
         String,
-        "SELECT email FROM sessions WHERE token = ? AND expires_at > datetime('now')",
+        "SELECT email FROM sessions WHERE token = ? AND expires_at > NOW()",
         token
     )
 }

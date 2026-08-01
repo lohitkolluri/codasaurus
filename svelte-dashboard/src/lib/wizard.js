@@ -5,7 +5,7 @@ export const SETUP_STEPS = [
     key: "database",
     label: "Database",
     short: "DB",
-    desc: "Where Codasaurus stores reviews and settings",
+    desc: "PostgreSQL — reviews, jobs, sessions, learning",
     route: "/setup/database",
     eta: "~30s",
   },

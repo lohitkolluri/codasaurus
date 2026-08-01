@@ -61,9 +61,7 @@ pub async fn review_pr_with_options(
         }
     }
 
-    let state = pool
-        .map(ReviewState::from_pool)
-        .or_else(|| ReviewState::open().ok());
+    let state = pool.map(ReviewState::from_pool);
 
     // Claim SHA at start to close TOCTOU race between concurrent workers
     if !head_sha.is_empty() {

@@ -98,7 +98,7 @@ pub(crate) async fn save_review_to_db(
         &crate::db::models::ReviewUpdate {
             status: Some(status.to_string()),
             summary_json: None,
-            completed_at: Some(chrono::Utc::now().to_rfc3339()),
+            completed_at: Some(chrono::Utc::now()),
         },
     )
     .await

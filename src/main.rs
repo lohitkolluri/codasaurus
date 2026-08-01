@@ -56,12 +56,7 @@ fn main() -> Result<()> {
                     .unwrap_or(3000)
             });
             let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-                format!(
-                    "sqlite://{}?mode=rwc",
-                    codasaurus::storage::data_dir()
-                        .join("codasaurus.db")
-                        .display()
-                )
+                "postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus".into()
             });
 
             let bot_config =

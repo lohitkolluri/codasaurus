@@ -10,7 +10,7 @@
 
 <p align="center">
   Deterministic Tier‑1 detectors · optional BYOK LLM · zero seat tax<br>
-  <code>@codasaurus</code> on any PR · Svelte dashboard · SQLite or Postgres
+  <code>@codasaurus</code> on any PR · Svelte dashboard · PostgreSQL
 </p>
 
 <p align="center">
@@ -49,12 +49,9 @@ docker compose up
 Open the dashboard → finish the [onboarding wizard](docs/setup-onboarding.md) (~5 min) → install the GitHub App.
 
 ```bash
-# Postgres HA
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml up
-
-# From source
+# From source (Postgres must be reachable)
 cargo build --release
-export DATABASE_URL="sqlite://./codasaurus.db?mode=rwc"
+export DATABASE_URL="postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus"
 ./target/release/codasaurus serve --port 3000
 ```
 
@@ -66,13 +63,14 @@ codasaurus serve | health | version
 
 ## Docs
 
-| Guide | Topic |
-| --- | --- |
-| [Setup — onboarding](docs/setup-onboarding.md) | First-run wizard |
-| [Setup — GitHub App](docs/setup-github-app.md) | Permissions, manifest, manual keys |
-| [Configuration](docs/configuration.md) | Env vars, TOML, offline, OIDC |
-| [Commands](docs/commands.md) | `@codasaurus` on PRs |
-| [Operations — backup & restore](docs/operations-backup-restore.md) | SQLite / Postgres, HA, health |
+| Guide                                                              | Topic                              |
+| ------------------------------------------------------------------ | ---------------------------------- |
+| [Setup — onboarding](docs/setup-onboarding.md)                     | First-run wizard                   |
+| [Setup — GitHub App](docs/setup-github-app.md)                     | Permissions, manifest, manual keys |
+| [Database](docs/database.md)                                       | PostgreSQL, pool, schema           |
+| [Configuration](docs/configuration.md)                             | Env vars, TOML, offline, OIDC      |
+| [Commands](docs/commands.md)                                       | `@codasaurus` on PRs               |
+| [Operations — backup & restore](docs/operations-backup-restore.md) | Postgres backup, HA, health        |
 
 ---
 

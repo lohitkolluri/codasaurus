@@ -54,8 +54,14 @@ pub async fn serve(
     // after ephemeral storage is wiped (Render free tier, Docker restarts).
     sync_env_to_db(&pool).await;
 
-    tracing::info!("Database connected (SQLite)");
-    println!("  Database connected (SQLite)");
+    tracing::info!("Database connected (PostgreSQL)");
+    println!("  Database connected (PostgreSQL)");
+
+    // Mark setup database step complete for Compose / env-based boots.
+    let _ = crate::db::config::set_config(&pool, "database_provider", "postgres").await;
+    if let Ok(url) = std::env::var("DATABASE_URL") {
+        let _ = crate::db::config::set_config(&pool, "database_url", &url).await;
+    }
 
     // Try loading bot config from DB (setup wizard may have stored it),
     // with env vars taking precedence.

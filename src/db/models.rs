@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::prelude::FromRow;
 
@@ -13,8 +14,8 @@ pub struct Repo {
     pub private: bool,
     pub active: bool,
     pub config_json: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -40,9 +41,9 @@ pub struct Review {
     pub pr_head_sha: Option<String>,
     pub status: String,
     pub summary_json: Option<String>,
-    pub started_at: Option<String>,
-    pub completed_at: Option<String>,
-    pub created_at: String,
+    pub started_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -60,7 +61,7 @@ pub struct ReviewCreate {
 pub struct ReviewUpdate {
     pub status: Option<String>,
     pub summary_json: Option<String>,
-    pub completed_at: Option<String>,
+    pub completed_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
@@ -81,7 +82,7 @@ pub struct Finding {
     pub code_snippet: Option<String>,
     pub context: Option<String>,
     pub category: Option<String>,
-    pub created_at: String,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -111,7 +112,7 @@ pub struct AuditEntry {
     pub target_type: Option<String>,
     pub target_id: Option<i64>,
     pub metadata_json: Option<String>,
-    pub created_at: String,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
@@ -123,7 +124,7 @@ pub struct User {
     pub role: String,
     #[serde(default = "default_auth_provider")]
     pub auth_provider: String,
-    pub created_at: String,
+    pub created_at: DateTime<Utc>,
 }
 
 fn default_auth_provider() -> String {
@@ -141,5 +142,5 @@ pub struct UserView {
 pub struct AppConfig {
     pub key: String,
     pub value: String,
-    pub updated_at: String,
+    pub updated_at: DateTime<Utc>,
 }

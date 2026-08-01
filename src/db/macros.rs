@@ -1,24 +1,14 @@
-//! Dual-backend query macros (`?` placeholders; dialect rewrites for Postgres).
+//! Postgres query macros (`?` placeholders rewritten via `dialect::prepare`).
 
-/// Run `fetch_all` for a `FromRow` type against either backend.
+/// Run `fetch_all` for a `FromRow` type.
 macro_rules! db_fetch_all {
     ($pool:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
         let __pool = $pool;
         let __sql = __pool.prepare_sql($sql);
-        match __pool {
-            $crate::db::DbPool::Sqlite(p) => {
-                sqlx::query_as::<_, $ty>(&__sql)
-                    $(.bind($bind))*
-                    .fetch_all(p)
-                    .await
-            }
-            $crate::db::DbPool::Postgres(p) => {
-                sqlx::query_as::<_, $ty>(&__sql)
-                    $(.bind($bind))*
-                    .fetch_all(p)
-                    .await
-            }
-        }
+        sqlx::query_as::<_, $ty>(&__sql)
+            $(.bind($bind))*
+            .fetch_all(__pool.as_pg())
+            .await
     }};
 }
 
@@ -26,20 +16,10 @@ macro_rules! db_fetch_optional {
     ($pool:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
         let __pool = $pool;
         let __sql = __pool.prepare_sql($sql);
-        match __pool {
-            $crate::db::DbPool::Sqlite(p) => {
-                sqlx::query_as::<_, $ty>(&__sql)
-                    $(.bind($bind))*
-                    .fetch_optional(p)
-                    .await
-            }
-            $crate::db::DbPool::Postgres(p) => {
-                sqlx::query_as::<_, $ty>(&__sql)
-                    $(.bind($bind))*
-                    .fetch_optional(p)
-                    .await
-            }
-        }
+        sqlx::query_as::<_, $ty>(&__sql)
+            $(.bind($bind))*
+            .fetch_optional(__pool.as_pg())
+            .await
     }};
 }
 
@@ -47,20 +27,10 @@ macro_rules! db_fetch_one {
     ($pool:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
         let __pool = $pool;
         let __sql = __pool.prepare_sql($sql);
-        match __pool {
-            $crate::db::DbPool::Sqlite(p) => {
-                sqlx::query_as::<_, $ty>(&__sql)
-                    $(.bind($bind))*
-                    .fetch_one(p)
-                    .await
-            }
-            $crate::db::DbPool::Postgres(p) => {
-                sqlx::query_as::<_, $ty>(&__sql)
-                    $(.bind($bind))*
-                    .fetch_one(p)
-                    .await
-            }
-        }
+        sqlx::query_as::<_, $ty>(&__sql)
+            $(.bind($bind))*
+            .fetch_one(__pool.as_pg())
+            .await
     }};
 }
 
@@ -68,22 +38,11 @@ macro_rules! db_execute {
     ($pool:expr, $sql:expr $(, $bind:expr)* $(,)?) => {{
         let __pool = $pool;
         let __sql = __pool.prepare_sql($sql);
-        match __pool {
-            $crate::db::DbPool::Sqlite(p) => {
-                sqlx::query(&__sql)
-                    $(.bind($bind))*
-                    .execute(p)
-                    .await
-                    .map(|r| r.rows_affected())
-            }
-            $crate::db::DbPool::Postgres(p) => {
-                sqlx::query(&__sql)
-                    $(.bind($bind))*
-                    .execute(p)
-                    .await
-                    .map(|r| r.rows_affected())
-            }
-        }
+        sqlx::query(&__sql)
+            $(.bind($bind))*
+            .execute(__pool.as_pg())
+            .await
+            .map(|r| r.rows_affected())
     }};
 }
 
@@ -91,20 +50,10 @@ macro_rules! db_scalar {
     ($pool:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
         let __pool = $pool;
         let __sql = __pool.prepare_sql($sql);
-        match __pool {
-            $crate::db::DbPool::Sqlite(p) => {
-                sqlx::query_scalar::<_, $ty>(&__sql)
-                    $(.bind($bind))*
-                    .fetch_one(p)
-                    .await
-            }
-            $crate::db::DbPool::Postgres(p) => {
-                sqlx::query_scalar::<_, $ty>(&__sql)
-                    $(.bind($bind))*
-                    .fetch_one(p)
-                    .await
-            }
-        }
+        sqlx::query_scalar::<_, $ty>(&__sql)
+            $(.bind($bind))*
+            .fetch_one(__pool.as_pg())
+            .await
     }};
 }
 
@@ -112,20 +61,10 @@ macro_rules! db_scalar_optional {
     ($pool:expr, $ty:ty, $sql:expr $(, $bind:expr)* $(,)?) => {{
         let __pool = $pool;
         let __sql = __pool.prepare_sql($sql);
-        match __pool {
-            $crate::db::DbPool::Sqlite(p) => {
-                sqlx::query_scalar::<_, $ty>(&__sql)
-                    $(.bind($bind))*
-                    .fetch_optional(p)
-                    .await
-            }
-            $crate::db::DbPool::Postgres(p) => {
-                sqlx::query_scalar::<_, $ty>(&__sql)
-                    $(.bind($bind))*
-                    .fetch_optional(p)
-                    .await
-            }
-        }
+        sqlx::query_scalar::<_, $ty>(&__sql)
+            $(.bind($bind))*
+            .fetch_optional(__pool.as_pg())
+            .await
     }};
 }
 
