@@ -265,6 +265,18 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .await?;
     }
 
+    if current < 5 {
+        for statement in [
+            "CREATE INDEX IF NOT EXISTS idx_reviews_repo_created ON reviews(repo_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_reviews_repo_status ON reviews(repo_id, status)",
+        ] {
+            sqlx::query(statement).execute(pool).await?;
+        }
+        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (5)")
+            .execute(pool)
+            .await?;
+    }
+
     Ok(())
 }
 

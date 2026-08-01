@@ -17,6 +17,9 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
     }
 }
 
+/// Stale `in_progress` claims older than this are reclaimable (crash / timeout recovery).
+const STALE_CLAIM_SECS: i64 = 600;
+
 pub struct ReviewState {
     pool: SqlitePool,
 }
@@ -77,22 +80,59 @@ impl ReviewState {
         })
     }
 
-    pub fn get_comment_id(&self, repo: &str, pr_number: i64) -> Result<Option<i64>> {
-        block_on(self.get_comment_id_async(repo, pr_number))
+    fn comment_key(repo: &str, pr_number: i64, kind: &str) -> String {
+        format!("{repo}/{pr_number}:{kind}")
     }
 
-    pub async fn get_comment_id_async(&self, repo: &str, pr_number: i64) -> Result<Option<i64>> {
-        let key = format!("{repo}/{pr_number}");
+    /// Legacy key without kind (pre–comment-slot split).
+    fn legacy_comment_key(repo: &str, pr_number: i64) -> String {
+        format!("{repo}/{pr_number}")
+    }
+
+    pub async fn get_comment_id_async(
+        &self,
+        repo: &str,
+        pr_number: i64,
+        kind: &str,
+    ) -> Result<Option<i64>> {
+        let key = Self::comment_key(repo, pr_number, kind);
         let result: Option<(i64,)> =
             sqlx::query_as("SELECT comment_id FROM review_comments WHERE repo_pr = ?")
                 .bind(&key)
                 .fetch_optional(&self.pool)
                 .await?;
-        Ok(result.map(|r| r.0))
+        if result.is_some() {
+            return Ok(result.map(|r| r.0));
+        }
+        // Walkthrough falls back to legacy single-slot key once.
+        if kind == "walkthrough" {
+            let legacy = Self::legacy_comment_key(repo, pr_number);
+            let result: Option<(i64,)> =
+                sqlx::query_as("SELECT comment_id FROM review_comments WHERE repo_pr = ?")
+                    .bind(&legacy)
+                    .fetch_optional(&self.pool)
+                    .await?;
+            return Ok(result.map(|r| r.0));
+        }
+        Ok(None)
     }
 
-    pub fn get_reviewed_sha(&self, repo: &str, pr_number: i64) -> Result<Option<String>> {
-        block_on(self.get_reviewed_sha_async(repo, pr_number))
+    pub async fn set_comment_id_async(
+        &self,
+        repo: &str,
+        pr_number: i64,
+        kind: &str,
+        comment_id: i64,
+    ) -> Result<()> {
+        let key = Self::comment_key(repo, pr_number, kind);
+        sqlx::query(
+            "INSERT OR REPLACE INTO review_comments (repo_pr, comment_id) VALUES (?, ?)",
+        )
+        .bind(&key)
+        .bind(comment_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     pub async fn get_reviewed_sha_async(&self, repo: &str, pr_number: i64) -> Result<Option<String>> {
@@ -106,47 +146,58 @@ impl ReviewState {
     }
 
     /// Atomically claim a SHA for review. Returns false if this SHA was already
-    /// claimed/completed (another worker is reviewing or finished).
+    /// completed or is actively in progress (and not stale).
     pub async fn try_claim_sha(&self, repo: &str, pr_number: i64, sha: &str) -> Result<bool> {
         let key = format!("{repo}/{pr_number}");
-        // If same SHA already recorded, skip
-        if let Some((existing, status)) = sqlx::query_as::<_, (String, String)>(
-            "SELECT head_sha, COALESCE(status, 'completed') FROM reviewed_commits WHERE repo_pr = ?",
+        if let Some((existing, status, created_at)) = sqlx::query_as::<_, (String, String, String)>(
+            "SELECT head_sha, COALESCE(status, 'completed'), COALESCE(created_at, datetime('now'))
+             FROM reviewed_commits WHERE repo_pr = ?",
         )
         .bind(&key)
         .fetch_optional(&self.pool)
         .await?
         {
             if existing == sha {
-                return Ok(false);
+                if status == "completed" {
+                    return Ok(false);
+                }
+                // Same SHA stuck in_progress — reclaim if stale.
+                if status == "in_progress" && !is_claim_stale(&created_at) {
+                    return Ok(false);
+                }
             }
-            let _ = status;
         }
 
         let result = sqlx::query(
-            "INSERT INTO reviewed_commits (repo_pr, head_sha, status) VALUES (?, ?, 'in_progress')
-             ON CONFLICT(repo_pr) DO UPDATE SET head_sha = excluded.head_sha, status = 'in_progress'
+            "INSERT INTO reviewed_commits (repo_pr, head_sha, status, created_at)
+             VALUES (?, ?, 'in_progress', datetime('now'))
+             ON CONFLICT(repo_pr) DO UPDATE SET
+               head_sha = excluded.head_sha,
+               status = 'in_progress',
+               created_at = datetime('now')
              WHERE reviewed_commits.head_sha != excluded.head_sha
-                OR reviewed_commits.status != 'in_progress'",
+                OR reviewed_commits.status != 'in_progress'
+                OR reviewed_commits.created_at < datetime('now', ?)",
         )
         .bind(&key)
         .bind(sha)
+        .bind(format!("-{STALE_CLAIM_SECS} seconds"))
         .execute(&self.pool)
         .await?;
 
-        // rows_affected == 0 means conflict and WHERE didn't match (same sha in progress)
         Ok(result.rows_affected() > 0)
     }
 
-    pub fn set_reviewed_sha(&self, repo: &str, pr_number: i64, sha: &str) -> Result<()> {
-        block_on(self.set_reviewed_sha_async(repo, pr_number, sha))
-    }
-
+    /// Mark claim completed (success path).
     pub async fn set_reviewed_sha_async(&self, repo: &str, pr_number: i64, sha: &str) -> Result<()> {
         let key = format!("{repo}/{pr_number}");
         sqlx::query(
-            "INSERT INTO reviewed_commits (repo_pr, head_sha, status) VALUES (?, ?, 'completed')
-             ON CONFLICT(repo_pr) DO UPDATE SET head_sha = excluded.head_sha, status = 'completed'",
+            "INSERT INTO reviewed_commits (repo_pr, head_sha, status, created_at)
+             VALUES (?, ?, 'completed', datetime('now'))
+             ON CONFLICT(repo_pr) DO UPDATE SET
+               head_sha = excluded.head_sha,
+               status = 'completed',
+               created_at = datetime('now')",
         )
         .bind(&key)
         .bind(sha)
@@ -155,24 +206,27 @@ impl ReviewState {
         Ok(())
     }
 
-    pub fn set_comment_id(&self, repo: &str, pr_number: i64, comment_id: i64) -> Result<()> {
-        block_on(self.set_comment_id_async(repo, pr_number, comment_id))
-    }
-
-    pub async fn set_comment_id_async(
-        &self,
-        repo: &str,
-        pr_number: i64,
-        comment_id: i64,
-    ) -> Result<()> {
+    /// Clear an in_progress claim so a timed-out / failed review can be retried.
+    pub async fn release_sha_claim(&self, repo: &str, pr_number: i64, sha: &str) -> Result<()> {
         let key = format!("{repo}/{pr_number}");
         sqlx::query(
-            "INSERT OR REPLACE INTO review_comments (repo_pr, comment_id) VALUES (?, ?)",
+            "DELETE FROM reviewed_commits
+             WHERE repo_pr = ? AND head_sha = ? AND status = 'in_progress'",
         )
         .bind(&key)
-        .bind(comment_id)
+        .bind(sha)
         .execute(&self.pool)
         .await?;
         Ok(())
     }
+}
+
+fn is_claim_stale(created_at: &str) -> bool {
+    // SQLite datetime('now') is UTC `YYYY-MM-DD HH:MM:SS`. Parse loosely.
+    let Ok(naive) = chrono::NaiveDateTime::parse_from_str(created_at, "%Y-%m-%d %H:%M:%S") else {
+        return true; // unparseable → allow reclaim
+    };
+    let created = naive.and_utc();
+    let age = chrono::Utc::now().signed_duration_since(created);
+    age.num_seconds() >= STALE_CLAIM_SECS
 }

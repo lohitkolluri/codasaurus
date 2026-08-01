@@ -2,22 +2,10 @@ use crate::detectors::Finding;
 use crate::graph::CodeGraph;
 use crate::parser::ParsedFile;
 use std::collections::HashMap;
-use std::sync::LazyLock;
-use std::sync::Mutex;
 
-/// Global mutable code graph populated during parsing.
-/// Each `run_all()` call rebuilds it from the parsed files.
-static CODE_GRAPH: LazyLock<Mutex<CodeGraph>> = LazyLock::new(|| Mutex::new(CodeGraph::new()));
-
-pub fn populate(files: &[ParsedFile]) {
-    let mut graph = match CODE_GRAPH.lock() {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("Warning: code graph mutex poisoned, resetting");
-            e.into_inner()
-        }
-    };
-    *graph = CodeGraph::new();
+/// Build a per-review code graph (never share across concurrent reviews).
+fn build_graph(files: &[ParsedFile]) -> CodeGraph {
+    let mut graph = CodeGraph::new();
 
     for file in files {
         let path = &file.path;
@@ -42,23 +30,16 @@ pub fn populate(files: &[ParsedFile]) {
         }
     }
 
-    // Inter-file dependency detection — flattened from O(F²) to O(F).
-    // Pre-collect ALL import names + their source files once,
-    // then scan each file's words against the flat list.
-    // Avoids the original nested file_a × file_b loop (F² × L × W × I_per_file → F × L × W × I_total).
-    let mut all_imports: Vec<(&str, &str)> = Vec::new(); // (import_name, file_path)
+    let mut all_imports: Vec<(&str, &str)> = Vec::new();
     for file in files {
         for import in &file.imports {
             all_imports.push((import.name.as_str(), file.path.as_str()));
         }
     }
 
-    // Deduplicate to avoid redundant edge processing
     let mut seen_edges: std::collections::HashSet<(String, String)> =
         std::collections::HashSet::new();
 
-    // Build inverted index: word → [(import_name, file_b_path)]
-    // Avoids O(L × W × I) nested loop — each word does O(1) index lookup
     let mut word_to_imports: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
     for &(import_name, file_b_path) in &all_imports {
         for word in import_name.split(|c: char| !c.is_alphanumeric() && c != '_') {
@@ -110,49 +91,31 @@ pub fn populate(files: &[ParsedFile]) {
             }
         }
     }
-}
 
-/// Lock the global code graph for read-only access.
-/// Used by `codasaurus verify` to share the same graph the detectors built.
-pub fn lock_graph() -> Result<std::sync::MutexGuard<'static, CodeGraph>, String> {
-    CODE_GRAPH
-        .lock()
-        .map_err(|e| format!("code graph mutex poisoned: {e}"))
+    graph
 }
 
 pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     let mut findings = Vec::new();
-
-    populate(parsed_files);
-
-    let graph = match CODE_GRAPH.lock() {
-        Ok(g) => g,
-        Err(e) => {
-            eprintln!("Warning: code graph mutex poisoned, resetting");
-            e.into_inner()
-        }
-    };
+    let graph = build_graph(parsed_files);
 
     for (file_path, symbols) in &graph.file_to_nodes {
         for sym in symbols {
             let affected = graph.blast_radius(sym, 3);
             if affected.len() > 5 {
                 findings.push(Finding {
-                    detector: "blast-radius".to_string(),
+                    detector: "graph".to_string(),
                     severity: "info",
-                    file: file_path.to_string(),
+                    file: file_path.clone(),
                     line: 0,
                     column: 0,
                     message: format!(
-                        "Symbol `{}` appears in the dependency path of {} other symbols. \
-                         Changes here may have wide-reaching effects.",
-                        sym,
+                        "Symbol `{sym}` has a large blast radius ({} dependents)",
                         affected.len()
                     ),
                     suggestion: Some(
-                        "Consider the impact of changes to this symbol across the codebase. \
-                         Add tests for downstream consumers."
-                            .to_string(),
+                        "Review callers before changing this symbol; consider feature flags."
+                            .into(),
                     ),
                     evidence: None,
                     codemod: None,

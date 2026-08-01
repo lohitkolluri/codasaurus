@@ -161,34 +161,6 @@ pub async fn get_findings_for_review(
     .await
 }
 
-pub async fn create_finding(
-    pool: &DbPool,
-    finding: &FindingCreate,
-) -> Result<Finding, sqlx::Error> {
-    sqlx::query_as::<_, Finding>(
-        "INSERT INTO findings (review_id, fingerprint, file_path, line_start, line_end, column_start, column_end, severity, detector, rule_id, message, suggested_fix, code_snippet, context, category)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         RETURNING *",
-    )
-    .bind(finding.review_id)
-    .bind(&finding.fingerprint)
-    .bind(&finding.file_path)
-    .bind(finding.line_start)
-    .bind(finding.line_end)
-    .bind(finding.column_start)
-    .bind(finding.column_end)
-    .bind(&finding.severity)
-    .bind(&finding.detector)
-    .bind(&finding.rule_id)
-    .bind(&finding.message)
-    .bind(&finding.suggested_fix)
-    .bind(&finding.code_snippet)
-    .bind(&finding.context)
-    .bind(&finding.category)
-    .fetch_one(&pool.0)
-    .await
-}
-
 /// Persist many findings in one transaction (avoids N+1 round-trips on large reviews).
 pub async fn create_findings_batch(
     pool: &DbPool,
@@ -230,10 +202,12 @@ pub async fn get_stats(pool: &DbPool) -> Result<serde_json::Value, sqlx::Error> 
         .fetch_one(&pool.0)
         .await?;
 
-    let total_reviews_today: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM reviews WHERE date(created_at) = CURRENT_DATE")
-            .fetch_one(&pool.0)
-            .await?;
+    let total_reviews_today: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM reviews
+         WHERE created_at >= date('now') AND created_at < date('now', '+1 day')",
+    )
+    .fetch_one(&pool.0)
+    .await?;
 
     let pass_rate: Option<f64> = sqlx::query_scalar(
         "SELECT AVG(CASE WHEN status = 'passed' THEN 100.0 WHEN status = 'failed' THEN 0.0 ELSE NULL END) FROM reviews",

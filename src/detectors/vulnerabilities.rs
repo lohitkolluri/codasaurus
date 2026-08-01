@@ -2,7 +2,10 @@ use crate::detectors::Finding;
 use crate::parser::ParsedFile;
 use crate::registry;
 
-/// Detect known vulnerabilities in imported packages via OSV.dev
+/// Detect known vulnerabilities in imported packages via OSV.dev.
+///
+/// Without a resolved package version, OSV returns *historical* vulns for the
+/// package name. Those must never be `blocking` — they destroy review trust.
 pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     let mut findings = Vec::new();
     // Track which (registry, package) we've already checked to avoid duplicate API calls
@@ -35,20 +38,10 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
 
             match registry::check_vulnerabilities(registry_name, &package) {
                 Ok(vulns) => {
-                    for vuln in &vulns {
-                        let severity = match vuln.severity.as_str() {
-                            s if s.eq_ignore_ascii_case("critical")
-                                || s.eq_ignore_ascii_case("high") =>
-                            {
-                                "blocking"
-                            }
-                            s if s.eq_ignore_ascii_case("moderate")
-                                || s.eq_ignore_ascii_case("medium") =>
-                            {
-                                "warning"
-                            }
-                            _ => "info",
-                        };
+                    // Cap volume: at most 3 vulns per package without version pinning.
+                    for vuln in vulns.iter().take(3) {
+                        // Unversioned query → informational only (not REQUEST_CHANGES).
+                        let severity = "info";
                         let fixed = vuln
                             .fixed_version
                             .as_ref()
@@ -60,9 +53,12 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                             file: file.path.clone(),
                             line: import.line,
                             column: import.column,
-                            message: format!("{}: {}{}", vuln.id, vuln.summary, fixed),
+                            message: format!(
+                                "{}: {}{} (unversioned OSV hit — confirm against lockfile)",
+                                vuln.id, vuln.summary, fixed
+                            ),
                             suggestion: Some(format!(
-                                "Update package `{}` to the latest version to fix {}.",
+                                "Pin/check `{}` in the lockfile and upgrade if {} still applies.",
                                 package, vuln.id
                             )),
                             evidence: Some(format!("{}: {}", vuln.id, vuln.summary)),

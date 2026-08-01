@@ -79,41 +79,6 @@ where
     Err(last_err.unwrap_or_else(|| anyhow::anyhow!("retry exhausted for {operation}")))
 }
 
-/// Retry a blocking fallible operation with exponential backoff.
-pub fn retry_blocking<F, T>(
-    config: &RetryConfig,
-    operation: &str,
-    is_retryable: &dyn Fn(&anyhow::Error) -> bool,
-    f: F,
-) -> anyhow::Result<T>
-where
-    F: Fn() -> anyhow::Result<T>,
-{
-    let mut last_err = None;
-    for attempt in 0..=config.max_retries {
-        match f() {
-            Ok(val) => return Ok(val),
-            Err(e) => {
-                if attempt < config.max_retries && is_retryable(&e) {
-                    let delay = config.delay(attempt);
-                    eprintln!(
-                        "Warning: {} failed (attempt {}), retrying in {:?}: {}",
-                        operation,
-                        attempt + 1,
-                        delay,
-                        e
-                    );
-                    std::thread::sleep(delay);
-                    last_err = Some(e);
-                } else {
-                    return Err(e);
-                }
-            }
-        }
-    }
-    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("retry exhausted for {operation}")))
-}
-
 /// Predicate: is this an error we should retry?
 pub fn is_reqwest_error_retryable(err: &anyhow::Error) -> bool {
     if let Some(req_err) = err.downcast_ref::<reqwest::Error>() {

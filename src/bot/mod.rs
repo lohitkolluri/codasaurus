@@ -10,12 +10,14 @@ mod auth;
 mod codeowners;
 mod github_files;
 pub(crate) mod markdown;
+mod quality;
+pub(crate) use quality::{apply_signal_budget, SignalBudget};
 pub(crate) mod repo_context;
 mod review;
 mod verify;
 
 use self::auth::get_installation_token;
-use self::review::{fetch_pull_request, review_pr};
+use self::review::{fetch_pull_request, review_pr, review_pr_with_options, ReviewOptions};
 
 use crate::bot_runtime::BotRuntimeConfig;
 use crate::db::{self, models::RepoCreate};
@@ -271,6 +273,7 @@ pub(crate) async fn handle_webhook(
             let cfg = config.clone();
             let delivery = delivery_id.to_string();
             let timeout_secs = runtime.review_timeout_secs;
+            let action = payload.action.clone();
             tokio::spawn(async move {
                 let span = tracing::info_span!(
                     "review_pr_webhook",
@@ -293,6 +296,18 @@ pub(crate) async fn handle_webhook(
                 let _guard = lock.lock().await;
 
                 let repo_for_prune = repo_full_name.clone();
+                let head_sha = pr
+                    .as_ref()
+                    .and_then(|p| p["head"]["sha"].as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let opts = ReviewOptions {
+                    auto_describe: matches!(
+                        action.as_str(),
+                        "opened" | "reopened" | "ready_for_review"
+                    ),
+                    auto_review_diff: true,
+                };
                 match timeout(Duration::from_secs(timeout_secs), async move {
                     let token = get_installation_token(&cfg, inst_id).await?;
                     let wrapped = WebhookPayload {
@@ -305,13 +320,19 @@ pub(crate) async fn handle_webhook(
                         repositories: None,
                         repositories_added: None,
                     };
-                    review_pr(&token, &repo_full_name, &wrapped).await
+                    review_pr_with_options(&token, &repo_full_name, &wrapped, opts).await
                 })
                 .await
                 {
                     Ok(Ok(())) => tracing::info!("review completed"),
-                    Ok(Err(e)) => tracing::error!(error = %e, "review failed"),
-                    Err(_) => tracing::error!("review timed out"),
+                    Ok(Err(e)) => {
+                        tracing::error!(error = %e, "review failed");
+                        release_claim_best_effort(&repo_for_prune, pr_number, &head_sha).await;
+                    }
+                    Err(_) => {
+                        tracing::error!("review timed out");
+                        release_claim_best_effort(&repo_for_prune, pr_number, &head_sha).await;
+                    }
                 }
 
                 drop(_guard);
@@ -465,6 +486,19 @@ static REVIEW_PERMITS: std::sync::LazyLock<tokio::sync::Semaphore> =
         tokio::sync::Semaphore::new(n.max(1))
     });
 
+async fn release_claim_best_effort(repo: &str, pr_number: i64, head_sha: &str) {
+    if head_sha.is_empty() {
+        return;
+    }
+    let Some(pool) = bot_db_pool() else {
+        return;
+    };
+    let state = crate::state::ReviewState::from_pool(pool);
+    if let Err(e) = state.release_sha_claim(repo, pr_number, head_sha).await {
+        tracing::warn!(error = %e, "failed to release SHA claim");
+    }
+}
+
 async fn handle_bot_command(
     ctx: WebhookContext,
     pr_number: i64,
@@ -511,6 +545,10 @@ async fn spawn_simple_comment(ctx: WebhookContext, pr_number: i64, body: String)
 }
 
 async fn spawn_describe(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
+    let Ok(_permit) = REVIEW_PERMITS.acquire().await else {
+        tracing::error!("review semaphore closed");
+        return;
+    };
     let _ = timeout(Duration::from_secs(timeout_secs), async move {
         let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
         let pr = fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await?;
@@ -664,6 +702,10 @@ async fn spawn_improve(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
 }
 
 async fn spawn_ask(ctx: WebhookContext, pr_number: i64, question: String, timeout_secs: u64) {
+    let Ok(_permit) = REVIEW_PERMITS.acquire().await else {
+        tracing::error!("review semaphore closed");
+        return;
+    };
     let _ = timeout(Duration::from_secs(timeout_secs), async move {
         let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
         let pr = fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await?;
@@ -693,12 +735,17 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
     let lock = pr_lock(&repo_name, pr_number).await;
     let _guard = lock.lock().await;
 
+    let head_sha_holder = std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
+    let head_sha_slot = head_sha_holder.clone();
     match timeout(Duration::from_secs(timeout_secs), async move {
         let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
         if pr_number <= 0 || ctx.repo_full_name == "unknown" {
             anyhow::bail!("invalid repository or PR number");
         }
         let pr_data = fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await?;
+        if let Some(sha) = pr_data["head"]["sha"].as_str() {
+            *head_sha_slot.lock().await = sha.to_string();
+        }
         // Force review even if draft when manually requested
         let mut pr_data = pr_data;
         if let Some(obj) = pr_data.as_object_mut() {
@@ -719,8 +766,16 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
     .await
     {
         Ok(Ok(())) => tracing::info!(pr = pr_number, "comment-triggered review completed"),
-        Ok(Err(e)) => tracing::error!(pr = pr_number, error = %e, "comment-triggered review failed"),
-        Err(_) => tracing::error!(pr = pr_number, "comment-triggered review timed out"),
+        Ok(Err(e)) => {
+            tracing::error!(pr = pr_number, error = %e, "comment-triggered review failed");
+            let sha = head_sha_holder.lock().await.clone();
+            release_claim_best_effort(&repo_name, pr_number, &sha).await;
+        }
+        Err(_) => {
+            tracing::error!(pr = pr_number, "comment-triggered review timed out");
+            let sha = head_sha_holder.lock().await.clone();
+            release_claim_best_effort(&repo_name, pr_number, &sha).await;
+        }
     }
 
     drop(_guard);

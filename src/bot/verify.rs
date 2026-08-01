@@ -5,6 +5,10 @@ use subtle::ConstantTimeEq;
 type HmacSha256 = Hmac<Sha256>;
 
 pub fn verify_signature(secret: &str, body: &[u8], signature: &str) -> bool {
+    // Fail closed: an empty webhook secret must never accept forged HMACs.
+    if secret.is_empty() {
+        return false;
+    }
     let expected_prefix = "sha256=";
     if !signature.starts_with(expected_prefix) {
         return false;
@@ -59,8 +63,8 @@ mod tests {
         use hmac::{Hmac, Mac};
         use sha2::Sha256;
         let body = b"test";
-        // HMAC with non-empty key won't match empty-key HMAC
-        let mut mac = Hmac::<Sha256>::new_from_slice(b"real-secret").unwrap();
+        // Even a signature forged with the empty key must be rejected.
+        let mut mac = Hmac::<Sha256>::new_from_slice(b"").unwrap();
         mac.update(body);
         let sig = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
         assert!(!verify_signature("", body, &sig));

@@ -8,9 +8,9 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 /// GitHub API max results per page for PR files.
-const PER_PAGE: usize = 100;
+const PER_PAGE: usize = crate::util::github::PR_FILES_PER_PAGE;
 /// GitHub exposes at most 3,000 PR files (30 pages of 100).
-const MAX_PR_FILE_PAGES: usize = 30;
+const MAX_PR_FILE_PAGES: usize = crate::util::github::MAX_PR_FILE_PAGES;
 /// Bound reviewer discovery to avoid exhausting an installation's API quota on a large PR.
 const MAX_REVIEWER_FILES: usize = 8;
 
@@ -125,7 +125,8 @@ async fn fetch_pr_files(
     unreachable!("the bounded page loop always returns")
 }
 
-/// Post or update an issue comment using state store for idempotency.
+/// Post or update an issue comment using a named slot for idempotency
+/// (`walkthrough`, `llm_summary`, `describe`, …) so slots never overwrite each other.
 async fn post_or_update_comment(
     client: &reqwest::Client,
     auth_header: &str,
@@ -133,13 +134,14 @@ async fn post_or_update_comment(
     pr_number: i64,
     body: &str,
     state: &Option<ReviewState>,
+    kind: &str,
 ) -> Result<i64> {
     let url = format!("https://api.github.com/repos/{repo_name}/issues/{pr_number}/comments");
 
     let headers = github_api_headers(auth_header)?;
 
     if let Some(ref s) = state {
-        if let Ok(Some(comment_id)) = s.get_comment_id_async(repo_name, pr_number).await {
+        if let Ok(Some(comment_id)) = s.get_comment_id_async(repo_name, pr_number, kind).await {
             let update_url =
                 format!("https://api.github.com/repos/{repo_name}/issues/comments/{comment_id}");
             let update_ok = retry_async(
@@ -188,7 +190,10 @@ async fn post_or_update_comment(
     let comment_id = resp["id"].as_i64().unwrap_or(0);
     if comment_id > 0 {
         if let Some(ref s) = state {
-            if let Err(e) = s.set_comment_id_async(repo_name, pr_number, comment_id).await {
+            if let Err(e) = s
+                .set_comment_id_async(repo_name, pr_number, kind, comment_id)
+                .await
+            {
                 eprintln!("Warning: failed to store comment ID: {e}");
             }
         }
@@ -310,7 +315,25 @@ fn severity_at_least(sev: &str, min: &str) -> bool {
     rank(sev) >= rank(min)
 }
 
+/// Options for a single review invocation (webhook vs slash-command).
+#[derive(Debug, Clone, Default)]
+pub struct ReviewOptions {
+    /// Post a describe-style comment (typically on opened / reopened).
+    pub auto_describe: bool,
+    /// Run LLM `review_diff` when PR size is under budget.
+    pub auto_review_diff: bool,
+}
+
 pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -> Result<()> {
+    review_pr_with_options(token, repo_name, payload, ReviewOptions::default()).await
+}
+
+pub async fn review_pr_with_options(
+    token: &str,
+    repo_name: &str,
+    payload: &WebhookPayload,
+    options: ReviewOptions,
+) -> Result<()> {
     let pr = match &payload.pull_request {
         Some(p) => p,
         None => return Ok(()),
@@ -360,14 +383,21 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
 
     let mut config = crate::config::Config::load_for_bot(pool).await;
     let mut repo_llm_enabled = true;
+    let mut repo_flags = crate::config::RepoBotFlags::default();
     if let Some(pool) = pool {
         if let Ok(Some(repo)) = crate::db::repos::get_repo_by_full_name(pool, repo_name).await {
             if let Some(ref cfg_json) = repo.config_json {
-                if let Some(llm) = config.overlay_repo_config_json(cfg_json) {
-                    repo_llm_enabled = llm;
-                }
+                repo_flags = config.overlay_repo_config_json(cfg_json);
+                repo_llm_enabled = repo_flags.llm_enabled;
             }
         }
+    }
+    let mut options = options;
+    if !repo_flags.auto_describe {
+        options.auto_describe = false;
+    }
+    if !repo_flags.auto_review_diff {
+        options.auto_review_diff = false;
     }
     let policy = crate::config::Config::bot_policy(pool).await;
     let runtime = crate::bot_runtime::BotRuntimeConfig::default();
@@ -515,6 +545,12 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         &commit_messages,
     );
     findings.findings.extend(slop_findings);
+
+    // Org-scale: severity budgets + noise ranking (high-signal only).
+    super::apply_signal_budget(
+        &mut findings.findings,
+        &super::SignalBudget::default(),
+    );
 
     let mut reviewers = suggest_reviewers(
         client,
@@ -680,7 +716,16 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     // If inline review failed (e.g. line numbers don't match), fall back to a single issue comment.
     // Uses the state store to update the previous comment rather than posting a new one.
     if !resp.status().is_success() {
-        post_or_update_comment(client, &auth_header, repo_name, pr_number, &body, &state).await?;
+        post_or_update_comment(
+            client,
+            &auth_header,
+            repo_name,
+            pr_number,
+            &body,
+            &state,
+            "walkthrough",
+        )
+        .await?;
     }
 
     // Record the reviewed commit SHA for incremental review
@@ -725,9 +770,126 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
             {
                 tracing::warn!(error = %e, "failed to generate LLM summary");
             }
+
+            // Phase 1: optional review_diff when PR is under size budget.
+            if options.auto_review_diff && files.len() <= runtime.auto_improve_max_files {
+                if let Err(e) = maybe_post_auto_improve(
+                    client,
+                    &auth_header,
+                    repo_name,
+                    pr_number,
+                    &files,
+                    &llm_cfg,
+                    &review_ctx,
+                    &state,
+                    runtime.auto_improve_max_diff_chars,
+                )
+                .await
+                {
+                    tracing::warn!(error = %e, "auto review_diff failed");
+                }
+            }
         }
     }
 
+    // Phase 1: auto-describe on opened/reopened (separate comment slot).
+    if options.auto_describe {
+        let describe = crate::bot::markdown::walkthrough_body(
+            &findings,
+            has_blocking,
+            &pr_title,
+            &files,
+            &reviewers,
+            &config,
+            &runtime,
+            true,
+        );
+        let describe_body = format!(
+            "### Codasaurus describe\n\n{describe}\n\n---\n_Auto-describe on PR open · `@codasaurus help`_"
+        );
+        if let Err(e) = post_or_update_comment(
+            client,
+            &auth_header,
+            repo_name,
+            pr_number,
+            &describe_body,
+            &state,
+            "describe",
+        )
+        .await
+        {
+            tracing::warn!(error = %e, "auto-describe comment failed");
+        }
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn maybe_post_auto_improve(
+    client: &reqwest::Client,
+    auth_header: &str,
+    repo_name: &str,
+    pr_number: i64,
+    files: &[serde_json::Value],
+    llm_cfg: &crate::llm::LlmConfig,
+    review_ctx: &crate::llm::ReviewContext,
+    state: &Option<ReviewState>,
+    max_diff_chars: usize,
+) -> Result<()> {
+    let mut diff = String::new();
+    for f in files.iter().take(40) {
+        let name = f["filename"].as_str().unwrap_or("?");
+        let patch = f["patch"].as_str().unwrap_or("");
+        if patch.is_empty() {
+            continue;
+        }
+        let _ = write!(diff, "--- a/{name}\n+++ b/{name}\n{patch}\n");
+        if diff.len() > max_diff_chars {
+            break;
+        }
+    }
+    if diff.is_empty() {
+        return Ok(());
+    }
+
+    let output = crate::llm::review_diff(&diff, llm_cfg, Some(review_ctx)).await?;
+    if output.issues.is_empty() {
+        return Ok(());
+    }
+
+    let mut text = String::from("### Codasaurus improve (auto)\n\n");
+    if let Some(summary) = output.summary.as_deref().filter(|s| !s.is_empty()) {
+        let _ = writeln!(text, "{summary}\n");
+    }
+    text.push_str("| File | Line | Severity | Suggestion |\n| --- | ---: | --- | --- |\n");
+    for issue in output.issues.iter().take(12) {
+        let sug = issue
+            .suggestion
+            .as_deref()
+            .unwrap_or(&issue.description)
+            .replace('|', "\\|")
+            .chars()
+            .take(140)
+            .collect::<String>();
+        let _ = writeln!(
+            text,
+            "| `{}` | {} | `{}` | {sug} |",
+            issue.file, issue.line, issue.severity
+        );
+    }
+    text.push_str("\n_Disable with repo `config_json.auto_review_diff: false`_");
+
+    post_or_update_comment(
+        client,
+        auth_header,
+        repo_name,
+        pr_number,
+        &text,
+        state,
+        "auto_improve",
+    )
+    .await?;
     Ok(())
 }
 
@@ -832,6 +994,7 @@ async fn generate_and_post_summary(
         pr_number,
         &summary_body,
         state,
+        "llm_summary",
     )
     .await?;
 

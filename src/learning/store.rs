@@ -202,11 +202,27 @@ impl LearningStore {
         })
         .collect();
 
+        // Short fingerprints from `@codasaurus ignore <12-hex>` must match full hashes.
+        let short_prefixes: Vec<String> = sqlx::query_as::<_, (String,)>(
+            "SELECT fingerprint FROM dismissed_findings WHERE length(fingerprint) BETWEEN 8 AND 63",
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|(fp,)| fp)
+        .collect();
+
         Ok(findings
             .iter()
             .filter(|f| {
                 let fp = f.fingerprint();
                 if dismissed_set.contains(&fp) {
+                    return false;
+                }
+                if short_prefixes
+                    .iter()
+                    .any(|p| fp.starts_with(p.as_str()) || p.starts_with(fp.as_str()))
+                {
                     return false;
                 }
                 for rule in &rules {

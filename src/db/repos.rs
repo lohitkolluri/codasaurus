@@ -28,6 +28,12 @@ pub async fn create_repo(pool: &DbPool, repo: &RepoCreate) -> Result<Repo, sqlx:
     sqlx::query_as::<_, Repo>(
         "INSERT INTO repos (github_id, full_name, owner, name, default_branch, installation_id, private, active)
          VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+         ON CONFLICT(full_name) DO UPDATE SET
+           github_id = excluded.github_id,
+           installation_id = excluded.installation_id,
+           private = excluded.private,
+           default_branch = COALESCE(excluded.default_branch, repos.default_branch),
+           updated_at = CURRENT_TIMESTAMP
          RETURNING *",
     )
     .bind(repo.github_id)

@@ -7,6 +7,10 @@ pub struct BotRuntimeConfig {
     pub max_reviewer_files: usize,
     pub max_comment_bytes: usize,
     pub max_llm_diff_chars: usize,
+    /// Max changed files for auto `review_diff` on webhook reviews.
+    pub auto_improve_max_files: usize,
+    /// Max aggregated patch chars for auto `review_diff`.
+    pub auto_improve_max_diff_chars: usize,
 }
 
 impl Default for BotRuntimeConfig {
@@ -17,6 +21,8 @@ impl Default for BotRuntimeConfig {
             max_reviewer_files: env_usize("CODASAURUS_MAX_REVIEWER_FILES", 8),
             max_comment_bytes: env_usize("CODASAURUS_MAX_COMMENT_BYTES", 64000),
             max_llm_diff_chars: env_usize("CODASAURUS_MAX_LLM_DIFF_CHARS", 8000),
+            auto_improve_max_files: env_usize("CODASAURUS_AUTO_IMPROVE_MAX_FILES", 40),
+            auto_improve_max_diff_chars: env_usize("CODASAURUS_AUTO_IMPROVE_MAX_DIFF", 24_000),
         }
     }
 }

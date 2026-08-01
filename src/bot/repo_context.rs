@@ -75,6 +75,7 @@ pub fn needed_manifests(changed_paths: &[String]) -> Vec<&'static str> {
 }
 
 /// Fetch missing manifests at `git_ref` and parse them into `ParsedFile`s.
+/// Also probes nested package manifests next to changed files (monorepos).
 pub async fn bootstrap_manifests(
     client: &reqwest::Client,
     headers: &HeaderMap,
@@ -84,15 +85,57 @@ pub async fn bootstrap_manifests(
     already_have: &HashSet<String>,
 ) -> Result<Vec<ParsedFile>> {
     let mut out = Vec::new();
-    for path in needed_manifests(changed_paths) {
+    let mut attempted = HashSet::new();
+
+    let mut candidates: Vec<String> = needed_manifests(changed_paths)
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+
+    // Nested monorepo: for `packages/foo/src/a.ts` also try `packages/foo/package.json`.
+    for path in changed_paths.iter().take(80) {
+        if let Some(parent) = path.rsplit_once('/').map(|(p, _)| p) {
+            let lower = path.to_lowercase();
+            let ext = lower.rsplit('.').next().unwrap_or("");
+            if matches!(
+                ext,
+                "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" | "vue" | "svelte"
+            ) {
+                candidates.push(format!("{parent}/package.json"));
+            } else if ext == "rs" {
+                candidates.push(format!("{parent}/Cargo.toml"));
+                // Walk one level up for workspace crates: crate/src/lib.rs → crate/Cargo.toml
+                if let Some(grand) = parent.rsplit_once('/').map(|(p, _)| p) {
+                    if parent.ends_with("/src") {
+                        candidates.push(format!("{grand}/Cargo.toml"));
+                    }
+                }
+            } else if matches!(ext, "py" | "pyi") {
+                candidates.push(format!("{parent}/pyproject.toml"));
+                candidates.push(format!("{parent}/requirements.txt"));
+            } else if ext == "go" {
+                candidates.push(format!("{parent}/go.mod"));
+            }
+        }
+    }
+
+    candidates.sort();
+    candidates.dedup();
+    candidates.truncate(24);
+
+    for path in candidates {
         let key = path.to_lowercase();
-        if already_have.iter().any(|p| p.eq_ignore_ascii_case(path) || p.ends_with(&format!("/{key}")))
+        if !attempted.insert(key.clone()) {
+            continue;
+        }
+        if already_have
+            .iter()
+            .any(|p| p.eq_ignore_ascii_case(&path) || p.ends_with(&format!("/{key}")))
         {
             continue;
         }
-        // Prefer exact path; also try nested for monorepos later — start with root.
-        if let Some(content) = fetch_repo_file(client, headers, repo, path, git_ref).await? {
-            if let Ok(parsed) = crate::parser::parse_file(path, &content) {
+        if let Some(content) = fetch_repo_file(client, headers, repo, &path, git_ref).await? {
+            if let Ok(parsed) = crate::parser::parse_file(&path, &content) {
                 out.push(parsed);
             }
         }
@@ -212,31 +255,24 @@ pub async fn gather_remote_context(
     already_have_paths: &HashSet<String>,
 ) -> Result<(RemoteRepoContext, Vec<ParsedFile>)> {
     let git_ref = if base_sha.is_empty() { "HEAD" } else { base_sha };
-
-    let manifests =
-        bootstrap_manifests(client, headers, repo, git_ref, changed_paths, already_have_paths)
-            .await
-            .unwrap_or_default();
-
-    // Guidelines: prefer head branch tip so in-PR CONTRIBUTING updates are seen; fall back to base.
     let head_ref = if head_ref.is_empty() { git_ref } else { head_ref };
-    let mut guidelines = fetch_guidelines(client, headers, repo, head_ref)
-        .await
-        .unwrap_or_default();
+
+    let (manifests_res, guidelines_res, codeowners_res, issues_res) = tokio::join!(
+        bootstrap_manifests(client, headers, repo, git_ref, changed_paths, already_have_paths),
+        fetch_guidelines(client, headers, repo, head_ref),
+        fetch_codeowner_reviewers(client, headers, repo, git_ref, changed_paths),
+        fetch_linked_issues(client, headers, repo, pr_body),
+    );
+
+    let manifests = manifests_res.unwrap_or_default();
+    let mut guidelines = guidelines_res.unwrap_or_default();
     if guidelines.is_empty() && head_ref != git_ref {
         guidelines = fetch_guidelines(client, headers, repo, git_ref)
             .await
             .unwrap_or_default();
     }
-
-    let codeowner_reviewers =
-        fetch_codeowner_reviewers(client, headers, repo, git_ref, changed_paths)
-            .await
-            .unwrap_or_default();
-
-    let linked_issues = fetch_linked_issues(client, headers, repo, pr_body)
-        .await
-        .unwrap_or_default();
+    let codeowner_reviewers = codeowners_res.unwrap_or_default();
+    let linked_issues = issues_res.unwrap_or_default();
 
     let mut summary = String::new();
     let _ = std::fmt::Write::write_fmt(

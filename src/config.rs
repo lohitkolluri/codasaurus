@@ -18,9 +18,6 @@ pub struct Config {
     pub guidelines: GuidelinesConfig,
 
     #[serde(default)]
-    pub tui: TuiConfig,
-
-    #[serde(default)]
     pub pre_merge: PreMergeConfig,
 }
 
@@ -93,14 +90,6 @@ pub struct GuidelinesConfig {
     /// Also set via CONTRIBUTING_GUIDELINES env var (takes precedence).
     #[serde(default)]
     pub contributing_guidelines: Option<String>,
-}
-
-/// Interactive TUI configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct TuiConfig {
-    /// Editor command to open files (defaults to $EDITOR / $VISUAL)
-    #[serde(default)]
-    pub editor: Option<String>,
 }
 
 /// Pre-merge check configuration
@@ -184,7 +173,6 @@ impl Default for Config {
                 cache_ttl_secs: 3600,
             },
             guidelines: GuidelinesConfig::default(),
-            tui: TuiConfig::default(),
             pre_merge: PreMergeConfig::default(),
         }
     }
@@ -223,6 +211,24 @@ pub struct BotPolicy {
     pub min_severity: String,
 }
 
+/// Per-repo bot flags from dashboard `config_json`.
+#[derive(Debug, Clone)]
+pub struct RepoBotFlags {
+    pub llm_enabled: bool,
+    pub auto_describe: bool,
+    pub auto_review_diff: bool,
+}
+
+impl Default for RepoBotFlags {
+    fn default() -> Self {
+        Self {
+            llm_enabled: true,
+            auto_describe: true,
+            auto_review_diff: true,
+        }
+    }
+}
+
 impl Config {
     /// Load file/env config, then overlay dashboard DB detector toggles when a pool is available.
     pub async fn load_for_bot(pool: Option<&crate::db::DbPool>) -> Self {
@@ -252,9 +258,13 @@ impl Config {
         policy
     }
 
-    /// Overlay per-repo `config_json` from the dashboard (`{ "detectors": {...}, "llm_enabled": bool }`).
-    pub fn overlay_repo_config_json(&mut self, config_json: &str) -> Option<bool> {
-        let value: serde_json::Value = serde_json::from_str(config_json).ok()?;
+    /// Overlay per-repo `config_json` from the dashboard.
+    /// Shape: `{ "detectors": {...}, "llm_enabled": bool, "auto_describe": bool, "auto_review_diff": bool }`.
+    pub fn overlay_repo_config_json(&mut self, config_json: &str) -> RepoBotFlags {
+        let mut flags = RepoBotFlags::default();
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(config_json) else {
+            return flags;
+        };
         if let Some(detectors) = value.get("detectors").and_then(|d| d.as_object()) {
             for (key, raw) in detectors {
                 let enabled = match raw {
@@ -267,10 +277,16 @@ impl Config {
                 apply_detector_key(&mut self.checks, key, enabled);
             }
         }
-        value
-            .get("llm_enabled")
-            .and_then(|v| v.as_bool())
-            .or(Some(true))
+        if let Some(v) = value.get("llm_enabled").and_then(|v| v.as_bool()) {
+            flags.llm_enabled = v;
+        }
+        if let Some(v) = value.get("auto_describe").and_then(|v| v.as_bool()) {
+            flags.auto_describe = v;
+        }
+        if let Some(v) = value.get("auto_review_diff").and_then(|v| v.as_bool()) {
+            flags.auto_review_diff = v;
+        }
+        flags
     }
 }
 
@@ -366,12 +382,12 @@ mod tests {
     fn overlay_repo_detectors_and_llm_flag() {
         let mut cfg = Config::default();
         assert!(cfg.checks.secrets);
-        let llm = cfg
-            .overlay_repo_config_json(
-                r#"{"detectors":{"secrets":false,"graph":false},"llm_enabled":false}"#,
-            )
-            .unwrap();
-        assert!(!llm);
+        let flags = cfg.overlay_repo_config_json(
+            r#"{"detectors":{"secrets":false,"graph":false},"llm_enabled":false,"auto_describe":false}"#,
+        );
+        assert!(!flags.llm_enabled);
+        assert!(!flags.auto_describe);
+        assert!(flags.auto_review_diff);
         assert!(!cfg.checks.secrets);
         assert!(!cfg.checks.graph);
         assert!(cfg.checks.hallucinated_imports);
