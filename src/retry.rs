@@ -124,7 +124,11 @@ pub async fn github_request(
         }
 
         let retryable = status.as_u16() == 429 || status.is_server_error();
+        if status.as_u16() == 429 {
+            crate::metrics::record_github_429();
+        }
         if attempt < config.max_retries && retryable {
+            crate::metrics::record_github_retry();
             let delay = parse_retry_after(&resp).unwrap_or_else(|| config.delay(attempt));
             let body = resp.text().await.unwrap_or_default();
             tracing::warn!(

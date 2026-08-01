@@ -299,6 +299,7 @@ pub async fn review_diff(
     let max_diff = crate::bot_runtime::BotRuntimeConfig::default().max_llm_diff_chars;
     let diff = truncate_chars(diff, max_diff);
     let prompt = build_review_prompt(&diff, context);
+    crate::metrics::record_llm_request(prompt.len());
 
     let client = llm_client()?;
 
@@ -381,6 +382,7 @@ RULES:
 
     let status = resp.status();
     if !status.is_success() {
+        crate::metrics::record_llm_error();
         let error_text = resp.text().await.unwrap_or_default();
         bail!("LLM API returned {status}: {error_text}");
     }
@@ -504,6 +506,7 @@ Write a helpful summary that:
 3. Provides actionable advice
 Keep it under 200 words and professional in tone."#
     );
+    crate::metrics::record_llm_request(user_prompt.len());
 
     let body = json!({
         "model": config.model,
@@ -536,11 +539,13 @@ Keep it under 200 words and professional in tone."#
                 .map_err(Into::into)
         },
     )
-    .await?;
+    .await
+    .inspect_err(|_| crate::metrics::record_llm_error())?;
 
     resp["choices"][0]["message"]["content"]
         .as_str()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .context("LLM summary response missing content")
+        .inspect_err(|_| crate::metrics::record_llm_error())
 }

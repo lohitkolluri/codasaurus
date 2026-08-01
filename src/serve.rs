@@ -80,7 +80,7 @@ fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> 
     let state = AppState { pool: pool.clone() };
     let api = api::build_router(state);
 
-    bot::set_config_pool(pool);
+    bot::set_config_pool(pool.clone());
 
     if bot_config
         .as_ref()
@@ -100,7 +100,11 @@ fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> 
         host: "0.0.0.0".into(),
         port: 3000,
     });
-    bot::set_bot_config(bot_cfg);
+    bot::set_bot_config(bot_cfg.clone());
+    if !bot_cfg.app_id.is_empty() && !bot_cfg.webhook_secret.is_empty() {
+        bot::start_review_worker(pool, bot_cfg);
+        println!("  Review queue worker started");
+    }
 
     // Direct POST route — no .nest(), no State/Extension, no state-laden routers.
     // GitHub sends POST to /webhook/ (with trailing slash). Register both variants
@@ -229,15 +233,7 @@ async fn health_handler() -> impl IntoResponse {
 }
 
 async fn metrics_handler() -> impl IntoResponse {
-    let body = format!(
-        "# HELP codasaurus_up Codasaurus process is up\n\
-         # TYPE codasaurus_up gauge\n\
-         codasaurus_up 1\n\
-         # HELP codasaurus_build_info Build version\n\
-         # TYPE codasaurus_build_info gauge\n\
-         codasaurus_build_info{{version=\"{}\"}} 1\n",
-        env!("CARGO_PKG_VERSION")
-    );
+    let body = crate::metrics::render_prometheus();
     (
         StatusCode::OK,
         [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],

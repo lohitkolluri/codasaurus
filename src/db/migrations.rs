@@ -277,6 +277,42 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .await?;
     }
 
+    if current < 6 {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS review_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                repo TEXT NOT NULL,
+                pr_number INTEGER NOT NULL,
+                head_sha TEXT NOT NULL,
+                installation_id INTEGER,
+                action TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'running', 'done', 'failed')),
+                attempts INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_review_jobs_repo_pr_sha
+             ON review_jobs(repo, pr_number, head_sha)",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_review_jobs_status_created
+             ON review_jobs(status, created_at)",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (6)")
+            .execute(pool)
+            .await?;
+    }
+
     Ok(())
 }
 
