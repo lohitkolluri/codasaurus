@@ -30,7 +30,7 @@ Codasaurus is a **single Rust binary** you self-host as a GitHub App. On every P
 - **Vulnerable packages** — OSV.dev lookups
 - **Stale APIs / AI slop** — deprecated patterns, TODO leaks, over-engineering
 - **Guidelines** — branch / DCO / conventional commits from remote `CONTRIBUTING`
-- **Walkthrough + slash commands** — `@codasaurus review|describe|improve|ask|ignore|help`
+- **Walkthrough + slash commands** — `@codasaurus review|describe|summarize|improve|security|labels|changelog|ask|ignore|help`
 
 ## Features
 
@@ -101,12 +101,16 @@ On any PR comment:
 
 | Command                | Effect                                             |
 | ---------------------- | -------------------------------------------------- |
-| `@codasaurus review`   | Full Tier-1 (+ optional LLM summary)               |
-| `@codasaurus describe` | Walkthrough / PR description                       |
-| `@codasaurus improve`  | LLM review_diff suggestions (falls back to static) |
-| `@codasaurus ask …`    | Question about the PR                              |
-| `@codasaurus ignore`   | Suppress fingerprint / learning                    |
-| `@codasaurus help`     | Command list                                       |
+| `@codasaurus review` | Full Tier-1 (+ optional LLM summary) |
+| `@codasaurus describe` | Walkthrough / PR description |
+| `@codasaurus summarize` | Short executive summary |
+| `@codasaurus improve` | LLM review_diff suggestions (falls back to static) |
+| `@codasaurus security` | Secrets / vuln-focused scan |
+| `@codasaurus labels` | Suggest and apply labels |
+| `@codasaurus changelog` | Draft a changelog bullet |
+| `@codasaurus ask …` | Question about the PR |
+| `@codasaurus ignore` | Suppress fingerprint / learning |
+| `@codasaurus help` | Command list |
 
 ## LLM (optional)
 

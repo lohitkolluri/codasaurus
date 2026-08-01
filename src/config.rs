@@ -393,4 +393,3 @@ mod tests {
         assert!(cfg.checks.hallucinated_imports);
     }
 }
-

@@ -384,9 +384,11 @@ pub async fn review_pr_with_options(
     let mut config = crate::config::Config::load_for_bot(pool).await;
     let mut repo_llm_enabled = true;
     let mut repo_flags = crate::config::RepoBotFlags::default();
+    let mut repo_config_json: Option<String> = None;
     if let Some(pool) = pool {
         if let Ok(Some(repo)) = crate::db::repos::get_repo_by_full_name(pool, repo_name).await {
             if let Some(ref cfg_json) = repo.config_json {
+                repo_config_json = Some(cfg_json.clone());
                 repo_flags = config.overlay_repo_config_json(cfg_json);
                 repo_llm_enabled = repo_flags.llm_enabled;
             }
@@ -399,7 +401,16 @@ pub async fn review_pr_with_options(
     if !repo_flags.auto_review_diff {
         options.auto_review_diff = false;
     }
-    let policy = crate::config::Config::bot_policy(pool).await;
+    let policy_pack = super::policy::PolicyPack::load(
+        pool,
+        repo_config_json.as_deref(),
+        config.pre_merge.max_blocking,
+        config.pre_merge.max_warnings,
+    )
+    .await;
+    let policy = crate::config::BotPolicy {
+        min_severity: policy_pack.min_severity.clone(),
+    };
     let runtime = crate::bot_runtime::BotRuntimeConfig::default();
 
     // Keep local FS guidelines off; remote guidelines applied after Contents API fetch.
@@ -552,6 +563,13 @@ pub async fn review_pr_with_options(
         &super::SignalBudget::default(),
     );
 
+    // Policy pack: forbidden paths + count caps.
+    findings.findings.extend(super::policy::forbidden_path_findings(
+        &changed_paths,
+        &policy_pack.forbidden_paths,
+    ));
+    super::policy::enforce_count_caps(&mut findings.findings, &policy_pack);
+
     let mut reviewers = suggest_reviewers(
         client,
         &auth_header,
@@ -568,6 +586,22 @@ pub async fn review_pr_with_options(
         }
     }
     reviewers.truncate(8);
+
+    // Request CODEOWNERS / suggested reviewers via GitHub API (not just suggest in markdown).
+    if policy_pack.request_reviewers && !reviewers.is_empty() {
+        if let Err(e) = super::github_extra::request_pull_reviewers(
+            client,
+            &headers,
+            repo_name,
+            pr_number,
+            &reviewers,
+            pr_author,
+        )
+        .await
+        {
+            tracing::warn!(error = %e, "request_reviewers failed");
+        }
+    }
 
     let review_ctx = crate::bot::repo_context::to_review_context(
         &remote_ctx,
@@ -670,6 +704,20 @@ pub async fn review_pr_with_options(
             false,
         )
         .await;
+        if policy_pack.create_check_run {
+            if let Err(e) = super::github_extra::create_findings_check_run(
+                client,
+                &headers,
+                repo_name,
+                head_sha,
+                &findings.findings,
+                false,
+            )
+            .await
+            {
+                tracing::warn!(error = %e, "check run failed");
+            }
+        }
         return Ok(());
     }
 
@@ -750,6 +798,21 @@ pub async fn review_pr_with_options(
         has_blocking,
     )
     .await;
+
+    if policy_pack.create_check_run {
+        if let Err(e) = super::github_extra::create_findings_check_run(
+            client,
+            &headers,
+            repo_name,
+            head_sha,
+            &findings.findings,
+            has_blocking,
+        )
+        .await
+        {
+            tracing::warn!(error = %e, "check run failed");
+        }
+    }
 
     // Generate and post LLM summary if enabled for this repo and an API key is available
     if repo_llm_enabled {

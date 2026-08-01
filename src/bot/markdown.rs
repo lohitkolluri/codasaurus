@@ -292,7 +292,11 @@ pub fn help_body() -> String {
      | --- | --- |\n\
      | `@codasaurus review` | Run static (+ optional LLM) review |\n\
      | `@codasaurus describe` | Generate PR walkthrough / summary |\n\
+     | `@codasaurus summarize` | Short PR summary |\n\
      | `@codasaurus improve` | Post actionable improvement suggestions |\n\
+     | `@codasaurus security` | Secrets / vuln-focused scan |\n\
+     | `@codasaurus labels` | Suggest and apply PR labels |\n\
+     | `@codasaurus changelog` | Draft a changelog bullet |\n\
      | `@codasaurus ask …` | Answer a question about this PR |\n\
      | `@codasaurus ignore <fp>` | Dismiss a finding by fingerprint |\n\
      | `@codasaurus help` | Show this help |\n"

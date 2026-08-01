@@ -8,8 +8,10 @@ use tokio::time::timeout;
 
 mod auth;
 mod codeowners;
+mod github_extra;
 mod github_files;
 pub(crate) mod markdown;
+mod policy;
 mod quality;
 pub(crate) use quality::{apply_signal_budget, SignalBudget};
 pub(crate) mod repo_context;
@@ -391,6 +393,10 @@ enum BotCommand {
     Review,
     Describe,
     Improve,
+    Summarize,
+    Labels,
+    Changelog,
+    Security,
     Ask(String),
     Ignore(Option<String>),
     Help,
@@ -402,14 +408,20 @@ fn parse_bot_command(body: &str) -> Option<BotCommand> {
     if !mentions.iter().any(|m| lower.contains(m)) {
         return None;
     }
-    if lower.contains(" help") || lower.ends_with("help") {
-        // avoid matching "helpful" — require word boundary-ish
-        if lower.contains("@codasaurus help")
-            || lower.contains("@codasaurus-bot help")
-            || lower.contains("@codasaurus-bot help")
-        {
-            return Some(BotCommand::Help);
-        }
+    if lower.contains("@codasaurus help") || lower.contains("@codasaurus-bot help") {
+        return Some(BotCommand::Help);
+    }
+    if lower.contains("changelog") {
+        return Some(BotCommand::Changelog);
+    }
+    if lower.contains("security") {
+        return Some(BotCommand::Security);
+    }
+    if lower.contains("labels") || lower.contains("label") {
+        return Some(BotCommand::Labels);
+    }
+    if lower.contains("summarize") || lower.contains("summary") {
+        return Some(BotCommand::Summarize);
     }
     if lower.contains("describe") {
         return Some(BotCommand::Describe);
@@ -512,6 +524,10 @@ async fn handle_bot_command(
         BotCommand::Describe => spawn_describe(ctx, pr_number, timeout_secs).await,
         BotCommand::Improve => spawn_improve(ctx, pr_number, timeout_secs).await,
         BotCommand::Ask(q) => spawn_ask(ctx, pr_number, q, timeout_secs).await,
+        BotCommand::Summarize => spawn_summarize(ctx, pr_number, timeout_secs).await,
+        BotCommand::Labels => spawn_labels(ctx, pr_number, timeout_secs).await,
+        BotCommand::Changelog => spawn_changelog(ctx, pr_number, timeout_secs).await,
+        BotCommand::Security => spawn_security(ctx, pr_number, timeout_secs).await,
     }
 }
 
@@ -721,6 +737,241 @@ async fn spawn_ask(ctx: WebhookContext, pr_number: i64, question: String, timeou
             "Configure an LLM API key to use `@codasaurus ask`.".into()
         };
         let text = format!("### Codasaurus ask\n\n> {question}\n\n{answer}");
+        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
+    })
+    .await;
+}
+
+async fn spawn_summarize(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
+    let Ok(_permit) = REVIEW_PERMITS.acquire().await else {
+        tracing::error!("review semaphore closed");
+        return;
+    };
+    let _ = timeout(Duration::from_secs(timeout_secs), async move {
+        let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
+        let pr = fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await?;
+        let title = pr["title"].as_str().unwrap_or("");
+        let body = pr["body"].as_str().unwrap_or("");
+        let pool = bot_db_pool();
+        let text = if let Some(llm) = crate::llm::LlmConfig::from_db_or_env(pool).await {
+            match crate::llm::summarize_pr(
+                title,
+                body,
+                "Write a 3-5 sentence executive summary of this PR. No markdown tables.",
+                &llm,
+            )
+            .await
+            {
+                Ok(s) => format!("### Codasaurus summarize\n\n{s}"),
+                Err(e) => format!(
+                    "### Codasaurus summarize\n\n**{title}**\n\n{}\n\n_LLM unavailable: {e}_",
+                    body.chars().take(400).collect::<String>()
+                ),
+            }
+        } else {
+            format!(
+                "### Codasaurus summarize\n\n**{title}**\n\n{}",
+                body.chars().take(600).collect::<String>()
+            )
+        };
+        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
+    })
+    .await;
+}
+
+async fn spawn_labels(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
+    let Ok(_permit) = REVIEW_PERMITS.acquire().await else {
+        tracing::error!("review semaphore closed");
+        return;
+    };
+    let _ = timeout(Duration::from_secs(timeout_secs), async move {
+        let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()?;
+        let auth = format!("Bearer {token}");
+        let files_url = format!(
+            "https://api.github.com/repos/{}/pulls/{}/files?per_page=100",
+            ctx.repo_full_name, pr_number
+        );
+        let files: Vec<serde_json::Value> = client
+            .get(&files_url)
+            .header("Authorization", &auth)
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", USER_AGENT)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        let paths: Vec<String> = files
+            .iter()
+            .filter_map(|f| f["filename"].as_str().map(str::to_string))
+            .collect();
+        let labels = github_extra::suggest_labels(&paths, &[]);
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::AUTHORIZATION,
+            auth.parse().map_err(|e| anyhow::anyhow!("{e}"))?,
+        );
+        headers.insert(
+            reqwest::header::ACCEPT,
+            "application/vnd.github+json".parse().unwrap(),
+        );
+        github_extra::apply_labels(&client, &headers, &ctx.repo_full_name, pr_number, &labels)
+            .await?;
+        let text = format!(
+            "### Codasaurus labels\n\nApplied: {}\n\n_Based on changed paths._",
+            labels
+                .iter()
+                .map(|l| format!("`{l}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
+    })
+    .await;
+}
+
+async fn spawn_changelog(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
+    let Ok(_permit) = REVIEW_PERMITS.acquire().await else {
+        tracing::error!("review semaphore closed");
+        return;
+    };
+    let _ = timeout(Duration::from_secs(timeout_secs), async move {
+        let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
+        let pr = fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await?;
+        let title = pr["title"].as_str().unwrap_or("Update").to_string();
+        let body = pr["body"].as_str().unwrap_or("").to_string();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()?;
+        let auth = format!("Bearer {token}");
+        let files_url = format!(
+            "https://api.github.com/repos/{}/pulls/{}/files?per_page=100",
+            ctx.repo_full_name, pr_number
+        );
+        let files: Vec<serde_json::Value> = client
+            .get(&files_url)
+            .header("Authorization", &auth)
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", USER_AGENT)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await
+            .unwrap_or_default();
+        let file_list: String = files
+            .iter()
+            .filter_map(|f| f["filename"].as_str())
+            .take(15)
+            .map(|p| format!("- `{p}`"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let pool = bot_db_pool();
+        let bullet = if let Some(llm) = crate::llm::LlmConfig::from_db_or_env(pool).await {
+            let ctx_text = format!("Changed files:\n{file_list}\n\nDraft one changelog bullet.");
+            crate::llm::summarize_pr(&title, &body, &ctx_text, &llm)
+                .await
+                .unwrap_or_else(|_| format!("- {title}"))
+        } else {
+            let kind = if title.to_ascii_lowercase().starts_with("fix") {
+                "Fixed"
+            } else if title.to_ascii_lowercase().starts_with("feat") {
+                "Added"
+            } else {
+                "Changed"
+            };
+            format!("- {kind}: {title}")
+        };
+
+        let text = format!(
+            "### Codasaurus changelog\n\n{bullet}\n\n<details><summary>Files</summary>\n\n{file_list}\n\n</details>"
+        );
+        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
+    })
+    .await;
+}
+
+async fn spawn_security(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
+    let Ok(_permit) = REVIEW_PERMITS.acquire().await else {
+        tracing::error!("review semaphore closed");
+        return;
+    };
+    let _ = timeout(Duration::from_secs(timeout_secs), async move {
+        let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .build()?;
+        let auth = format!("Bearer {token}");
+        let files_url = format!(
+            "https://api.github.com/repos/{}/pulls/{}/files?per_page=100",
+            ctx.repo_full_name, pr_number
+        );
+        let files: Vec<serde_json::Value> = client
+            .get(&files_url)
+            .header("Authorization", &auth)
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", USER_AGENT)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        let mut parsed = Vec::new();
+        for f in files.iter().take(80) {
+            let name = f["filename"].as_str().unwrap_or("");
+            let patch = f["patch"].as_str().unwrap_or("");
+            if name.is_empty() || patch.is_empty() {
+                continue;
+            }
+            // Reconstruct rough file content from patch added lines for secret scan.
+            let mut content = String::new();
+            for line in patch.lines() {
+                if let Some(rest) = line.strip_prefix('+') {
+                    if !rest.starts_with('+') {
+                        content.push_str(rest);
+                        content.push('\n');
+                    }
+                }
+            }
+            if content.is_empty() {
+                continue;
+            }
+            if let Ok(pf) = crate::parser::parse_file(name, &content) {
+                parsed.push(pf);
+            }
+        }
+
+        let mut findings = crate::detectors::security::detect_secrets(&parsed);
+        findings.extend(crate::detectors::vulnerabilities::detect(&parsed));
+        findings.retain(|f| {
+            matches!(
+                f.detector.as_str(),
+                "secrets" | "vulnerabilities" | "todo-leaks"
+            ) || f.severity == "blocking"
+        });
+
+        let mut text = String::from("### Codasaurus security\n\n");
+        if findings.is_empty() {
+            text.push_str("No secrets or known vulnerability signals in the scanned diff.\n");
+        } else {
+            text.push_str("| Severity | Detector | File | Message |\n| --- | --- | --- | --- |\n");
+            for f in findings.iter().take(25) {
+                let msg = f.message.replace('|', "\\|").chars().take(120).collect::<String>();
+                let _ = std::fmt::Write::write_fmt(
+                    &mut text,
+                    format_args!(
+                        "| `{}` | `{}` | `{}:{}` | {msg} |\n",
+                        f.severity, f.detector, f.file, f.line
+                    ),
+                );
+            }
+        }
+        text.push_str("\n_Run `@codasaurus review` for the full detector suite._");
         post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
     })
     .await;

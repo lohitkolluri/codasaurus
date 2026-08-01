@@ -12,9 +12,11 @@
    - Pull requests: **Read & Write**
    - Contents: **Read**
    - Issues: **Read & Write**
+   - Checks: **Read & Write** (Check Run annotations)
    - Metadata: **Read**
 4. **Subscribe to events:**
    - Pull request
+   - Issue comment
 5. **Where can this app be installed:** Any account
 
 ## 2. Generate a Private Key
