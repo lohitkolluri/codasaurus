@@ -372,15 +372,18 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     let policy = crate::config::Config::bot_policy(pool).await;
     let runtime = crate::bot_runtime::BotRuntimeConfig::default();
 
-    // Host cwd is not the PR repo — guidelines detector would scan the wrong tree.
-    if pool.is_some() {
-        config.checks.guidelines = false;
-    }
+    // Keep local FS guidelines off; remote guidelines applied after Contents API fetch.
+    let want_guidelines = config.checks.guidelines;
+    config.checks.guidelines = false;
 
     let client = GITHUB_CLIENT
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("GitHub API client not available (failed to initialize)"))?;
     let auth_header = format!("Bearer {token}");
+    let headers = github_api_headers(&auth_header)?;
+
+    let base_sha = pr["base"]["sha"].as_str().unwrap_or("");
+    let head_ref = pr["head"]["ref"].as_str().unwrap_or("");
 
     let files = fetch_pr_files(client, repo_name, pr_number, &auth_header)
         .await
@@ -393,9 +396,16 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         return Ok(());
     }
 
+    let changed_paths: Vec<String> = files
+        .iter()
+        .filter_map(|f| f["filename"].as_str().map(String::from))
+        .collect();
+
     let mut parsed_files_collected: Vec<crate::parser::ParsedFile> = Vec::new();
+    let mut already_have = std::collections::HashSet::new();
     for file in &files {
         let filename = file["filename"].as_str().unwrap_or("unknown");
+        already_have.insert(filename.to_string());
         let patch = file["patch"].as_str().unwrap_or("");
         if !patch.is_empty() && patch.len() < 100_000 {
             let parsed = match crate::parser::parse_unified_diff(filename, patch) {
@@ -411,21 +421,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         }
     }
 
-    // Registry/OSV use blocking HTTP — keep them off the Tokio worker threads.
-    let mut findings = if parsed_files_collected.is_empty() {
-        Findings::new()
-    } else {
-        let cfg = config.clone();
-        let parsed = parsed_files_collected.clone();
-        tokio::task::spawn_blocking(move || detectors::run_all(&parsed, &cfg))
-            .await
-            .map_err(|e| anyhow::anyhow!("detector task join error: {e}"))?
-    };
-
-    // Apply default_severity floor from dashboard settings
-    findings.findings.retain(|f| severity_at_least(f.severity, &policy.min_severity));
-
-    // Slop detection — check PR metadata for AI-generation signals
+    // Fetch commits early — used by slop + remote guidelines.
     let pr_author = pr["user"]["login"].as_str().unwrap_or("");
     let commits_url = format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/commits");
     let commit_messages: Vec<String> = match retry_async(
@@ -435,12 +431,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         || async {
             client
                 .get(&commits_url)
-                .header("Authorization", &auth_header)
-                .header("Accept", "application/vnd.github+json")
-                .header(
-                    "User-Agent",
-                    concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
-                )
+                .headers(headers.clone())
                 .send()
                 .await
                 .map_err(Into::into)
@@ -457,6 +448,60 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         },
         Err(_) => vec![],
     };
+
+    // Repo awareness: manifests, CONTRIBUTING/AGENTS, CODEOWNERS, linked issues.
+    let (remote_ctx, bootstrapped) = crate::bot::repo_context::gather_remote_context(
+        client,
+        &headers,
+        repo_name,
+        base_sha,
+        head_ref,
+        &pr_title,
+        &pr_body,
+        &changed_paths,
+        &already_have,
+    )
+    .await
+    .unwrap_or_default();
+
+    // Prefer full base-branch manifests over incomplete patch slices.
+    for m in bootstrapped {
+        parsed_files_collected.retain(|p| p.path != m.path);
+        parsed_files_collected.push(m);
+    }
+    if remote_ctx.manifests_added > 0 {
+        tracing::info!(
+            n = remote_ctx.manifests_added,
+            "bootstrapped dependency manifests from base branch"
+        );
+    }
+
+    // Registry/OSV use blocking HTTP — keep them off the Tokio worker threads.
+    let mut findings = if parsed_files_collected.is_empty() {
+        Findings::new()
+    } else {
+        let cfg = config.clone();
+        let parsed = parsed_files_collected.clone();
+        tokio::task::spawn_blocking(move || detectors::run_all(&parsed, &cfg))
+            .await
+            .map_err(|e| anyhow::anyhow!("detector task join error: {e}"))?
+    };
+
+    if want_guidelines && !remote_ctx.guidelines.is_empty() {
+        let g = detectors::guidelines::detect_remote(
+            &remote_ctx.guidelines,
+            head_ref,
+            &commit_messages,
+            &changed_paths,
+        );
+        findings.findings.extend(g);
+    }
+
+    // Apply default_severity floor from dashboard settings
+    findings
+        .findings
+        .retain(|f| severity_at_least(f.severity, &policy.min_severity));
+
     let slop_findings = crate::detectors::slop::detect_slop(
         &parsed_files_collected,
         &pr_title,
@@ -465,7 +510,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     );
     findings.findings.extend(slop_findings);
 
-    let reviewers = suggest_reviewers(
+    let mut reviewers = suggest_reviewers(
         client,
         &auth_header,
         repo_name,
@@ -474,6 +519,21 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         runtime.max_reviewer_files.min(MAX_REVIEWER_FILES),
     )
     .await;
+    // CODEOWNERS first, then history-based (deduped).
+    for owner in remote_ctx.codeowner_reviewers.iter().rev() {
+        if owner != pr_author && !reviewers.iter().any(|r| r == owner) {
+            reviewers.insert(0, owner.clone());
+        }
+    }
+    reviewers.truncate(8);
+
+    let review_ctx = crate::bot::repo_context::to_review_context(
+        &remote_ctx,
+        repo_name,
+        head_ref,
+        &pr_title,
+        &pr_body,
+    );
 
     let mut review_comments: Vec<serde_json::Value> = Vec::new();
     let mut has_blocking = false;
@@ -653,6 +713,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
                 &pr_title,
                 &pr_body,
                 &state,
+                &review_ctx,
             )
             .await
             {
@@ -693,8 +754,19 @@ async fn generate_and_post_summary(
     pr_title: &str,
     pr_body: &str,
     state: &Option<ReviewState>,
+    review_ctx: &crate::llm::ReviewContext,
 ) -> Result<()> {
     let mut findings_text = String::new();
+    if let Some(ref ctx) = review_ctx.repo_context {
+        let _ = writeln!(findings_text, "Repo context:\n{ctx}\n");
+    }
+    if !review_ctx.linked_issues.is_empty() {
+        let _ = writeln!(findings_text, "Linked issues:");
+        for iss in &review_ctx.linked_issues {
+            let _ = writeln!(findings_text, "- #{} {}", iss.number, iss.title);
+        }
+        findings_text.push('\n');
+    }
     // Prefer blocking findings first; cap volume for token cost.
     let mut ordered: Vec<&Finding> = findings.findings.iter().collect();
     ordered.sort_by_key(|f| match f.severity {

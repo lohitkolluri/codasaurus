@@ -120,16 +120,27 @@ fn resolve_guideline_path(path: &Path) -> Vec<GuidelineFile> {
 
 fn load_guideline_file(path: &Path, source: &str) -> Option<GuidelineFile> {
     let content = std::fs::read_to_string(path).ok()?;
-    if content.trim().is_empty() {
-        return None;
+    GuidelineFile::from_content(path, source, content)
+}
+
+impl GuidelineFile {
+    /// Build a guideline file from in-memory content (GitHub Contents API / tests).
+    pub fn from_content(
+        path: impl Into<PathBuf>,
+        source: &str,
+        content: String,
+    ) -> Option<Self> {
+        if content.trim().is_empty() {
+            return None;
+        }
+        let rules = parse_guidelines_md(&content);
+        Some(Self {
+            path: path.into(),
+            source: source.to_string(),
+            content,
+            rules,
+        })
     }
-    let rules = parse_guidelines_md(&content);
-    Some(GuidelineFile {
-        path: path.to_path_buf(),
-        source: source.to_string(),
-        content,
-        rules,
-    })
 }
 
 /// Format guideline files as a compact LLM-friendly string.

@@ -7,7 +7,10 @@ use tokio::sync::Mutex;
 use tokio::time::timeout;
 
 mod auth;
+mod codeowners;
+mod github_files;
 pub(crate) mod markdown;
+pub(crate) mod repo_context;
 mod review;
 mod verify;
 
