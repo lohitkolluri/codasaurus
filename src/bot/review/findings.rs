@@ -115,6 +115,10 @@ pub(crate) fn is_critical_full_file_path(path: &str) -> bool {
         || lower.contains("crypto")
         || lower.contains("secret")
         || lower.contains("password")
+        || lower.contains("middleware")
+        || lower.contains("rbac")
+        || lower.contains("permission")
+        || lower.contains(".github/workflows")
         || lower.ends_with("dockerfile")
         || lower.contains("dockerfile.")
         || lower.ends_with(".tf")
@@ -124,6 +128,7 @@ pub(crate) fn is_critical_full_file_path(path: &str) -> bool {
         || lower.contains("/helm/")
         || lower.contains("deployment.yaml")
         || lower.contains("deployment.yml")
+        || lower.contains("serviceaccount")
         || lower.ends_with("compose.yml")
         || lower.ends_with("compose.yaml")
 }
@@ -274,5 +279,13 @@ mod tests {
         }
         assert_eq!(pkg("Package `lodash` not found"), "lodash");
         assert_eq!(pkg("no backtick"), "unknown");
+    }
+
+    #[test]
+    fn critical_paths_include_workflows_and_rbac() {
+        assert!(is_critical_full_file_path(".github/workflows/ci.yml"));
+        assert!(is_critical_full_file_path("src/auth/middleware.rs"));
+        assert!(is_critical_full_file_path("k8s/rbac.yaml"));
+        assert!(!is_critical_full_file_path("src/ui/button.tsx"));
     }
 }

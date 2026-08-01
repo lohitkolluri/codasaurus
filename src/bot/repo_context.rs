@@ -314,17 +314,52 @@ pub async fn fetch_external_tickets(pr_body: &str) -> Vec<IssueContext> {
             let client = reqwest::Client::new();
             for id in ids {
                 let query = serde_json::json!({
-                    "query": format!(
-                        "{{ issue(id: \"{id}\") {{ title description }} }}"
-                    )
+                    "query": "query($q: String!) { issueSearch(query: $q, first: 1) { nodes { identifier title description } } }",
+                    "variables": { "q": id }
                 });
-                // Linear uses issue identifier via filter — best-effort GraphQL.
-                let _ = (api_key.as_str(), &client, &query);
-                out.push(IssueContext {
-                    number: 0,
-                    title: format!("[Linear {id}]"),
-                    body: Some("Linked from PR body (LINEAR_API_KEY set).".into()),
-                });
+                match client
+                    .post("https://api.linear.app/graphql")
+                    .header("Authorization", api_key.as_str())
+                    .header("Content-Type", "application/json")
+                    .json(&query)
+                    .send()
+                    .await
+                {
+                    Ok(resp) if resp.status().is_success() => {
+                        if let Ok(v) = resp.json::<serde_json::Value>().await {
+                            let node = &v["data"]["issueSearch"]["nodes"][0];
+                            if node.is_object() {
+                                let title = node["title"].as_str().unwrap_or(&id).to_string();
+                                let body = node["description"]
+                                    .as_str()
+                                    .map(|s| s.chars().take(800).collect());
+                                let num = id
+                                    .split('-')
+                                    .next_back()
+                                    .and_then(|s| s.parse().ok())
+                                    .unwrap_or(0);
+                                out.push(IssueContext {
+                                    number: num,
+                                    title: format!("[Linear {id}] {title}"),
+                                    body,
+                                });
+                                continue;
+                            }
+                        }
+                        out.push(IssueContext {
+                            number: 0,
+                            title: format!("[Linear {id}]"),
+                            body: Some("Linked from PR body (fetch returned no issue).".into()),
+                        });
+                    }
+                    _ => {
+                        out.push(IssueContext {
+                            number: 0,
+                            title: format!("[Linear {id}]"),
+                            body: Some("Linked from PR body (Linear fetch failed).".into()),
+                        });
+                    }
+                }
             }
         } else {
             for id in ids {

@@ -303,7 +303,7 @@ pub fn help_body() -> String {
      | `@codasaurus improve` | Post actionable improvement suggestions |\n\
      | `@codasaurus security` | Secrets / vuln-focused scan |\n\
      | `@codasaurus labels` | Suggest and apply PR labels |\n\
-     | `@codasaurus changelog` | Draft a Keep a Changelog section |\n\
+     | `@codasaurus changelog` / `update_changelog` | Draft a Keep a Changelog section |\n\
      | `@codasaurus add_docs` | Suggest README/docs stubs for this PR |\n\
      | `@codasaurus ask …` | Answer a question about this PR |\n\
      | `@codasaurus ignore <fp>` | Dismiss a finding by fingerprint |\n\

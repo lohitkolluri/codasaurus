@@ -28,9 +28,10 @@ Codasaurus is a **single Rust binary** you self-host as a GitHub App. On every P
 - **Undeclared dependencies** — used but missing from the manifest
 - **Leaked secrets** — API keys, tokens, connection strings
 - **Vulnerable packages** — OSV.dev lookups
+- **IaC risks** — open CIDR, privileged pods, literal K8s secrets
 - **Stale APIs / AI slop** — deprecated patterns, TODO leaks, over-engineering
 - **Guidelines** — branch / DCO / conventional commits from remote `CONTRIBUTING`
-- **Walkthrough + slash commands** — `@codasaurus review|describe|summarize|improve|security|labels|changelog|ask|ignore|help`
+- **Walkthrough + slash commands** — `@codasaurus review|describe|summarize|improve|security|labels|changelog|add_docs|ask|ignore|help`
 
 ## Features
 
@@ -38,8 +39,9 @@ Codasaurus is a **single Rust binary** you self-host as a GitHub App. On every P
 - **Deterministic Tier 1.** Registry lookups and pattern matching — no LLM required.
 - **BYOK LLM.** OpenRouter or Ollama / any OpenAI-compatible endpoint.
 - **Learning.** Dismissals and fingerprints suppress noise across reviews.
-- **Self-hosted.** Docker Compose + SQLite; dashboard for repos, reviews, settings.
+- **Self-hosted.** Docker Compose + **SQLite (default)** or **Postgres** for multi-replica HA; optional OIDC SSO.
 - **One binary.** `codasaurus serve` (+ `health` / `version`).
+- **Ops.** Durable review queue, `/metrics`, backup docs — see [docs/ops-backup-restore.md](docs/ops-backup-restore.md).
 
 ## Architecture
 
@@ -52,7 +54,7 @@ flowchart TB
     BOT -.->|BYOK| T2[LLM summary / improve]
     T1 --> GH[Inline comments + walkthrough]
     T2 --> GH
-    BOT --> DB[(SQLite)]
+    BOT --> DB[(SQLite / Postgres)]
     DB --> DASH[Svelte dashboard]
 ```
 
@@ -64,6 +66,7 @@ flowchart TB
 | **phantom-deps**                   | Used but undeclared packages           | Manifest cross-reference |
 | **secrets**                        | Keys, tokens, JWTs, connection strings | Regex (15+ formats)      |
 | **vulnerabilities**                | Known CVEs in deps                     | OSV.dev                  |
+| **iac**                            | Open CIDR, privileged pods, K8s secrets| Terraform / YAML scan    |
 | **todo-leaks / slop**              | `TODO`/`FIXME`, AI markers             | Line scan                |
 | **over-engineering / boilerplate** | Unnecessary abstraction                | AST heuristics           |
 | **stale-api**                      | Deprecated API patterns                | Migration patterns       |
@@ -74,18 +77,22 @@ flowchart TB
 ## Quick Start
 
 ```bash
-# Clone and run
+# Clone and run (SQLite)
 git clone https://github.com/lohitkolluri/codasaurus.git
 cd codasaurus
 docker compose up
 
+# Optional Postgres HA
+docker compose -f docker-compose.postgres.yml up
+
 # Or build locally
 cargo build --release
 export DATABASE_URL="sqlite://./codasaurus.db?mode=rwc"
+# or: export DATABASE_URL="postgres://codasaurus:codasaurus@localhost:5432/codasaurus"
 ./target/release/codasaurus serve --port 3000
 ```
 
-Open the dashboard, complete setup, install the GitHub App on your repos. See [docs/github-app-setup.md](docs/github-app-setup.md).
+Open the dashboard, complete setup, install the GitHub App on your repos. See [docs/github-app-setup.md](docs/github-app-setup.md). Optional OIDC: set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and `PUBLIC_URL` / `OIDC_REDIRECT_URI`.
 
 Binary commands:
 
@@ -107,7 +114,8 @@ On any PR comment:
 | `@codasaurus improve` | LLM review_diff suggestions (falls back to static) |
 | `@codasaurus security` | Secrets / vuln-focused scan |
 | `@codasaurus labels` | Suggest and apply labels |
-| `@codasaurus changelog` | Draft a changelog bullet |
+| `@codasaurus changelog` / `update_changelog` | Draft Keep a Changelog bullets |
+| `@codasaurus add_docs` | Suggest docs stubs for this PR |
 | `@codasaurus ask …` | Question about the PR |
 | `@codasaurus ignore` | Suppress fingerprint / learning |
 | `@codasaurus help` | Command list |
@@ -134,7 +142,7 @@ Enable LLM in the dashboard per installation / repo settings.
 | **LLM**                   | Bundled    | Bundled            | BYOK / vendor    | **BYOK OpenRouter / Ollama**           |
 | **Learning**              | Yes        | Yes                | Rules / RAG      | **Dismiss fingerprints**               |
 
-Roadmap (“Excalibur”): auto-describe, severity budgets, Check Runs, durable queue, Postgres HA — see `.cursor/plans/excalibur-pr-agent.md`.
+Roadmap (“Excalibur”): GitLab / IDE / MCP after GitHub path stays best-in-class — see `.cursor/plans/excalibur-pr-agent.md`. Review practices: [docs/code-review.md](docs/code-review.md).
 
 ## Configuration
 
@@ -149,6 +157,7 @@ secrets = true
 over_engineering = true
 boilerplate = true
 todo_leaks = true
+iac = true
 ```
 
 ## Development

@@ -93,6 +93,11 @@ pub async fn review_pr_with_options(
                 repo_llm_enabled = repo_flags.llm_enabled;
             }
         }
+        if let Ok(Some(v)) = crate::db::config::get_config(pool, "auto_labels_enabled").await {
+            if matches!(v.to_ascii_lowercase().as_str(), "false" | "0" | "no" | "off") {
+                repo_flags.auto_labels = false;
+            }
+        }
     }
     let mut options = options;
     if !repo_flags.auto_describe {
@@ -508,7 +513,7 @@ pub async fn review_pr_with_options(
                 tracing::warn!(error = %e, "check run failed");
             }
         }
-        {
+        if repo_flags.auto_labels {
             let paths: Vec<String> = files
                 .iter()
                 .filter_map(|f| f["filename"].as_str().map(str::to_string))
@@ -619,7 +624,7 @@ pub async fn review_pr_with_options(
     }
 
     // Soft-apply suggested labels from paths + detectors (best-effort).
-    {
+    if repo_flags.auto_labels {
         let paths: Vec<String> = files
             .iter()
             .filter_map(|f| f["filename"].as_str().map(str::to_string))

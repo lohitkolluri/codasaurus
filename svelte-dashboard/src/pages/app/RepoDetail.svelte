@@ -45,7 +45,7 @@
       } else {
         const DETECTOR_KEYS = [
           "hallucinated_imports", "phantom_deps", "vulnerabilities", "secrets",
-          "over_engineering", "boilerplate", "todo_leaks", "stale_api", "graph", "guidelines",
+          "over_engineering", "boilerplate", "todo_leaks", "stale_api", "graph", "guidelines", "iac",
         ];
         const defaults = {};
         for (const key of DETECTOR_KEYS) {

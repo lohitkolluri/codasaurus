@@ -173,7 +173,7 @@ pub async fn create_findings_check_run(
     Ok(())
 }
 
-/// Apply suggested labels to a PR (issues API).
+/// Apply suggested labels to a PR (issues API). Creates missing labels when possible.
 pub async fn apply_labels(
     client: &reqwest::Client,
     headers: &HeaderMap,
@@ -184,6 +184,8 @@ pub async fn apply_labels(
     if labels.is_empty() {
         return Ok(());
     }
+    ensure_labels_exist(client, headers, repo, labels).await;
+
     let url = format!("https://api.github.com/repos/{repo}/issues/{pr_number}/labels");
     let body = serde_json::json!({ "labels": labels });
     let resp = retry_async(
@@ -208,22 +210,80 @@ pub async fn apply_labels(
     Ok(())
 }
 
+fn label_color(name: &str) -> &'static str {
+    match name {
+        "security" => "d73a4a",
+        "ci" => "5319e7",
+        "tests" => "0e8a16",
+        "documentation" => "0075ca",
+        "dependencies" => "0366d6",
+        "infrastructure" => "fbca04",
+        "needs-review" => "e4e669",
+        _ => "cfd3d7",
+    }
+}
+
+/// Best-effort create repo labels so apply does not 422 on missing names.
+async fn ensure_labels_exist(
+    client: &reqwest::Client,
+    headers: &HeaderMap,
+    repo: &str,
+    labels: &[String],
+) {
+    for name in labels {
+        let url = format!("https://api.github.com/repos/{repo}/labels");
+        let body = serde_json::json!({
+            "name": name,
+            "color": label_color(name),
+        });
+        let _ = client
+            .post(&url)
+            .headers(headers.clone())
+            .header("User-Agent", USER_AGENT)
+            .json(&body)
+            .send()
+            .await;
+        // 201 created, 422 already exists — both fine
+    }
+}
+
 /// Suggest labels from changed paths + finding detectors.
 pub fn suggest_labels(paths: &[String], detectors: &[String]) -> Vec<String> {
     let mut labels = Vec::new();
     let joined = paths.join("\n").to_lowercase();
-    if paths.iter().any(|p| p.contains("test") || p.ends_with("_test.rs") || p.contains("spec.")) {
+    if paths.iter().any(|p| {
+        let l = p.to_lowercase();
+        l.contains("test") || l.ends_with("_test.rs") || l.contains("spec.") || l.contains("__tests__")
+    }) {
         labels.push("tests".into());
     }
-    if joined.contains("dockerfile") || joined.contains(".github/workflows") {
+    if joined.contains("dockerfile")
+        || joined.contains(".github/workflows")
+        || joined.contains(".gitlab-ci")
+        || joined.contains("cloudbuild")
+    {
         labels.push("ci".into());
+    }
+    if paths.iter().any(|p| {
+        let l = p.to_lowercase();
+        l.ends_with(".tf")
+            || l.ends_with(".tfvars")
+            || l.contains("/k8s/")
+            || l.contains("/helm/")
+            || l.contains("compose.y")
+            || l.contains("deployment.y")
+    }) {
+        labels.push("infrastructure".into());
     }
     if paths.iter().any(|p| {
         p.ends_with(".md") || p.contains("docs/") || p.eq_ignore_ascii_case("readme.md")
     }) {
         labels.push("documentation".into());
     }
-    if detectors.iter().any(|d| d == "secrets" || d == "vulnerabilities") {
+    if detectors
+        .iter()
+        .any(|d| d == "secrets" || d == "vulnerabilities" || d == "iac")
+    {
         labels.push("security".into());
     }
     if detectors
@@ -260,5 +320,15 @@ mod tests {
             &["secrets".into()],
         );
         assert!(labels.contains(&"security".into()));
+    }
+
+    #[test]
+    fn suggests_iac_and_infra_labels() {
+        let labels = suggest_labels(
+            &["infra/main.tf".into()],
+            &["iac".into()],
+        );
+        assert!(labels.contains(&"security".into()));
+        assert!(labels.contains(&"infrastructure".into()));
     }
 }

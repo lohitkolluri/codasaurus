@@ -197,6 +197,7 @@ fn apply_enabled_flag(checks: &mut CheckConfig, key: &str, value: &str) {
         "stale_api_enabled" => checks.stale_api = enabled,
         "guidelines_enabled" => checks.guidelines = enabled,
         "graph_enabled" => checks.graph = enabled,
+        "iac_enabled" => checks.iac = enabled,
         _ => {}
     }
 }
@@ -222,6 +223,7 @@ pub struct RepoBotFlags {
     pub llm_enabled: bool,
     pub auto_describe: bool,
     pub auto_review_diff: bool,
+    pub auto_labels: bool,
 }
 
 impl Default for RepoBotFlags {
@@ -230,6 +232,7 @@ impl Default for RepoBotFlags {
             llm_enabled: true,
             auto_describe: true,
             auto_review_diff: true,
+            auto_labels: true,
         }
     }
 }
@@ -264,7 +267,7 @@ impl Config {
     }
 
     /// Overlay per-repo `config_json` from the dashboard.
-    /// Shape: `{ "detectors": {...}, "llm_enabled": bool, "auto_describe": bool, "auto_review_diff": bool }`.
+    /// Shape: `{ "detectors": {...}, "llm_enabled": bool, "auto_describe": bool, "auto_review_diff": bool, "auto_labels": bool }`.
     pub fn overlay_repo_config_json(&mut self, config_json: &str) -> RepoBotFlags {
         let mut flags = RepoBotFlags::default();
         let Ok(value) = serde_json::from_str::<serde_json::Value>(config_json) else {
@@ -291,6 +294,9 @@ impl Config {
         if let Some(v) = value.get("auto_review_diff").and_then(|v| v.as_bool()) {
             flags.auto_review_diff = v;
         }
+        if let Some(v) = value.get("auto_labels").and_then(|v| v.as_bool()) {
+            flags.auto_labels = v;
+        }
         flags
     }
 }
@@ -307,6 +313,7 @@ fn apply_detector_key(checks: &mut CheckConfig, key: &str, enabled: bool) {
         "stale_api" => checks.stale_api = enabled,
         "guidelines" => checks.guidelines = enabled,
         "graph" => checks.graph = enabled,
+        "iac" => checks.iac = enabled,
         _ => {}
     }
 }

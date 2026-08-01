@@ -95,6 +95,8 @@ async fn set_setting(
         "stale_api_enabled",
         "graph_enabled",
         "guidelines_enabled",
+        "iac_enabled",
+        "auto_labels_enabled",
     ];
     if !ALLOWED_KEYS.contains(&key.as_str()) {
         return Err(ApiError::bad_request(format!("Unknown setting: {key}")));

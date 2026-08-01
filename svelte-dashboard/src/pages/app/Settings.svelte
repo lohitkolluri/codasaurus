@@ -40,8 +40,15 @@
 
   const DETECTOR_KEYS = [
     "hallucinated_imports", "phantom_deps", "vulnerabilities", "secrets",
-    "over_engineering", "boilerplate", "todo_leaks", "stale_api", "graph", "guidelines",
+    "over_engineering", "boilerplate", "todo_leaks", "stale_api", "graph", "guidelines", "iac",
   ];
+
+  let maxWarnings = $state("20");
+  let maxBlocking = $state("0");
+  let forbiddenPaths = $state("");
+  let autoLabels = $state(true);
+  let policySaving = $state(false);
+  let policyMsg = $state("");
 
   const PROVIDER_DEFAULTS = {
     openrouter: { model: "openai/gpt-4o", baseUrl: "https://openrouter.ai/api/v1" },
@@ -96,6 +103,10 @@
       }
       detectorToggles = toggles;
       defaultSeverity = data.default_severity ?? "warning";
+      maxWarnings = data.max_warnings ?? "20";
+      maxBlocking = data.max_blocking ?? "0";
+      forbiddenPaths = data.forbidden_paths ?? "";
+      autoLabels = data.auto_labels_enabled !== "false";
     } catch (err) {
       error = err.message || "Failed to load settings";
     } finally {
@@ -139,6 +150,22 @@
       severityMsg = "Saved";
     } catch (err) { severityMsg = err.message || "Save failed"; }
     finally { severitySaving = false; }
+  }
+
+  async function savePolicy() {
+    policySaving = true; policyMsg = "";
+    try {
+      const updates = [
+        api.put("/api/settings/max_warnings", { value: maxWarnings }),
+        api.put("/api/settings/max_blocking", { value: maxBlocking }),
+        api.put("/api/settings/forbidden_paths", { value: forbiddenPaths }),
+        api.put("/api/settings/auto_labels_enabled", { value: autoLabels ? "true" : "false" }),
+      ];
+      const results = await Promise.allSettled(updates);
+      const failed = results.filter(r => r.status === "rejected");
+      policyMsg = failed.length === 0 ? "Saved" : `Save failed (${failed.length} errors)`;
+    } catch (err) { policyMsg = err.message || "Save failed"; }
+    finally { policySaving = false; }
   }
 </script>
 
@@ -241,6 +268,37 @@
           <div class="save-row">
             <button onclick={saveSeverity} disabled={severitySaving}>{severitySaving ? "Saving…" : "Save"}</button>
             {#if severityMsg}<span class="save-msg" class:error={severityMsg !== "Saved"}>{severityMsg}</span>{/if}
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="section-heading">Policy pack</h3>
+          <div class="form-group">
+            <label for="max-warnings">Max warnings (soft cap)</label>
+            <input id="max-warnings" type="number" min="0" bind:value={maxWarnings} />
+          </div>
+          <div class="form-group">
+            <label for="max-blocking">Max blocking findings</label>
+            <input id="max-blocking" type="number" min="0" bind:value={maxBlocking} />
+          </div>
+          <div class="form-group">
+            <label for="forbidden-paths">Forbidden path prefixes (comma-separated)</label>
+            <input id="forbidden-paths" type="text" bind:value={forbiddenPaths} placeholder="vendor/,secrets/" />
+          </div>
+          <div class="detector-row" style="border:none;padding:8px 0">
+            <span>Auto-apply PR labels</span>
+            <label class="toggle">
+              <div class="toggle-track" class:on={autoLabels} role="checkbox" aria-checked={autoLabels}
+                tabindex="0"
+                onclick={() => (autoLabels = !autoLabels)}
+                onkeydown={(e) => { if (e.key === 'Enter') autoLabels = !autoLabels; }}>
+                <div class="toggle-knob"></div>
+              </div>
+            </label>
+          </div>
+          <div class="save-row">
+            <button onclick={savePolicy} disabled={policySaving}>{policySaving ? "Saving…" : "Save"}</button>
+            {#if policyMsg}<span class="save-msg" class:error={policyMsg !== "Saved"}>{policyMsg}</span>{/if}
           </div>
         </div>
       {/if}

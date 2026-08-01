@@ -40,7 +40,7 @@ pub(crate) fn parse_bot_command(body: &str) -> Option<BotCommand> {
     if lower.contains("add_docs") || lower.contains("add-docs") || lower.contains("add docs") {
         return Some(BotCommand::AddDocs);
     }
-    if lower.contains("changelog") {
+    if lower.contains("changelog") || lower.contains("update_changelog") {
         return Some(BotCommand::Changelog);
     }
     if lower.contains("security") {
@@ -513,12 +513,35 @@ async fn spawn_changelog(ctx: WebhookContext, pr_number: i64, timeout_secs: u64)
             .join("\n");
 
         let pool = bot_db_pool();
-        let sections = if let Some(llm) = crate::llm::LlmConfig::from_db_or_env(pool).await {
-            let ctx_text = format!(
-                "Changed files:\n{file_list}\n\nWrite a Keep a Changelog style draft with sections \
-                 ### Added, ### Changed, ### Fixed, ### Security (omit empty). Short bullets only."
+        let existing = {
+            let mut headers = reqwest::header::HeaderMap::new();
+            if let Ok(v) = reqwest::header::HeaderValue::from_str(&auth) {
+                headers.insert(reqwest::header::AUTHORIZATION, v);
+            }
+            headers.insert(
+                reqwest::header::ACCEPT,
+                reqwest::header::HeaderValue::from_static("application/vnd.github+json"),
             );
-            crate::llm::summarize_pr(&title, &body, &ctx_text, &llm)
+            headers.insert(
+                reqwest::header::USER_AGENT,
+                reqwest::header::HeaderValue::from_static(USER_AGENT),
+            );
+            let head = pr["head"]["sha"].as_str().unwrap_or("HEAD");
+            match crate::bot::github_files::fetch_first_existing(
+                &client,
+                &headers,
+                &ctx.repo_full_name,
+                &["CHANGELOG.md", "CHANGELOG", "docs/CHANGELOG.md"],
+                head,
+            )
+            .await
+            {
+                Ok(Some((_path, content))) => content.chars().take(2000).collect::<String>(),
+                _ => String::new(),
+            }
+        };
+        let sections = if let Some(llm) = crate::llm::LlmConfig::from_db_or_env(pool).await {
+            crate::llm::changelog_pr(&title, &body, &file_list, &existing, &llm)
                 .await
                 .unwrap_or_else(|_| heuristic_changelog(&title, &file_list))
         } else {
@@ -816,6 +839,10 @@ mod tests {
         ));
         assert!(matches!(
             parse_bot_command("@codasaurus changelog"),
+            Some(BotCommand::Changelog)
+        ));
+        assert!(matches!(
+            parse_bot_command("@codasaurus update_changelog"),
             Some(BotCommand::Changelog)
         ));
     }
