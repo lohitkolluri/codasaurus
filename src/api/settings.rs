@@ -106,7 +106,8 @@ async fn set_setting(
             .flatten()
             .unwrap_or_default();
         let allow_loopback = provider == "ollama";
-        crate::ssrf::validate_llm_base_url(&body.value, allow_loopback)
+        crate::ssrf::validate_llm_base_url_resolved(&body.value, allow_loopback)
+            .await
             .map_err(ApiError::bad_request)?;
     }
     db::config::set_config(&state.pool, &key, &body.value).await?;

@@ -150,6 +150,7 @@ pub fn walkthrough_body(
     config: &Config,
     runtime: &BotRuntimeConfig,
     include_brand_gif: bool,
+    include_mermaid: bool,
 ) -> String {
     let counts = findings.count_by_severity();
     let blocking = *counts.get("blocking").unwrap_or(&0);
@@ -187,6 +188,12 @@ pub fn walkthrough_body(
         "PR: _{}_\n",
         escape_md(pr_title)
     );
+
+    if include_mermaid {
+        if let Some(diagram) = mermaid_change_flow(files) {
+            let _ = writeln!(body, "```mermaid\n{diagram}\n```\n");
+        }
+    }
 
     // Changed files table
     let _ = writeln!(body, "#### Changed files\n");
@@ -305,6 +312,43 @@ pub fn help_body() -> String {
 
 fn escape_md(s: &str) -> String {
     s.replace('|', "\\|").replace('\n', " ")
+}
+
+/// Compact mermaid flowchart of top path prefixes (shown when LLM is on).
+fn mermaid_change_flow(files: &[serde_json::Value]) -> Option<String> {
+    use std::collections::BTreeMap;
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for f in files {
+        let name = f["filename"].as_str().unwrap_or("");
+        if name.is_empty() {
+            continue;
+        }
+        let top = name
+            .split('/')
+            .next()
+            .unwrap_or(name)
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+            .take(24)
+            .collect::<String>();
+        if top.is_empty() {
+            continue;
+        }
+        *counts.entry(top).or_default() += 1;
+    }
+    if counts.is_empty() {
+        return None;
+    }
+    let mut nodes: Vec<(String, usize)> = counts.into_iter().collect();
+    nodes.sort_by(|a, b| b.1.cmp(&a.1));
+    nodes.truncate(6);
+
+    let mut out = String::from("flowchart LR\n  Author --> Review[Codasaurus]\n");
+    for (i, (name, n)) in nodes.iter().enumerate() {
+        let id = format!("N{i}");
+        let _ = writeln!(out, "  Review --> {id}[{name} ×{n}]");
+    }
+    Some(out)
 }
 
 fn truncate_utf8_owned(s: &mut String, max_bytes: usize) {

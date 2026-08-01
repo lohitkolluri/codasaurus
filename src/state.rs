@@ -1,10 +1,10 @@
-//! Review comment IDs and commit SHA tracking.
+//! Review comment IDs and commit SHA tracking (multi-replica safe leases).
 //! Uses the shared app DbPool when available; falls back to a dedicated SQLite file.
 
 use anyhow::Result;
 use sqlx::SqlitePool;
 use std::path::PathBuf;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 use tokio::runtime::{Handle, Runtime};
 
 static FALLBACK_RT: LazyLock<Runtime> =
@@ -20,19 +20,28 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 /// Stale `in_progress` claims older than this are reclaimable (crash / timeout recovery).
 const STALE_CLAIM_SECS: i64 = 600;
 
+/// Stable per-process lease identity for multi-replica claim ownership.
+fn lease_owner_id() -> &'static str {
+    static OWNER: OnceLock<String> = OnceLock::new();
+    OWNER.get_or_init(|| {
+        let host = std::env::var("HOSTNAME")
+            .or_else(|_| std::env::var("CODASAURUS_INSTANCE_ID"))
+            .unwrap_or_else(|_| "node".into());
+        format!("{host}-{}", std::process::id())
+    })
+}
+
 pub struct ReviewState {
     pool: SqlitePool,
 }
 
 impl ReviewState {
-    /// Use the shared bot/app database pool (preferred for serve/bot paths).
     pub fn from_pool(pool: &crate::db::DbPool) -> Self {
         Self {
             pool: pool.0.clone(),
         }
     }
 
-    /// Open the dedicated review_state.db (non-serve / test contexts).
     pub fn open() -> Result<Self> {
         Self::open_at(Self::db_path()?)
     }
@@ -71,11 +80,17 @@ impl ReviewState {
                     repo_pr TEXT PRIMARY KEY,
                     head_sha TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'completed',
+                    lease_owner TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL DEFAULT (datetime('now'))
                  )",
             )
             .execute(&self.pool)
             .await?;
+            let _ = sqlx::query(
+                "ALTER TABLE reviewed_commits ADD COLUMN lease_owner TEXT NOT NULL DEFAULT ''",
+            )
+            .execute(&self.pool)
+            .await;
             Ok::<_, anyhow::Error>(())
         })
     }
@@ -84,7 +99,6 @@ impl ReviewState {
         format!("{repo}/{pr_number}:{kind}")
     }
 
-    /// Legacy key without kind (pre–comment-slot split).
     fn legacy_comment_key(repo: &str, pr_number: i64) -> String {
         format!("{repo}/{pr_number}")
     }
@@ -104,7 +118,6 @@ impl ReviewState {
         if result.is_some() {
             return Ok(result.map(|r| r.0));
         }
-        // Walkthrough falls back to legacy single-slot key once.
         if kind == "walkthrough" {
             let legacy = Self::legacy_comment_key(repo, pr_number);
             let result: Option<(i64,)> =
@@ -145,42 +158,58 @@ impl ReviewState {
         Ok(result.map(|r| r.0))
     }
 
-    /// Atomically claim a SHA for review. Returns false if this SHA was already
-    /// completed or is actively in progress (and not stale).
+    /// Atomically claim a SHA for review. Multi-replica safe via `lease_owner`.
     pub async fn try_claim_sha(&self, repo: &str, pr_number: i64, sha: &str) -> Result<bool> {
         let key = format!("{repo}/{pr_number}");
-        if let Some((existing, status, created_at)) = sqlx::query_as::<_, (String, String, String)>(
-            "SELECT head_sha, COALESCE(status, 'completed'), COALESCE(created_at, datetime('now'))
-             FROM reviewed_commits WHERE repo_pr = ?",
-        )
-        .bind(&key)
-        .fetch_optional(&self.pool)
-        .await?
+        let owner = lease_owner_id();
+        if let Some((existing, status, created_at, lease_owner)) =
+            sqlx::query_as::<_, (String, String, String, String)>(
+                "SELECT head_sha,
+                        COALESCE(status, 'completed'),
+                        COALESCE(created_at, datetime('now')),
+                        COALESCE(lease_owner, '')
+                 FROM reviewed_commits WHERE repo_pr = ?",
+            )
+            .bind(&key)
+            .fetch_optional(&self.pool)
+            .await?
         {
             if existing == sha {
                 if status == "completed" {
                     return Ok(false);
                 }
-                // Same SHA stuck in_progress — reclaim if stale.
-                if status == "in_progress" && !is_claim_stale(&created_at) {
+                if status == "in_progress"
+                    && lease_owner != owner
+                    && !is_claim_stale(&created_at)
+                {
+                    return Ok(false);
+                }
+                if status == "in_progress"
+                    && lease_owner == owner
+                    && !is_claim_stale(&created_at)
+                {
+                    // Same process already holds the lease (e.g. nested call).
                     return Ok(false);
                 }
             }
         }
 
         let result = sqlx::query(
-            "INSERT INTO reviewed_commits (repo_pr, head_sha, status, created_at)
-             VALUES (?, ?, 'in_progress', datetime('now'))
+            "INSERT INTO reviewed_commits (repo_pr, head_sha, status, lease_owner, created_at)
+             VALUES (?, ?, 'in_progress', ?, datetime('now'))
              ON CONFLICT(repo_pr) DO UPDATE SET
                head_sha = excluded.head_sha,
                status = 'in_progress',
+               lease_owner = excluded.lease_owner,
                created_at = datetime('now')
              WHERE reviewed_commits.head_sha != excluded.head_sha
                 OR reviewed_commits.status != 'in_progress'
+                OR reviewed_commits.lease_owner = excluded.lease_owner
                 OR reviewed_commits.created_at < datetime('now', ?)",
         )
         .bind(&key)
         .bind(sha)
+        .bind(owner)
         .bind(format!("-{STALE_CLAIM_SECS} seconds"))
         .execute(&self.pool)
         .await?;
@@ -188,33 +217,38 @@ impl ReviewState {
         Ok(result.rows_affected() > 0)
     }
 
-    /// Mark claim completed (success path).
     pub async fn set_reviewed_sha_async(&self, repo: &str, pr_number: i64, sha: &str) -> Result<()> {
         let key = format!("{repo}/{pr_number}");
+        let owner = lease_owner_id();
         sqlx::query(
-            "INSERT INTO reviewed_commits (repo_pr, head_sha, status, created_at)
-             VALUES (?, ?, 'completed', datetime('now'))
+            "INSERT INTO reviewed_commits (repo_pr, head_sha, status, lease_owner, created_at)
+             VALUES (?, ?, 'completed', ?, datetime('now'))
              ON CONFLICT(repo_pr) DO UPDATE SET
                head_sha = excluded.head_sha,
                status = 'completed',
+               lease_owner = excluded.lease_owner,
                created_at = datetime('now')",
         )
         .bind(&key)
         .bind(sha)
+        .bind(owner)
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
-    /// Clear an in_progress claim so a timed-out / failed review can be retried.
     pub async fn release_sha_claim(&self, repo: &str, pr_number: i64, sha: &str) -> Result<()> {
         let key = format!("{repo}/{pr_number}");
+        let owner = lease_owner_id();
         sqlx::query(
             "DELETE FROM reviewed_commits
-             WHERE repo_pr = ? AND head_sha = ? AND status = 'in_progress'",
+             WHERE repo_pr = ? AND head_sha = ? AND status = 'in_progress'
+               AND (lease_owner = ? OR lease_owner = '' OR created_at < datetime('now', ?))",
         )
         .bind(&key)
         .bind(sha)
+        .bind(owner)
+        .bind(format!("-{STALE_CLAIM_SECS} seconds"))
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -222,9 +256,8 @@ impl ReviewState {
 }
 
 fn is_claim_stale(created_at: &str) -> bool {
-    // SQLite datetime('now') is UTC `YYYY-MM-DD HH:MM:SS`. Parse loosely.
     let Ok(naive) = chrono::NaiveDateTime::parse_from_str(created_at, "%Y-%m-%d %H:%M:%S") else {
-        return true; // unparseable → allow reclaim
+        return true;
     };
     let created = naive.and_utc();
     let age = chrono::Utc::now().signed_duration_since(created);

@@ -60,9 +60,20 @@ pub async fn get_review(pool: &DbPool, id: i64) -> Result<Option<Review>, sqlx::
 }
 
 pub async fn create_review(pool: &DbPool, review: &ReviewCreate) -> Result<Review, sqlx::Error> {
+    // Upsert on (repo_id, pr_number, head_sha) so re-reviews don't duplicate dashboard rows.
+    let sha = review.pr_head_sha.clone().unwrap_or_default();
     sqlx::query_as::<_, Review>(
         "INSERT INTO reviews (repo_id, pr_number, pr_title, pr_author, pr_base_branch, pr_head_branch, pr_head_sha)
          VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(repo_id, pr_number, pr_head_sha) DO UPDATE SET
+           pr_title = excluded.pr_title,
+           pr_author = excluded.pr_author,
+           pr_base_branch = excluded.pr_base_branch,
+           pr_head_branch = excluded.pr_head_branch,
+           status = 'pending',
+           started_at = NULL,
+           completed_at = NULL,
+           summary_json = NULL
          RETURNING *",
     )
     .bind(review.repo_id)
@@ -71,9 +82,21 @@ pub async fn create_review(pool: &DbPool, review: &ReviewCreate) -> Result<Revie
     .bind(&review.pr_author)
     .bind(&review.pr_base_branch)
     .bind(&review.pr_head_branch)
-    .bind(&review.pr_head_sha)
+    .bind(&sha)
     .fetch_one(&pool.0)
     .await
+}
+
+/// Clear findings for a review before re-inserting (upsert path).
+pub async fn delete_findings_for_review(
+    pool: &DbPool,
+    review_id: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM findings WHERE review_id = ?")
+        .bind(review_id)
+        .execute(&pool.0)
+        .await?;
+    Ok(())
 }
 
 pub async fn update_review(

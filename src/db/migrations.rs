@@ -313,6 +313,43 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .await?;
     }
 
+    if current < 7 {
+        // Deduplicate reviews before unique (repo, pr, sha) index.
+        sqlx::query(
+            "DELETE FROM findings WHERE review_id NOT IN (
+               SELECT MIN(id) FROM reviews GROUP BY repo_id, pr_number, COALESCE(pr_head_sha, '')
+             )",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "DELETE FROM reviews WHERE id NOT IN (
+               SELECT MIN(id) FROM reviews GROUP BY repo_id, pr_number, COALESCE(pr_head_sha, '')
+             )",
+        )
+        .execute(pool)
+        .await?;
+        // Normalize NULL sha → '' so unique index is effective.
+        sqlx::query("UPDATE reviews SET pr_head_sha = '' WHERE pr_head_sha IS NULL")
+            .execute(pool)
+            .await?;
+        sqlx::query(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_repo_pr_sha
+             ON reviews(repo_id, pr_number, pr_head_sha)",
+        )
+        .execute(pool)
+        .await?;
+        // Multi-replica lease column on reviewed_commits (ignore if already present).
+        let _ = sqlx::query(
+            "ALTER TABLE reviewed_commits ADD COLUMN lease_owner TEXT NOT NULL DEFAULT ''",
+        )
+        .execute(pool)
+        .await;
+        sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (7)")
+            .execute(pool)
+            .await?;
+    }
+
     Ok(())
 }
 

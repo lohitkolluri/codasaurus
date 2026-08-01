@@ -751,8 +751,11 @@ async fn spawn_describe(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) 
         let title = pr["title"].as_str().unwrap_or("");
         let body = pr["body"].as_str().unwrap_or("");
         let pool = bot_db_pool();
+        let files_hint = fetch_changed_paths_hint(&token, &ctx.repo_full_name, pr_number)
+            .await
+            .unwrap_or_default();
         let text = if let Some(llm) = crate::llm::LlmConfig::from_db_or_env(pool).await {
-            match crate::llm::summarize_pr(title, body, "(describe walkthrough)", &llm).await {
+            match crate::llm::describe_pr(title, body, &files_hint, &llm).await {
                 Ok(s) => format!("### Codasaurus describe\n\n{s}"),
                 Err(e) => format!(
                     "### Codasaurus describe\n\n**{title}**\n\n{}\n\n_LLM unavailable: {e}_",
@@ -908,9 +911,11 @@ async fn spawn_ask(ctx: WebhookContext, pr_number: i64, question: String, timeou
         let title = pr["title"].as_str().unwrap_or("");
         let body = pr["body"].as_str().unwrap_or("");
         let pool = bot_db_pool();
+        let files_hint = fetch_changed_paths_hint(&token, &ctx.repo_full_name, pr_number)
+            .await
+            .unwrap_or_default();
         let answer = if let Some(llm) = crate::llm::LlmConfig::from_db_or_env(pool).await {
-            let findings_ctx = format!("PR title: {title}\n\nQuestion: {question}");
-            crate::llm::summarize_pr(title, body, &findings_ctx, &llm)
+            crate::llm::ask_about_pr(title, body, &question, &files_hint, &llm)
                 .await
                 .unwrap_or_else(|e| format!("Could not answer: {e}"))
         } else {
@@ -920,6 +925,36 @@ async fn spawn_ask(ctx: WebhookContext, pr_number: i64, question: String, timeou
         post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
     })
     .await;
+}
+
+/// Lightweight changed-file list for ask/describe prompts (no full patches).
+async fn fetch_changed_paths_hint(
+    token: &str,
+    repo: &str,
+    pr_number: i64,
+) -> anyhow::Result<String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()?;
+    let auth = format!("Bearer {token}");
+    let files_url = format!("https://api.github.com/repos/{repo}/pulls/{pr_number}/files?per_page=100");
+    let files: Vec<serde_json::Value> = client
+        .get(&files_url)
+        .header("Authorization", &auth)
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", USER_AGENT)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let mut out = String::new();
+    for f in files.iter().take(60) {
+        let name = f["filename"].as_str().unwrap_or("?");
+        let status = f["status"].as_str().unwrap_or("modified");
+        let _ = std::fmt::Write::write_fmt(&mut out, format_args!("{status}\t{name}\n"));
+    }
+    Ok(out)
 }
 
 async fn spawn_summarize(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {

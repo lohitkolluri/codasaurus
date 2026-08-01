@@ -50,6 +50,44 @@ pub fn validate_llm_base_url(raw: &str, allow_loopback: bool) -> Result<(), Stri
     Ok(())
 }
 
+/// Like [`validate_llm_base_url`], then resolve DNS and reject private/metadata answers
+/// (mitigates DNS rebinding to link-local / RFC1918).
+pub async fn validate_llm_base_url_resolved(
+    raw: &str,
+    allow_loopback: bool,
+) -> Result<(), String> {
+    validate_llm_base_url(raw, allow_loopback)?;
+    let url = Url::parse(raw).map_err(|e| format!("Invalid URL: {e}"))?;
+    let host = url
+        .host_str()
+        .ok_or_else(|| "URL must include a host".to_string())?;
+
+    // Literal IPs already checked.
+    if host.parse::<IpAddr>().is_ok() {
+        return Ok(());
+    }
+
+    let port = url.port_or_known_default().unwrap_or(443);
+    let addrs = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|e| format!("DNS lookup failed for '{host}': {e}"))?;
+
+    let mut saw_any = false;
+    for addr in addrs {
+        saw_any = true;
+        if is_blocked_ip(addr.ip(), allow_loopback) {
+            return Err(format!(
+                "Host '{host}' resolves to blocked address {} (SSRF protection)",
+                addr.ip()
+            ));
+        }
+    }
+    if !saw_any {
+        return Err(format!("Host '{host}' resolved to no addresses"));
+    }
+    Ok(())
+}
+
 fn is_blocked_ip(ip: IpAddr, allow_loopback: bool) -> bool {
     match ip {
         IpAddr::V4(v4) => is_blocked_v4(v4, allow_loopback),
@@ -123,5 +161,11 @@ mod tests {
     #[test]
     fn rejects_non_http() {
         assert!(validate_llm_base_url("ftp://example.com", false).is_err());
+    }
+
+    #[tokio::test]
+    async fn resolve_allows_public_host() {
+        let r = validate_llm_base_url_resolved("https://openrouter.ai/api/v1", false).await;
+        assert!(r.is_ok(), "{r:?}");
     }
 }

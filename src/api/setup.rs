@@ -301,7 +301,8 @@ async fn setup_llm(
     // SSRF guard for user-supplied endpoints
     if !base_url.is_empty() {
         let allow_loopback = body.provider == "ollama";
-        ssrf::validate_llm_base_url(base_url, allow_loopback)
+        ssrf::validate_llm_base_url_resolved(base_url, allow_loopback)
+            .await
             .map_err(ApiError::bad_request)?;
     }
 
@@ -367,7 +368,9 @@ async fn test_llm_connection(
             if base_url.is_empty() {
                 return Ok(Some(false));
             }
-            ssrf::validate_llm_base_url(base_url, false).map_err(ApiError::bad_request)?;
+            ssrf::validate_llm_base_url_resolved(base_url, false)
+                .await
+                .map_err(ApiError::bad_request)?;
             let base = base_url.trim_end_matches('/');
             (
                 format!("{base}/chat/completions"),

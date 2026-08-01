@@ -783,6 +783,19 @@ pub async fn review_pr_with_options(
                 tracing::warn!(error = %e, "check run failed");
             }
         }
+        {
+            let paths: Vec<String> = files
+                .iter()
+                .filter_map(|f| f["filename"].as_str().map(str::to_string))
+                .collect();
+            let labels = super::github_extra::suggest_labels(&paths, &[]);
+            if let Err(e) =
+                super::github_extra::apply_labels(client, &headers, repo_name, pr_number, &labels)
+                    .await
+            {
+                tracing::warn!(error = %e, "auto-apply labels failed");
+            }
+        }
         return Ok(());
     }
 
@@ -795,6 +808,7 @@ pub async fn review_pr_with_options(
         &config,
         &runtime,
         false,
+        repo_llm_enabled,
     );
 
     // Try to create a review with inline comments; fall back to single comment
@@ -879,6 +893,25 @@ pub async fn review_pr_with_options(
         }
     }
 
+    // Soft-apply suggested labels from paths + detectors (best-effort).
+    {
+        let paths: Vec<String> = files
+            .iter()
+            .filter_map(|f| f["filename"].as_str().map(str::to_string))
+            .collect();
+        let detectors: Vec<String> = findings
+            .findings
+            .iter()
+            .map(|f| f.detector.clone())
+            .collect();
+        let labels = super::github_extra::suggest_labels(&paths, &detectors);
+        if let Err(e) =
+            super::github_extra::apply_labels(client, &headers, repo_name, pr_number, &labels).await
+        {
+            tracing::warn!(error = %e, "auto-apply labels failed");
+        }
+    }
+
     // Generate and post LLM summary if enabled for this repo and an API key is available
     if repo_llm_enabled {
         if let Some(llm_cfg) = crate::llm::LlmConfig::from_db_or_env(pool).await {
@@ -931,6 +964,7 @@ pub async fn review_pr_with_options(
             &config,
             &runtime,
             true,
+            repo_llm_enabled,
         );
         let describe_body = format!(
             "### Codasaurus describe\n\n{describe}\n\n---\n_Auto-describe on PR open · `@codasaurus help`_"
@@ -1182,6 +1216,10 @@ async fn save_review_to_db(
         Ok(r) => r,
         Err(_) => return,
     };
+    // Upsert reuses the same review id — drop stale findings first.
+    if let Err(e) = crate::db::reviews::delete_findings_for_review(pool, review.id).await {
+        eprintln!("Warning: failed to clear prior findings: {e}");
+    }
     let batch: Vec<crate::db::models::FindingCreate> = findings
         .findings
         .iter()
