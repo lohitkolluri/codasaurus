@@ -223,7 +223,7 @@ pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
         .clamp(5, 120);
 
     // Per-attempt handshake budget; Neon cold start often needs >5s.
-    let connect_timeout_secs = acquire_secs.min(60).max(15);
+    let connect_timeout_secs = acquire_secs.clamp(15, 60);
     let normalized = ensure_connect_timeout(&normalized, connect_timeout_secs);
     let target = safe_db_target(&normalized);
     let free = free_tier_hints(&normalized);
