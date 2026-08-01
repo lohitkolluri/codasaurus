@@ -7,6 +7,7 @@ use tokio::sync::Mutex;
 use tokio::time::timeout;
 
 mod auth;
+pub(crate) mod markdown;
 mod review;
 mod verify;
 
@@ -289,43 +290,30 @@ pub(crate) async fn handle_webhook(
             .as_ref()
             .and_then(|c| c.get("body").and_then(|b| b.as_str()))
             .unwrap_or("");
-        let is_review_cmd = comment_body.contains("@codasaurus review")
-            || comment_body.contains("@codasaurus full review")
-            || comment_body.contains("@codasaurus-bot review")
-            || comment_body.contains("@codasaurus-bot full review");
-        let is_ignore_cmd = comment_body.contains("@codasaurus-bot ignore")
-            || comment_body.contains("@codasaurus ignore")
-            || comment_body.contains("@codasaurus-bot dismiss")
-            || comment_body.contains("@codasaurus dismiss");
+        let cmd = parse_bot_command(comment_body);
 
-        if (is_review_cmd || is_ignore_cmd) && author_can_command(&payload) {
-            let is_pr = payload
-                .issue
-                .as_ref()
-                .and_then(|i| i.get("pull_request"))
-                .is_some();
-
-            if is_pr {
-                let pr_number = payload
+        if let Some(cmd) = cmd {
+            if !author_can_command(&payload) {
+                tracing::info!("ignoring command from unauthorized commenter");
+            } else {
+                let is_pr = payload
                     .issue
                     .as_ref()
-                    .and_then(|i| i["number"].as_i64())
-                    .unwrap_or(0);
-                let ctx = WebhookContext::from_payload(config.clone(), &payload);
-                if is_review_cmd {
+                    .and_then(|i| i.get("pull_request"))
+                    .is_some();
+                if is_pr {
+                    let pr_number = payload
+                        .issue
+                        .as_ref()
+                        .and_then(|i| i["number"].as_i64())
+                        .unwrap_or(0);
+                    let ctx = WebhookContext::from_payload(config.clone(), &payload);
                     let timeout_secs = runtime.review_timeout_secs;
                     tokio::spawn(async move {
-                        spawn_review(ctx, pr_number, timeout_secs).await;
-                    });
-                } else {
-                    let fingerprint = extract_ignore_fingerprint(comment_body);
-                    tokio::spawn(async move {
-                        spawn_ignore_comment(ctx, pr_number, fingerprint).await;
+                        handle_bot_command(ctx, pr_number, cmd, timeout_secs).await;
                     });
                 }
             }
-        } else if is_review_cmd || is_ignore_cmd {
-            tracing::info!("ignoring command from unauthorized commenter");
         }
     } else if event == "installation" && payload.action == "created" {
         tokio::spawn(handle_installation_created(
@@ -343,8 +331,71 @@ pub(crate) async fn handle_webhook(
     Ok(Json(serde_json::json!({"status": "ok"})))
 }
 
+#[derive(Debug, Clone)]
+enum BotCommand {
+    Review,
+    Describe,
+    Improve,
+    Ask(String),
+    Ignore(Option<String>),
+    Help,
+}
+
+fn parse_bot_command(body: &str) -> Option<BotCommand> {
+    let lower = body.to_ascii_lowercase();
+    let mentions = ["@codasaurus", "@codasaurus-bot"];
+    if !mentions.iter().any(|m| lower.contains(m)) {
+        return None;
+    }
+    if lower.contains(" help") || lower.ends_with("help") {
+        // avoid matching "helpful" — require word boundary-ish
+        if lower.contains("@codasaurus help")
+            || lower.contains("@codasaurus-bot help")
+            || lower.contains("@codasaurus-bot help")
+        {
+            return Some(BotCommand::Help);
+        }
+    }
+    if lower.contains("describe") {
+        return Some(BotCommand::Describe);
+    }
+    if lower.contains("improve") {
+        return Some(BotCommand::Improve);
+    }
+    if lower.contains(" ignore") || lower.contains(" dismiss") {
+        return Some(BotCommand::Ignore(extract_ignore_fingerprint(body)));
+    }
+    if let Some(q) = extract_ask_question(body) {
+        return Some(BotCommand::Ask(q));
+    }
+    if lower.contains("review") {
+        return Some(BotCommand::Review);
+    }
+    None
+}
+
+fn extract_ask_question(body: &str) -> Option<String> {
+    for prefix in ["@codasaurus ask ", "@codasaurus-bot ask "] {
+        if let Some(rest) = body.split(prefix).nth(1) {
+            let q = rest.trim();
+            if !q.is_empty() {
+                return Some(q.to_string());
+            }
+        }
+        // case-insensitive fallback
+        let lower = body.to_ascii_lowercase();
+        let p = prefix.to_ascii_lowercase();
+        if let Some(idx) = lower.find(&p) {
+            let q = body[idx + prefix.len()..].trim();
+            if !q.is_empty() {
+                return Some(q.to_string());
+            }
+        }
+    }
+    None
+}
+
 fn extract_ignore_fingerprint(body: &str) -> Option<String> {
-    // `@codasaurus ignore <fingerprint>` or `@codasaurus-bot dismiss <fingerprint>`
     for prefix in [
         "@codasaurus ignore ",
         "@codasaurus-bot ignore ",
@@ -357,11 +408,131 @@ fn extract_ignore_fingerprint(body: &str) -> Option<String> {
                 return Some(fp.to_string());
             }
         }
+        let lower = body.to_ascii_lowercase();
+        let p = prefix.to_ascii_lowercase();
+        if let Some(idx) = lower.find(&p) {
+            let rest = &body[idx + prefix.len()..];
+            let fp = rest.split_whitespace().next().unwrap_or("").trim();
+            if !fp.is_empty() && fp.len() >= 8 {
+                return Some(fp.to_string());
+            }
+        }
     }
     None
 }
 
+/// Global concurrency limit for reviews (org-scale safety).
+static REVIEW_PERMITS: std::sync::LazyLock<tokio::sync::Semaphore> =
+    std::sync::LazyLock::new(|| {
+        let n = std::env::var("CODASAURUS_MAX_CONCURRENT_REVIEWS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(4usize);
+        tokio::sync::Semaphore::new(n.max(1))
+    });
+
+async fn handle_bot_command(
+    ctx: WebhookContext,
+    pr_number: i64,
+    cmd: BotCommand,
+    timeout_secs: u64,
+) {
+    match cmd {
+        BotCommand::Review => spawn_review(ctx, pr_number, timeout_secs).await,
+        BotCommand::Ignore(fp) => spawn_ignore_comment(ctx, pr_number, fp).await,
+        BotCommand::Help => spawn_simple_comment(ctx, pr_number, markdown::help_body()).await,
+        BotCommand::Describe => spawn_describe(ctx, pr_number, timeout_secs).await,
+        BotCommand::Improve => spawn_improve(ctx, pr_number, timeout_secs).await,
+        BotCommand::Ask(q) => spawn_ask(ctx, pr_number, q, timeout_secs).await,
+    }
+}
+
+async fn post_issue_comment(token: &str, repo: &str, pr: i64, body: &str) -> anyhow::Result<()> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()?;
+    let url = format!("https://api.github.com/repos/{repo}/issues/{pr}/comments");
+    crate::retry::github_request(&crate::retry::RetryConfig::api_default(), "post_comment", || {
+        client
+            .post(&url)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", USER_AGENT)
+            .json(&serde_json::json!({"body": body}))
+    })
+    .await?;
+    Ok(())
+}
+
+async fn spawn_simple_comment(ctx: WebhookContext, pr_number: i64, body: String) {
+    match get_installation_token(&ctx.cfg, ctx.inst_id).await {
+        Ok(token) => {
+            if let Err(e) = post_issue_comment(&token, &ctx.repo_full_name, pr_number, &body).await
+            {
+                tracing::error!(error = %e, "failed to post comment");
+            }
+        }
+        Err(e) => tracing::error!(error = %e, "auth error"),
+    }
+}
+
+async fn spawn_describe(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
+    let _ = timeout(Duration::from_secs(timeout_secs), async move {
+        let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
+        let pr = fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await?;
+        let title = pr["title"].as_str().unwrap_or("");
+        let body = pr["body"].as_str().unwrap_or("");
+        let pool = bot_db_pool();
+        let text = if let Some(llm) = crate::llm::LlmConfig::from_db_or_env(pool).await {
+            match crate::llm::summarize_pr(title, body, "(describe walkthrough)", &llm).await {
+                Ok(s) => format!("### Codasaurus describe\n\n{s}"),
+                Err(e) => format!(
+                    "### Codasaurus describe\n\n**{title}**\n\n{}\n\n_LLM unavailable: {e}_",
+                    body.chars().take(500).collect::<String>()
+                ),
+            }
+        } else {
+            format!(
+                "### Codasaurus describe\n\n**Title:** {title}\n\n{}\n\n_Configure an LLM key for richer summaries._",
+                body.chars().take(800).collect::<String>()
+            )
+        };
+        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
+    })
+    .await;
+}
+
+async fn spawn_improve(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
+    // Improve runs a full review so inline ```suggestion``` blocks and fix guidance appear
+    spawn_review(ctx, pr_number, timeout_secs).await;
+}
+
+async fn spawn_ask(ctx: WebhookContext, pr_number: i64, question: String, timeout_secs: u64) {
+    let _ = timeout(Duration::from_secs(timeout_secs), async move {
+        let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
+        let pr = fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await?;
+        let title = pr["title"].as_str().unwrap_or("");
+        let body = pr["body"].as_str().unwrap_or("");
+        let pool = bot_db_pool();
+        let answer = if let Some(llm) = crate::llm::LlmConfig::from_db_or_env(pool).await {
+            let findings_ctx = format!("PR title: {title}\n\nQuestion: {question}");
+            crate::llm::summarize_pr(title, body, &findings_ctx, &llm)
+                .await
+                .unwrap_or_else(|e| format!("Could not answer: {e}"))
+        } else {
+            "Configure an LLM API key to use `@codasaurus ask`.".into()
+        };
+        let text = format!("### Codasaurus ask\n\n> {question}\n\n{answer}");
+        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
+    })
+    .await;
+}
+
 async fn spawn_review(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
+    let Ok(_permit) = REVIEW_PERMITS.acquire().await else {
+        tracing::error!("review semaphore closed");
+        return;
+    };
     let lock = pr_lock(&ctx.repo_full_name, pr_number).await;
     let _guard = lock.lock().await;
 
@@ -371,6 +542,11 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
             anyhow::bail!("invalid repository or PR number");
         }
         let pr_data = fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await?;
+        // Force review even if draft when manually requested
+        let mut pr_data = pr_data;
+        if let Some(obj) = pr_data.as_object_mut() {
+            obj.insert("draft".into(), serde_json::json!(false));
+        }
         let wrapped = WebhookPayload {
             action: String::new(),
             pull_request: Some(pr_data),
@@ -406,16 +582,15 @@ async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64, fingerprint: 
                     .dismiss_fingerprint(fp, "manual", &ctx.repo_full_name, "dismissed via comment")
                     .await?;
                 format!(
-                    "✅ Dismissed finding `{fp}`. Matching findings will be filtered on future reviews."
+                    "### Dismissed\n\nFinding `{fp}` will be filtered on future reviews."
                 )
             } else {
                 format!(
-                    "⚠️ Could not persist dismissal for `{fp}` (database unavailable)."
+                    "### Could not dismiss\n\nDatabase unavailable — could not persist `{fp}`."
                 )
             }
         } else {
-            "To dismiss a finding, reply with `@codasaurus ignore <fingerprint>` \
-             (copy the fingerprint from the finding details)."
+            "### Ignore\n\nReply with `@codasaurus ignore <fingerprint>` (see the fingerprint on each finding comment)."
                 .to_string()
         };
 

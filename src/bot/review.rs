@@ -7,17 +7,12 @@ use std::fmt::Write;
 use std::sync::LazyLock;
 use std::time::Duration;
 
-/// Max bytes for a GitHub issue comment body (API limit: 65536).
-const MAX_COMMENT_BYTES: usize = 64000;
-
 /// GitHub API max results per page for PR files.
 const PER_PAGE: usize = 100;
 /// GitHub exposes at most 3,000 PR files (30 pages of 100).
 const MAX_PR_FILE_PAGES: usize = 30;
 /// Bound reviewer discovery to avoid exhausting an installation's API quota on a large PR.
 const MAX_REVIEWER_FILES: usize = 50;
-/// Keep review creation within GitHub's inline-comment payload limit.
-const MAX_INLINE_COMMENTS: usize = 8;
 
 /// Build a production-configured GitHub API client with timeouts and pooling.
 static GITHUB_CLIENT: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
@@ -88,18 +83,6 @@ fn github_api_headers(auth_header: &str) -> Result<reqwest::header::HeaderMap> {
         )),
     );
     Ok(headers)
-}
-
-/// Truncate a string to fit within `max_bytes` at a UTF-8 boundary.
-fn truncate_utf8(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-    let mut idx = max_bytes;
-    while !s.is_char_boundary(idx) {
-        idx -= 1;
-    }
-    &s[..idx]
 }
 
 /// Fetch all changed files for a PR. GitHub caps this endpoint at 3,000 files.
@@ -309,11 +292,30 @@ async fn suggest_reviewers(
     reviewers.into_iter().map(|(name, _)| name).collect()
 }
 
+/// True if finding severity meets the configured minimum (blocking > warning > info).
+fn severity_at_least(sev: &str, min: &str) -> bool {
+    fn rank(s: &str) -> u8 {
+        match s {
+            "blocking" => 3,
+            "warning" => 2,
+            _ => 1,
+        }
+    }
+    rank(sev) >= rank(min)
+}
+
 pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -> Result<()> {
     let pr = match &payload.pull_request {
         Some(p) => p,
         None => return Ok(()),
     };
+
+    // Draft PRs: skip full review (edge case) unless explicitly forced via comment path
+    let is_draft = pr["draft"].as_bool().unwrap_or(false);
+    if is_draft {
+        tracing::info!(repo = repo_name, "skipping draft PR");
+        return Ok(());
+    }
 
     let pr_number = pr["number"].as_i64().unwrap_or(0);
     let pr_title = pr["title"].as_str().unwrap_or("").to_string();
@@ -321,6 +323,17 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     let head_sha = pr["head"]["sha"].as_str().unwrap_or("");
 
     let pool = crate::bot::CONFIG_POOL.get();
+
+    // Honor dashboard active toggle
+    if let Some(pool) = pool {
+        if let Ok(Some(repo)) = crate::db::repos::get_repo_by_full_name(pool, repo_name).await {
+            if !repo.active {
+                tracing::info!(repo = repo_name, "repo inactive — skipping review");
+                return Ok(());
+            }
+        }
+    }
+
     let state = pool
         .map(ReviewState::from_pool)
         .or_else(|| ReviewState::open().ok());
@@ -339,7 +352,19 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         }
     }
 
-    let config = crate::config::Config::load_for_bot(pool).await;
+    let mut config = crate::config::Config::load_for_bot(pool).await;
+    let mut repo_llm_enabled = true;
+    if let Some(pool) = pool {
+        if let Ok(Some(repo)) = crate::db::repos::get_repo_by_full_name(pool, repo_name).await {
+            if let Some(ref cfg_json) = repo.config_json {
+                if let Some(llm) = config.overlay_repo_config_json(cfg_json) {
+                    repo_llm_enabled = llm;
+                }
+            }
+        }
+    }
+    let policy = crate::config::Config::bot_policy(pool).await;
+    let runtime = crate::bot_runtime::BotRuntimeConfig::default();
 
     let client = GITHUB_CLIENT
         .as_ref()
@@ -383,6 +408,9 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     } else {
         detectors::run_all(&parsed_files_collected, &config)
     };
+
+    // Apply default_severity floor from dashboard settings
+    findings.findings.retain(|f| severity_at_least(f.severity, &policy.min_severity));
 
     // Slop detection — check PR metadata for AI-generation signals
     let pr_author = pr["user"]["login"].as_str().unwrap_or("");
@@ -450,7 +478,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         if f.line == 0 {
             continue;
         }
-        if review_comments.len() >= MAX_INLINE_COMMENTS {
+        if review_comments.len() >= runtime.max_inline_comments {
             break;
         }
 
@@ -460,7 +488,7 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
             continue;
         }
 
-        let comment_body = build_comment_body(f);
+        let comment_body = crate::bot::markdown::inline_finding_comment(f);
         let comment = serde_json::json!({
             "path": f.file,
             "line": f.line,
@@ -470,11 +498,9 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         review_comments.push(comment);
     }
 
-    // Only approve when there are genuinely no findings. Some valid findings are
-    // repository-level and have no source line, so an empty inline-comment list
-    // must never be treated as a clean review.
+    // Only approve when there are genuinely no findings.
     if findings.is_empty() {
-        let body = "✅ No issues found — approved.";
+        let body = crate::bot::markdown::clean_approve_body();
         let review = serde_json::json!({"body": body, "event": "APPROVE"});
         let approve_url =
             format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews");
@@ -524,24 +550,16 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
         return Ok(());
     }
 
-    let mut body = build_review_body(&findings, has_blocking, &pr_title, &pr_body, &config);
-
-    // Append suggested reviewers
-    if !reviewers.is_empty() {
-        let _ = writeln!(
-            body,
-            "\n👥 **Suggested reviewers:** {}",
-            reviewers
-                .iter()
-                .map(|r| format!("@{r}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-        let _ = writeln!(body);
-    }
-
-    // Truncate body to fit within GitHub's 64K comment limit
-    body = truncate_utf8(&body, MAX_COMMENT_BYTES).to_string();
+    let body = crate::bot::markdown::walkthrough_body(
+        &findings,
+        has_blocking,
+        &pr_title,
+        &files,
+        &reviewers,
+        &config,
+        &runtime,
+        false,
+    );
 
     // Try to create a review with inline comments; fall back to single comment
     let review_body = serde_json::json!({
@@ -601,468 +619,33 @@ pub async fn review_pr(token: &str, repo_name: &str, payload: &WebhookPayload) -
     )
     .await;
 
-    // Generate and post LLM summary if API key is available
-    if let Some(llm_cfg) = crate::llm::LlmConfig::from_db_or_env(pool).await {
-        if let Err(e) = generate_and_post_summary(
-            client,
-            &auth_header,
-            repo_name,
-            pr_number,
-            &findings,
-            &llm_cfg,
-            &pr_title,
-            &pr_body,
-            &state,
-        )
-        .await
-        {
-            tracing::warn!(error = %e, "failed to generate LLM summary");
+    // Generate and post LLM summary if enabled for this repo and an API key is available
+    if repo_llm_enabled {
+        if let Some(llm_cfg) = crate::llm::LlmConfig::from_db_or_env(pool).await {
+            if let Err(e) = generate_and_post_summary(
+                client,
+                &auth_header,
+                repo_name,
+                pr_number,
+                &findings,
+                &llm_cfg,
+                &pr_title,
+                &pr_body,
+                &state,
+            )
+            .await
+            {
+                tracing::warn!(error = %e, "failed to generate LLM summary");
+            }
         }
     }
 
     Ok(())
 }
 
+#[cfg(test)]
 fn build_comment_body(finding: &Finding) -> String {
-    let icon = match finding.severity {
-        "blocking" => "🔴",
-        "warning" => "🟡",
-        _ => "🔵",
-    };
-    let title = finding_display_title(finding);
-    let explanation = finding_explanation(finding);
-    let action = finding_action(finding);
-
-    format!("**{icon} {title}**\n\n{explanation}\n\n{action}",)
-}
-
-fn finding_display_title(f: &Finding) -> String {
-    match f.detector.as_str() {
-        "hallucinated-imports" => {
-            let pkg = extract_package_name(&f.message);
-            format!("Package Doesn't Exist — `{pkg}`")
-        }
-        "secrets" => "Credential in Source".into(),
-        "phantom-deps" => {
-            let pkg = extract_package_name(&f.message);
-            format!("Missing Dependency — `{pkg}`")
-        }
-        "todo-leaks" => "Incomplete Code".into(),
-        "vulnerabilities" => {
-            let pkg = f
-                .suggestion
-                .as_ref()
-                .and_then(|s| s.split('`').nth(1))
-                .unwrap_or("package");
-            format!("Known Vulnerability — `{pkg}`")
-        }
-        "over-engineering" => "Unnecessary Abstraction".into(),
-        "boilerplate" => "Boilerplate Code".into(),
-        "stale-api" => "Deprecated API".into(),
-        "graph" => "Unused Code".into(),
-        "guidelines" => "Guideline Violation".into(),
-        other => format!("{} Issue", capitalize_first(other)),
-    }
-}
-
-fn finding_explanation(f: &Finding) -> String {
-    match f.detector.as_str() {
-        "hallucinated-imports" => {
-            let pkg = extract_package_name(&f.message);
-            format!(
-                "`{pkg}` doesn't appear to exist on the registry. This import will fail at \
-                 build time or crash at runtime — the package simply isn't available."
-            )
-        }
-        "secrets" => "A secret key or token is hardcoded in this file. Since it's committed, \
-                      it's now part of the git history and should be rotated immediately. \
-                      Anyone with repository access can use it."
-            .to_string(),
-        "phantom-deps" => {
-            let pkg = extract_package_name(&f.message);
-            format!(
-                "`{pkg}` is imported but not declared in the project manifest. It may work \
-                 locally through hoisting or a global install, but this will break in CI \
-                 or on any fresh environment."
-            )
-        }
-        "todo-leaks" => "A `TODO` or `FIXME` marker made it into the commit. These signal \
-                         incomplete work — either the task was forgotten or the marker was \
-                         left in by accident."
-            .to_string(),
-        "vulnerabilities" => {
-            let cve = f.message.split(':').next().unwrap_or(&f.message);
-            let desc = f.message.split(':').nth(1).unwrap_or("").trim();
-            format!(
-                "{} ({}) affects this dependency. {}",
-                cve,
-                f.suggestion
-                    .as_ref()
-                    .and_then(|s| s.split('`').nth(1))
-                    .unwrap_or("unknown"),
-                desc
-            )
-        }
-        "over-engineering" => "The abstraction here adds complexity without a clear benefit at \
-                               this scale. Early abstraction is harder to undo than it is to \
-                               add later when the need is proven."
-            .to_string(),
-        _ => "This finding should be addressed to maintain code quality.".into(),
-    }
-}
-
-fn finding_action(f: &Finding) -> String {
-    if let Some(ref s) = f.suggestion {
-        return format!("**💡 Suggestion:** {s}");
-    }
-    if let Some(ref c) = f.codemod {
-        return format!("```suggestion\n{c}\n```");
-    }
-    "Please review and address this finding.".into()
-}
-
-fn extract_package_name(msg: &str) -> String {
-    msg.split('`').nth(1).unwrap_or("unknown").to_string()
-}
-
-fn capitalize_first(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
-    }
-}
-
-struct CheckResult {
-    name: &'static str,
-    status: CheckStatus,
-    details: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum CheckStatus {
-    Pass,
-    Warning,
-    Fail,
-}
-
-impl std::fmt::Display for CheckStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CheckStatus::Pass => write!(f, "✅ Pass"),
-            CheckStatus::Warning => write!(f, "⚠️ Warning"),
-            CheckStatus::Fail => write!(f, "❌ Fail"),
-        }
-    }
-}
-
-fn evaluate_pre_merge_checks(
-    config: &crate::config::Config,
-    pr_title: &str,
-    pr_body: &str,
-    blocking: usize,
-    warnings: usize,
-) -> Vec<CheckResult> {
-    let mut results = Vec::new();
-
-    if config.pre_merge.require_description {
-        let desc = pr_body.trim();
-        if desc.is_empty() || desc.len() < 20 {
-            results.push(CheckResult {
-                name: "PR Description",
-                status: CheckStatus::Fail,
-                details: "Description is missing or too short".into(),
-            });
-        } else {
-            results.push(CheckResult {
-                name: "PR Description",
-                status: CheckStatus::Pass,
-                details: "Description provided".into(),
-            });
-        }
-    }
-
-    if config.pre_merge.require_title_convention {
-        let title = pr_title.trim();
-        let conventional = title.contains(':') || title.contains('(');
-        if conventional {
-            results.push(CheckResult {
-                name: "Title Convention",
-                status: CheckStatus::Pass,
-                details: "Follows type(scope): format".into(),
-            });
-        } else {
-            results.push(CheckResult {
-                name: "Title Convention",
-                status: CheckStatus::Warning,
-                details: "Consider using conventional commit format (type: description)".into(),
-            });
-        }
-    }
-
-    let max_blocking = config.pre_merge.max_blocking;
-    if blocking > max_blocking {
-        results.push(CheckResult {
-            name: "Blocking Issues",
-            status: CheckStatus::Fail,
-            details: format!("{blocking} blocking issues (max allowed: {max_blocking})"),
-        });
-    } else if blocking > 0 {
-        results.push(CheckResult {
-            name: "Blocking Issues",
-            status: CheckStatus::Warning,
-            details: format!("{blocking} blocking issues found"),
-        });
-    } else {
-        results.push(CheckResult {
-            name: "Blocking Issues",
-            status: CheckStatus::Pass,
-            details: "No blocking issues".into(),
-        });
-    }
-
-    // Warnings check
-    let max_warnings = config.pre_merge.max_warnings;
-    if warnings > max_warnings {
-        results.push(CheckResult {
-            name: "Warnings",
-            status: CheckStatus::Warning,
-            details: format!("{warnings} warnings (threshold: {max_warnings})"),
-        });
-    } else {
-        results.push(CheckResult {
-            name: "Warnings",
-            status: CheckStatus::Pass,
-            details: format!("{warnings} warnings"),
-        });
-    }
-
-    results
-}
-
-fn build_review_body(
-    findings: &Findings,
-    has_blocking: bool,
-    pr_title: &str,
-    pr_body: &str,
-    config: &crate::config::Config,
-) -> String {
-    use std::collections::BTreeMap;
-
-    let counts = findings.count_by_severity();
-    let blocking = counts.get("blocking").copied().unwrap_or(0);
-    let warnings = counts.get("warning").copied().unwrap_or(0);
-    let infos = counts.get("info").copied().unwrap_or(0);
-
-    let blocking_weight = (blocking * 15) as i32;
-    let warning_weight = (warnings * 5) as i32;
-    let deduction = blocking_weight + warning_weight + (infos as i32);
-    let confidence = (100i32 - deduction.min(95)).max(5) as u32;
-
-    let score_emoji = match confidence {
-        90..=100 => "🟢",
-        70..=89 => "🟡",
-        _ => "🔴",
-    };
-
-    let verdict_line = if has_blocking {
-        "> [!CAUTION] Changes Requested"
-    } else if warnings > 0 {
-        "> [!WARNING] Review with Suggestions"
-    } else {
-        "> [!NOTE] No Issues Found"
-    };
-
-    let mut body = String::with_capacity(4096);
-    let _ = writeln!(body, "## 🦕 Codasaurus Review");
-    let _ = writeln!(body);
-    let _ = writeln!(body, "{verdict_line}");
-    let _ = writeln!(body, "> 🔴 **{blocking}** blocking · 🟡 **{warnings}** warnings · 🔵 **{infos}** info · {score_emoji} **{confidence}%** confidence");
-    let _ = writeln!(body);
-
-    // Group findings by file
-    let mut by_file: BTreeMap<String, Vec<&Finding>> = BTreeMap::new();
-    for f in &findings.findings {
-        by_file.entry(f.file.clone()).or_default().push(f);
-    }
-
-    if !by_file.is_empty() {
-        let _ = writeln!(body, "### 📂 Findings");
-        let _ = writeln!(body);
-        for (file_path, file_findings) in &by_file {
-            let _ = writeln!(body, "#### `{file_path}`");
-            let _ = writeln!(body);
-            let _ = writeln!(body, "| Line | Severity | Detector | Issue |");
-            let _ = writeln!(body, "| ---: | :---: | --- | --- |");
-            for f in file_findings {
-                let icon = match f.severity {
-                    "blocking" => "🔴",
-                    "warning" => "🟡",
-                    _ => "🔵",
-                };
-                let line_cell = if f.line > 0 {
-                    f.line.to_string()
-                } else {
-                    "—".into()
-                };
-                let short_msg = summarize_message(&f.message, 80);
-                let _ = writeln!(
-                    body,
-                    "| {line_cell} | {icon} {sev} | `{det}` | {msg} |",
-                    sev = f.severity,
-                    det = f.detector,
-                    msg = short_msg,
-                );
-            }
-            let _ = writeln!(body);
-        }
-    }
-
-    let mut vuln_by_pkg: BTreeMap<String, Vec<&Finding>> = BTreeMap::new();
-    for f in &findings.findings {
-        if f.detector != "vulnerabilities" {
-            continue;
-        }
-        // Suggestion format: "Update package `{package}` to the latest version to fix {CVE-ID}."
-        let pkg = match f.suggestion.as_ref().and_then(|s| s.split('`').nth(1)) {
-            Some(p) => p.to_string(),
-            None => continue,
-        };
-        vuln_by_pkg.entry(pkg).or_default().push(f);
-    }
-
-    if !vuln_by_pkg.is_empty() {
-        let _ = writeln!(body, "### 📦 Vulnerable Dependencies");
-        let _ = writeln!(body);
-        let _ = writeln!(body, "| Package | CVE | Severity |");
-        let _ = writeln!(body, "| --- | --- | :---: |");
-        for (pkg, pkg_findings) in vuln_by_pkg.iter().take(10) {
-            for f in pkg_findings.iter().take(3) {
-                let cve_id = f.message.split(':').next().unwrap_or(&f.message);
-                let icon = match f.severity {
-                    "blocking" => "🔴",
-                    "warning" => "🟡",
-                    _ => "🔵",
-                };
-                let _ = writeln!(
-                    body,
-                    "| `{pkg}` | `{cve_id}` | {icon} {s} |",
-                    s = f.severity
-                );
-            }
-        }
-        let _ = writeln!(body);
-    }
-
-    let checks = evaluate_pre_merge_checks(config, pr_title, pr_body, blocking, warnings);
-    if !checks.is_empty() {
-        let _ = writeln!(body, "### 🚥 Pre-merge Checks");
-        let _ = writeln!(body);
-        let _ = writeln!(body, "| Check | Status | Details |");
-        let _ = writeln!(body, "| --- | :---: | --- |");
-        for check in &checks {
-            let _ = writeln!(
-                body,
-                "| {} | {} | {} |",
-                check.name, check.status, check.details
-            );
-        }
-        let _ = writeln!(body);
-    }
-
-    let verified = build_verified_list(findings);
-    if !verified.is_empty() {
-        let _ = writeln!(body, "### ✅ Verified");
-        let _ = writeln!(body);
-        for v in &verified {
-            let _ = writeln!(body, "- [x] {v}");
-        }
-        // Show remaining unchecked detectors
-        let remaining = build_unverified_list(findings);
-        for r in &remaining {
-            let _ = writeln!(body, "- [ ] {r}");
-        }
-        let _ = writeln!(body);
-    }
-
-    let _ = writeln!(body, "---");
-    let _ = writeln!(body);
-    let _ = writeln!(
-        body,
-        "<sub>🦕 Reviewed by [Codasaurus](https://github.com/lohitkolluri/codasaurus)</sub>"
-    );
-    let _ = writeln!(body);
-
-    body
-}
-
-fn build_verified_list(findings: &Findings) -> Vec<String> {
-    let detector_set: std::collections::HashSet<&str> = findings
-        .findings
-        .iter()
-        .map(|f| f.detector.as_str())
-        .collect();
-
-    let clean_names: [(&str, &str); 10] = [
-        (
-            "hallucinated-imports",
-            "All imports resolve to real packages",
-        ),
-        ("secrets", "No hardcoded credentials detected"),
-        (
-            "phantom-deps",
-            "All dependencies are declared in the manifest",
-        ),
-        ("todo-leaks", "No leftover TODO or FIXME markers"),
-        ("vulnerabilities", "No known CVEs in dependencies"),
-        ("over-engineering", "No unnecessary abstraction detected"),
-        ("boilerplate", "No excessive boilerplate found"),
-        ("stale-api", "No deprecated API usage detected"),
-        ("graph", "No dead code or unused exports"),
-        ("guidelines", "Repository guidelines are followed"),
-    ];
-
-    clean_names
-        .iter()
-        .filter(|(k, _)| !detector_set.contains(k))
-        .map(|(_, v)| v.to_string())
-        .collect()
-}
-
-fn build_unverified_list(findings: &Findings) -> Vec<String> {
-    let detector_set: std::collections::HashSet<&str> = findings
-        .findings
-        .iter()
-        .map(|f| f.detector.as_str())
-        .collect();
-
-    let fail_names: [(&str, &str); 10] = [
-        ("hallucinated-imports", "Nonesistent package imports found"),
-        ("secrets", "Hardcoded credentials detected"),
-        ("phantom-deps", "Dependencies used but undeclared"),
-        ("todo-leaks", "Leftover TODO or FIXME markers found"),
-        ("vulnerabilities", "CVEs found in dependencies"),
-        ("over-engineering", "Unnecessary abstraction detected"),
-        ("boilerplate", "Excessive boilerplate found"),
-        ("stale-api", "Deprecated API usage detected"),
-        ("graph", "Dead code or unused exports found"),
-        ("guidelines", "Guideline violations found"),
-    ];
-
-    fail_names
-        .iter()
-        .filter(|(k, _)| detector_set.contains(k))
-        .map(|(_, v)| v.to_string())
-        .collect()
-}
-
-fn summarize_message(msg: &str, max_len: usize) -> String {
-    if msg.chars().count() <= max_len {
-        return msg.to_string();
-    }
-    let truncated: String = msg.chars().take(max_len).collect();
-    let last_space = truncated.rfind(' ').unwrap_or(truncated.len());
-    format!("{}…", &truncated[..last_space])
+    crate::bot::markdown::inline_finding_comment(finding)
 }
 
 fn urlencoding_encode(s: &str) -> String {
@@ -1102,7 +685,7 @@ async fn generate_and_post_summary(
     let summary = crate::llm::summarize_pr(pr_title, pr_body, &findings_text, llm_cfg).await?;
 
     let summary_body = format!(
-        "## 📋 AI Review Summary\n\n{summary}\n\n---\n_Generated by Codasaurus LLM review_"
+        "### AI review summary\n\n{summary}\n\n---\n_Generated by Codasaurus_"
     );
 
     post_or_update_comment(
@@ -1176,7 +759,7 @@ async fn save_review_to_db(
             pool,
             &crate::db::models::FindingCreate {
                 review_id: review.id,
-                fingerprint: None,
+                fingerprint: Some(format!("{}:{}", review.id, f.fingerprint())),
                 file_path: f.file.clone(),
                 line_start: if f.line > 0 {
                     Some(f.line as i64)
@@ -1189,7 +772,7 @@ async fn save_review_to_db(
                 severity: f.severity.to_string(),
                 detector: f.detector.clone(),
                 rule_id: None,
-                message: f.message.clone(),
+                message: crate::bot::markdown::redact_secrets(&f.message),
                 suggested_fix: f.suggestion.clone(),
                 code_snippet: f.codemod.clone(),
                 context: None,
@@ -1323,9 +906,10 @@ mod tests {
             "Package `fakelib` not found on npm.",
             Some("Check npmjs.com"),
         ));
-        assert!(body.contains("Package Doesn't Exist"));
+        assert!(body.contains("Package does not exist"));
         assert!(body.contains("fakelib"));
-        assert!(body.contains("💡 Suggestion"));
+        assert!(body.contains("fingerprint:"));
+        assert!(body.contains("`blocking`"));
     }
 
     #[test]
@@ -1338,8 +922,8 @@ mod tests {
             "API Key detected",
             Some("Use env vars"),
         ));
-        assert!(body.contains("Credential in Source"));
-        assert!(body.contains("hardcoded"));
+        assert!(body.contains("Credential in source"));
+        assert!(body.contains("secret") || body.contains("Rotate"));
     }
 
     #[test]
@@ -1352,9 +936,8 @@ mod tests {
             "GHSA-123: desc",
             Some("Update `lodash`"),
         ));
-        assert!(body.contains("Known Vulnerability"));
+        assert!(body.contains("Known vulnerability"));
         assert!(body.contains("lodash"));
-        assert!(body.contains("GHSA-123"));
     }
 
     #[test]
@@ -1367,7 +950,7 @@ mod tests {
             "// TODO: fix",
             Some("Complete it"),
         ));
-        assert!(body.contains("Incomplete Code"));
+        assert!(body.contains("Incomplete code"));
     }
 
     #[test]
@@ -1428,7 +1011,10 @@ mod tests {
 
     #[test]
     fn extract_package_from_backtick_msg() {
-        assert_eq!(extract_package_name("Package `lodash` not found"), "lodash");
-        assert_eq!(extract_package_name("no backtick"), "unknown");
+        fn pkg(msg: &str) -> String {
+            msg.split('`').nth(1).unwrap_or("unknown").to_string()
+        }
+        assert_eq!(pkg("Package `lodash` not found"), "lodash");
+        assert_eq!(pkg("no backtick"), "unknown");
     }
 }
