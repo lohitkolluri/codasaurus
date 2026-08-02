@@ -706,7 +706,24 @@ pub async fn review_pr_with_options(
             &blast_md,
             &dep_delta_md,
         );
-        let review = serde_json::json!({"body": body, "event": "APPROVE"});
+        // Canonical summary is an issue comment we update in place on each push.
+        post_or_update_comment(
+            client,
+            &auth_header,
+            repo_name,
+            pr_number,
+            &body,
+            &state,
+            "walkthrough",
+        )
+        .await?;
+        let sha_short = head_sha.get(..7).unwrap_or(head_sha);
+        let review = serde_json::json!({
+            "body": format!(
+                "### Codasaurus\n\nLooks good on `{sha_short}` — summary comment updated."
+            ),
+            "event": "APPROVE"
+        });
         let approve_url =
             format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews");
         let _: serde_json::Value = retry_async(
@@ -809,48 +826,73 @@ pub async fn review_pr_with_options(
         walkthrough_extras,
     );
 
-    // Try to create a review with inline comments; fall back to single comment
-    let review_body = serde_json::json!({
-        "body": body,
-        "event": if has_blocking { "REQUEST_CHANGES" } else { "COMMENT" },
-        "comments": review_comments,
-    });
-
-    let review_url = format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews");
-    let resp = retry_async(
-        &RetryConfig::api_default(),
-        "post_pr_review",
-        &is_reqwest_error_retryable,
-        || async {
-            client
-                .post(&review_url)
-                .header("Authorization", &auth_header)
-                .header("Accept", "application/vnd.github+json")
-                .header(
-                    "User-Agent",
-                    concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
-                )
-                .json(&review_body)
-                .send()
-                .await
-                .map_err(Into::into)
-        },
+    // Canonical walkthrough is always an issue comment, updated in place on new
+    // commits (review_comments slot). Previously we only updated on Review API
+    // failure, so every successful push posted a brand-new full PR review.
+    post_or_update_comment(
+        client,
+        &auth_header,
+        repo_name,
+        pr_number,
+        &body,
+        &state,
+        "walkthrough",
     )
     .await?;
 
-    // If inline review failed (e.g. line numbers don't match), fall back to a single issue comment.
-    // Uses the state store to update the previous comment rather than posting a new one.
-    if !resp.status().is_success() {
-        post_or_update_comment(
-            client,
-            &auth_header,
-            repo_name,
-            pr_number,
-            &body,
-            &state,
-            "walkthrough",
+    // Inline findings / merge-blocking still need a Pull Request Review; keep
+    // that body short so we do not spam a second full walkthrough per commit.
+    // Skip the review entirely when there is nothing to attach and no block.
+    if !review_comments.is_empty() || has_blocking {
+        let sha_short = head_sha.get(..7).unwrap_or(head_sha);
+        let review_event = if has_blocking {
+            "REQUEST_CHANGES"
+        } else {
+            "COMMENT"
+        };
+        let review_body = serde_json::json!({
+            "body": format!(
+                "### Codasaurus\n\n\
+                 Review for `{sha_short}` — full walkthrough is in the summary comment \
+                 (updated in place on each push).\n\n\
+                 {} inline finding{}.",
+                review_comments.len(),
+                if review_comments.len() == 1 { "" } else { "s" }
+            ),
+            "event": review_event,
+            "comments": review_comments,
+        });
+
+        let review_url =
+            format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews");
+        let resp = retry_async(
+            &RetryConfig::api_default(),
+            "post_pr_review",
+            &is_reqwest_error_retryable,
+            || async {
+                client
+                    .post(&review_url)
+                    .header("Authorization", &auth_header)
+                    .header("Accept", "application/vnd.github+json")
+                    .header(
+                        "User-Agent",
+                        concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+                    )
+                    .json(&review_body)
+                    .send()
+                    .await
+                    .map_err(Into::into)
+            },
         )
         .await?;
+
+        if !resp.status().is_success() {
+            // Walkthrough already updated above; inline comments are best-effort.
+            tracing::warn!(
+                status = %resp.status(),
+                "PR review API failed after walkthrough update (inline comments skipped)"
+            );
+        }
     }
 
     // Record the reviewed commit SHA for incremental review

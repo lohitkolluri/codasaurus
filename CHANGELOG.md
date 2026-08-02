@@ -52,10 +52,11 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 
 ### Removed
 
-- Placeholder “configure JIRA_*” linked-issue stubs from walkthroughs (only real tickets when integrations are configured).
+- Placeholder “configure JIRA\_\*” linked-issue stubs from walkthroughs (only real tickets when integrations are configured).
 
 ### Fixed
 
+- Walkthrough summary is always updated in place on new commits (issue-comment slot); PR Reviews only carry short bodies + inlines — no longer a full duplicate walkthrough per push.
 - Docker image build failed: `.dockerignore` excluded `assets/logo.png` required by `include_bytes!` for `/branding/logo.png`.
 - Runtime GitHub App auth now accepts raw `GITHUB_APP_PRIVATE_KEY` everywhere (not only `*_B64`).
 - Hallucinated-import suggestions link to real registry URLs (npmjs / PyPI / crates.io).

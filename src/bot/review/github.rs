@@ -139,7 +139,7 @@ pub(crate) async fn post_or_update_comment(
         if let Ok(Some(comment_id)) = s.get_comment_id_async(repo_name, pr_number, kind).await {
             let update_url =
                 format!("https://api.github.com/repos/{repo_name}/issues/comments/{comment_id}");
-            let update_ok = retry_async(
+            match retry_async(
                 &RetryConfig::api_default(),
                 "update_comment",
                 &is_reqwest_error_retryable,
@@ -154,12 +154,28 @@ pub(crate) async fn post_or_update_comment(
                 },
             )
             .await
-            .map(|r| r.status().is_success())
-            .unwrap_or(false);
-            if update_ok {
-                return Ok(comment_id);
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    tracing::info!(%kind, comment_id, "updated existing PR comment in place");
+                    return Ok(comment_id);
+                }
+                Ok(resp) => {
+                    tracing::warn!(
+                        %kind,
+                        comment_id,
+                        status = %resp.status(),
+                        "failed to update comment — posting a new one"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        %kind,
+                        comment_id,
+                        error = %e,
+                        "failed to update comment — posting a new one"
+                    );
+                }
             }
-            eprintln!("Warning: failed to update comment {comment_id} , creating new",);
         }
     }
 
