@@ -143,7 +143,7 @@
 
     <div class="card static">
       <h3>Detectors</h3>
-      <div class="detector-grid">
+      <div class="detector-grid scroll-thin">
         {#each Object.entries(detectors) as [key, val]}
           <div class="detector-row">
             <span class="detector-label">{formatLabel(key)}</span>
@@ -313,19 +313,6 @@
   .detector-grid {
     max-height: 320px;
     overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--text-muted) var(--bg-secondary);
-  }
-  .detector-grid::-webkit-scrollbar {
-    width: 6px;
-  }
-  .detector-grid::-webkit-scrollbar-track {
-    background: var(--bg-secondary);
-    border-radius: 3px;
-  }
-  .detector-grid::-webkit-scrollbar-thumb {
-    background: var(--text-muted);
-    border-radius: 3px;
   }
   .detector-row {
     display: flex;

@@ -673,6 +673,32 @@ body,
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--bg-primary);
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-muted) var(--bg-secondary);
+}
+
+.page-panel-scroll::-webkit-scrollbar,
+.scroll-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.page-panel-scroll::-webkit-scrollbar-track,
+.scroll-thin::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+    border-radius: 3px;
+}
+
+.page-panel-scroll::-webkit-scrollbar-thumb,
+.scroll-thin::-webkit-scrollbar-thumb {
+    background: var(--text-muted);
+    border-radius: 3px;
+}
+
+.scroll-thin {
+    overflow: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-muted) var(--bg-secondary);
 }
 
 .page-panel-scroll table {
@@ -745,6 +771,11 @@ body,
     font-size: var(--text-xl);
     font-weight: var(--weight-semibold);
     letter-spacing: -0.02em;
+}
+
+.dashboard-activity-scroll {
+    max-height: min(420px, 55vh);
+    padding-right: 2px;
 }
 
 @keyframes content-enter {
@@ -1082,6 +1113,7 @@ body,
 
 .pagination .page-num:hover:not(.active) {
     background: var(--bg-secondary);
+    color: var(--text-primary);
 }
 
 /* ── 17. Toggle Switch ─────────────────────────────────────────── */
@@ -1252,6 +1284,7 @@ body,
 
 .file-tree-item:hover {
     background: var(--bg-secondary);
+    color: var(--text-primary);
 }
 
 .file-tree-item.active {
@@ -2761,6 +2794,10 @@ body,
     background: color-mix(in srgb, var(--bg-secondary) 35%, var(--bg-primary));
 }
 
+.chart-card.analytics-detectors-card {
+    padding: var(--space-5) var(--space-6);
+}
+
 .chart-card-head {
     display: flex;
     align-items: center;
@@ -2986,17 +3023,18 @@ body,
 
 .analytics-detectors {
     list-style: none;
-    margin: var(--space-3) 0 0;
-    padding: 0;
+    margin: var(--space-2) 0 0;
+    padding: var(--space-2) 0;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 12px;
+    max-height: 360px;
 }
 
 .analytics-detectors li {
     display: grid;
-    grid-template-columns: minmax(100px, 160px) 1fr minmax(56px, 72px);
-    gap: 10px;
+    grid-template-columns: minmax(110px, 168px) 1fr minmax(64px, 80px);
+    gap: 12px;
     align-items: center;
     font-size: var(--text-sm);
 }
@@ -3007,21 +3045,35 @@ body,
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: var(--text-secondary);
 }
 
 .analytics-det-track {
-    height: 8px;
-    border-radius: 4px;
-    background: color-mix(in srgb, var(--text-muted) 18%, transparent);
+    height: 10px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text-muted) 22%, transparent);
     overflow: hidden;
+    /* Keep bars off the card edge */
+    margin-inline: 2px;
 }
 
 .analytics-det-fill {
     height: 100%;
-    border-radius: 4px;
-    background: var(--text-primary);
-    opacity: 0.65;
+    max-width: 100%;
+    border-radius: 999px;
+    background: var(--det-bar, var(--accent-soft));
+    opacity: 0.9;
+    min-width: 4px;
 }
+
+.analytics-det-fill.tone-0 { --det-bar: var(--accent-soft); }
+.analytics-det-fill.tone-1 { --det-bar: var(--info); }
+.analytics-det-fill.tone-2 { --det-bar: var(--warning); }
+.analytics-det-fill.tone-3 { --det-bar: var(--success); }
+.analytics-det-fill.tone-4 { --det-bar: #a78bfa; }
+.analytics-det-fill.tone-5 { --det-bar: #22d3ee; }
+.analytics-det-fill.tone-6 { --det-bar: #fb7185; }
+.analytics-det-fill.tone-7 { --det-bar: #94a3b8; }
 
 .analytics-det-count {
     text-align: right;

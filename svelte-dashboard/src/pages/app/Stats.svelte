@@ -327,15 +327,15 @@
       {#if detectors.length > 0}
         <section class="section-block">
           <h2 class="stats-section-title">Findings by detector (30d)</h2>
-          <div class="analytics-panel chart-card">
-            <ul class="analytics-detectors">
-              {#each pageDetectors as d}
+          <div class="analytics-panel chart-card analytics-detectors-card">
+            <ul class="analytics-detectors scroll-thin">
+              {#each pageDetectors as d, i}
                 <li>
                   <span class="analytics-det-name" title={d.detector}>{d.detector}</span>
                   <div class="analytics-det-track">
                     <div
-                      class="analytics-det-fill"
-                      style={`width: ${Math.max(2, Math.round(d.share_pct ?? 0))}%`}
+                      class={`analytics-det-fill tone-${i % 8}`}
+                      style={`width: ${Math.min(100, Math.max(4, Math.round(d.share_pct ?? 0)))}%`}
                     ></div>
                   </div>
                   <span class="analytics-det-count">
@@ -348,7 +348,7 @@
             {#if detectors.length > DETECTOR_PAGE}
               <div class="detector-page-meta">
                 <span>
-                  {detectors.length} detectors Â· page {detectorPageSafe} of {detectorPages}
+                  {detectors.length} detectors · page {detectorPageSafe} of {detectorPages}
                 </span>
                 <Pagination
                   page={detectorPageSafe}
