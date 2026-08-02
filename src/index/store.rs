@@ -40,8 +40,9 @@ pub async fn replace_file_index(
         .execute(&mut *tx)
         .await?;
     sqlx::query(
-        "DELETE FROM repo_edges WHERE repo_full_name = $1 AND from_symbol IN
-         (SELECT symbol_name FROM repo_symbols WHERE repo_full_name = $1 AND file_path = $2)",
+        "DELETE FROM repo_edges WHERE repo_full_name = $1 AND
+         (from_symbol = $2 OR
+          from_symbol IN (SELECT symbol_name FROM repo_symbols WHERE repo_full_name = $1 AND file_path = $2))",
     )
     .bind(repo_full_name)
     .bind(&file.file_path)

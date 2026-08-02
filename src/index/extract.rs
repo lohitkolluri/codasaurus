@@ -132,7 +132,8 @@ impl<'a> Collector<'a> {
         self.scope.last().map(|s| s.as_str())
     }
 
-    fn add_symbol(&mut self, name: &str, kind: &str, node: Node) {
+    /// Record a symbol (+ DEFINES edge) and return its (possibly qualified) name.
+    fn add_symbol(&mut self, name: &str, kind: &str, node: Node) -> String {
         let qualified = match (self.enclosing(), kind) {
             (Some(parent), SYMBOL_METHOD) => format!("{parent}::{name}"),
             _ => name.to_string(),
@@ -149,9 +150,10 @@ impl<'a> Collector<'a> {
         });
         self.edges.push(ExtractedEdge {
             from_symbol: self.file_path.to_string(),
-            to_symbol: qualified,
+            to_symbol: qualified.clone(),
             edge_kind: EDGE_DEFINES.to_string(),
         });
+        qualified
     }
 
     fn walk(&mut self, node: Node) {
@@ -162,22 +164,28 @@ impl<'a> Collector<'a> {
             // --- Rust ---
             "function_item" => {
                 if let Some(name) = self.node_name(node) {
-                    self.add_symbol(&name, SYMBOL_FUNCTION, node);
-                    self.scope.push(name);
+                    let kind = if self.enclosing().is_some() {
+                        SYMBOL_METHOD
+                    } else {
+                        SYMBOL_FUNCTION
+                    };
+                    let qualified = self.add_symbol(&name, kind, node);
+                    self.scope.push(qualified);
                     pushed = true;
                 }
             }
             "struct_item" | "enum_item" | "trait_item" | "union_item" => {
                 if let Some(name) = self.node_name(node) {
-                    self.add_symbol(&name, SYMBOL_CLASS, node);
-                    self.scope.push(name);
+                    let qualified = self.add_symbol(&name, SYMBOL_CLASS, node);
+                    self.scope.push(qualified);
                     pushed = true;
                 }
             }
             "impl_item" => {
-                if let Some(name) = self.node_name(node) {
-                    self.add_symbol(&name, SYMBOL_CLASS, node);
-                    self.scope.push(name);
+                let name = node.child_by_field_name("type").and_then(|n| self.text(n));
+                if let Some(name) = name {
+                    let qualified = self.add_symbol(&name, SYMBOL_CLASS, node);
+                    self.scope.push(qualified);
                     pushed = true;
                 }
             }
@@ -195,21 +203,23 @@ impl<'a> Collector<'a> {
             // --- Go ---
             "function_declaration" => {
                 if let Some(name) = self.node_name(node) {
-                    self.add_symbol(&name, SYMBOL_FUNCTION, node);
-                    self.scope.push(name);
+                    let qualified = self.add_symbol(&name, SYMBOL_FUNCTION, node);
+                    self.scope.push(qualified);
                     pushed = true;
                 }
             }
             "method_declaration" => {
                 if let Some(name) = self.node_name(node) {
-                    self.add_symbol(&name, SYMBOL_METHOD, node);
+                    let qualified = self.add_symbol(&name, SYMBOL_METHOD, node);
+                    self.scope.push(qualified);
+                    pushed = true;
                 }
             }
             "type_declaration" => {
                 if let Some(spec) = node.child_by_field_name("type") {
                     if let Some(name) = self.node_name(spec) {
-                        self.add_symbol(&name, SYMBOL_CLASS, node);
-                        self.scope.push(name);
+                        let qualified = self.add_symbol(&name, SYMBOL_CLASS, node);
+                        self.scope.push(qualified);
                         pushed = true;
                     }
                 }
@@ -238,14 +248,19 @@ impl<'a> Collector<'a> {
             // --- Python ---
             "function_definition" => {
                 if let Some(name) = self.node_name(node) {
-                    self.add_symbol(&name, SYMBOL_FUNCTION, node);
-                    self.scope.push(name);
+                    let kind = if self.enclosing().is_some() {
+                        SYMBOL_METHOD
+                    } else {
+                        SYMBOL_FUNCTION
+                    };
+                    let qualified = self.add_symbol(&name, kind, node);
+                    self.scope.push(qualified);
                     pushed = true;
                 }
             }
             "class_definition" => {
                 if let Some(name) = self.node_name(node) {
-                    self.add_symbol(&name, SYMBOL_CLASS, node);
+                    let qualified = self.add_symbol(&name, SYMBOL_CLASS, node);
                     if let Some(superclasses) = node.child_by_field_name("superclasses") {
                         for child in superclasses.named_children(&mut superclasses.walk()) {
                             if let Some(base) = self.text(child) {
@@ -257,7 +272,7 @@ impl<'a> Collector<'a> {
                             }
                         }
                     }
-                    self.scope.push(name);
+                    self.scope.push(qualified);
                     pushed = true;
                 }
             }
@@ -270,7 +285,7 @@ impl<'a> Collector<'a> {
             // --- JavaScript / TypeScript ---
             "class_declaration" | "interface_declaration" => {
                 if let Some(name) = self.node_name(node) {
-                    self.add_symbol(&name, SYMBOL_CLASS, node);
+                    let qualified = self.add_symbol(&name, SYMBOL_CLASS, node);
                     if let Some(heritage) = node.child_by_field_name("heritage") {
                         for child in heritage.named_children(&mut heritage.walk()) {
                             if let Some(base) = self.text(child) {
@@ -282,13 +297,15 @@ impl<'a> Collector<'a> {
                             }
                         }
                     }
-                    self.scope.push(name);
+                    self.scope.push(qualified);
                     pushed = true;
                 }
             }
             "method_definition" => {
                 if let Some(name) = self.node_name(node) {
-                    self.add_symbol(&name, SYMBOL_METHOD, node);
+                    let qualified = self.add_symbol(&name, SYMBOL_METHOD, node);
+                    self.scope.push(qualified);
+                    pushed = true;
                 }
             }
             "variable_declarator" => {
@@ -310,10 +327,20 @@ impl<'a> Collector<'a> {
         // CALLS edges: name the callee from the call's function field.
         if matches!(kind, "call_expression" | "call") {
             if let Some(callee) = node.child_by_field_name("function") {
-                let callee_name = callee
-                    .child_by_field_name("name")
-                    .and_then(|n| self.text(n))
-                    .or_else(|| self.text(callee));
+                let callee_name = if callee.kind() == "member_expression" {
+                    callee
+                        .child_by_field_name("property")
+                        .and_then(|n| self.text(n))
+                } else if callee.kind() == "field_expression" {
+                    callee
+                        .child_by_field_name("field")
+                        .and_then(|n| self.text(n))
+                } else {
+                    callee
+                        .child_by_field_name("name")
+                        .and_then(|n| self.text(n))
+                        .or_else(|| self.text(callee))
+                };
                 if let Some(target) = callee_name {
                     if let Some(caller) = self.enclosing() {
                         self.edges.push(ExtractedEdge {
@@ -414,6 +441,40 @@ fn main() {
         assert!(names.contains(&"User"), "{names:?}");
         assert!(names.contains(&"User::load"), "{names:?}");
         assert!(names.contains(&"MAX"), "{names:?}");
+    }
+
+    #[test]
+    fn rust_impl_methods_qualified() {
+        let src = "struct User {}\nimpl User {\n    fn load() -> u8 { 1 }\n}\n";
+        let idx = extract_file("src/user.rs", src).unwrap();
+        let names: Vec<&str> = idx.symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"User"), "{names:?}");
+        assert!(names.contains(&"User::load"), "{names:?}");
+    }
+
+    #[test]
+    fn python_class_methods_qualified() {
+        let src = "class A:\n    def go(self):\n        pass\n";
+        let idx = extract_file("a.py", src).unwrap();
+        let names: Vec<&str> = idx.symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"A"), "{names:?}");
+        assert!(names.contains(&"A::go"), "{names:?}");
+    }
+
+    #[test]
+    fn javascript_method_calls_use_field_name() {
+        let src = "class A {\n  go() { return this.b(); }\n}\n";
+        let idx = extract_file("a.js", src).unwrap();
+        let calls: Vec<String> = idx
+            .edges
+            .iter()
+            .filter(|e| e.edge_kind == EDGE_CALLS)
+            .map(|e| e.to_symbol.clone())
+            .collect();
+        assert!(calls.contains(&"b".to_string()), "{calls:?}");
+        assert!(idx.edges.iter().any(|e| {
+            e.edge_kind == EDGE_CALLS && e.from_symbol == "A::go" && e.to_symbol == "b"
+        }));
     }
 
     #[test]

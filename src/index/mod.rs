@@ -41,6 +41,7 @@ pub async fn list_repo_files(
             arr.iter()
                 .filter(|t| t["type"].as_str() == Some("blob"))
                 .filter_map(|t| t["path"].as_str().map(|p| p.to_string()))
+                .filter(|p| extract::language_name(p).is_some())
                 .collect()
         })
         .unwrap_or_default();
