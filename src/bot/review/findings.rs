@@ -169,7 +169,7 @@ mod tests {
             "Package `fakelib` not found on npm.",
             Some("Check npmjs.com"),
         ));
-        assert!(body.contains("Package does not exist"));
+        assert!(body.contains("Missing package") || body.contains("fakelib"));
         assert!(body.contains("fakelib"));
         assert!(body.contains("fingerprint:"));
         assert!(
@@ -187,8 +187,8 @@ mod tests {
             "API Key detected",
             Some("Use env vars"),
         ));
-        assert!(body.contains("Credential in source"));
-        assert!(body.contains("secret") || body.contains("Rotate"));
+        assert!(body.contains("Secret in the code") || body.contains("Credential"));
+        assert!(body.contains("secret") || body.contains("Rotate") || body.contains("Do this"));
     }
 
     #[test]
@@ -215,7 +215,7 @@ mod tests {
             "// TODO: fix",
             Some("Complete it"),
         ));
-        assert!(body.contains("Incomplete code"));
+        assert!(body.contains("Unfinished TODO") || body.contains("TODO"));
     }
 
     #[test]

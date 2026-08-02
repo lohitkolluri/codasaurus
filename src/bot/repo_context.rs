@@ -17,6 +17,10 @@ static ISSUE_REF_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(?:fixes|closes|resolves|fix(?:es)?)\s+#(\d+)\b").expect("issue ref regex")
 });
 
+/// Bare `#123` mentions (titles often use these without Fixes/Closes).
+static ISSUE_HASH_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"#(\d+)\b").expect("issue hash regex"));
+
 static JIRA_KEY_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\b([A-Z][A-Z0-9]+-\d+)\b").expect("jira key regex"));
 
@@ -192,20 +196,34 @@ pub async fn fetch_codeowner_reviewers(
     Ok(owners_for_paths(&rules, changed_paths))
 }
 
-/// Parse Fixes/Closes/Resolves #N from PR body and fetch issue titles (budgeted).
+/// Parse Fixes/Closes/Resolves #N (and bare `#N`) from PR title+body; fetch up to 3.
 pub async fn fetch_linked_issues(
     client: &reqwest::Client,
     headers: &HeaderMap,
     repo: &str,
+    pr_title: &str,
     pr_body: &str,
 ) -> Result<Vec<IssueContext>> {
+    let haystack = format!("{pr_title}\n{pr_body}");
     let mut numbers: Vec<u64> = ISSUE_REF_RE
-        .captures_iter(pr_body)
+        .captures_iter(&haystack)
         .filter_map(|c| c.get(1)?.as_str().parse().ok())
         .collect();
+    // Also pick bare #N from the title (and short body prefix) so linked issues
+    // show up even when authors skip "Fixes #" wording.
+    for cap in ISSUE_HASH_RE.captures_iter(pr_title) {
+        if let Some(n) = cap.get(1).and_then(|m| m.as_str().parse().ok()) {
+            numbers.push(n);
+        }
+    }
+    for cap in ISSUE_HASH_RE.captures_iter(pr_body.chars().take(800).collect::<String>().as_str()) {
+        if let Some(n) = cap.get(1).and_then(|m| m.as_str().parse().ok()) {
+            numbers.push(n);
+        }
+    }
     numbers.sort_unstable();
     numbers.dedup();
-    numbers.truncate(5);
+    numbers.truncate(3);
 
     if numbers.is_empty() {
         return Ok(Vec::new());
@@ -501,7 +519,7 @@ pub async fn gather_remote_context(
         ),
         fetch_guidelines(client, headers, repo, head_ref),
         fetch_codeowner_reviewers(client, headers, repo, git_ref, changed_paths),
-        fetch_linked_issues(client, headers, repo, pr_body),
+        fetch_linked_issues(client, headers, repo, pr_title, pr_body),
     );
 
     let manifests = manifests_res.unwrap_or_default();

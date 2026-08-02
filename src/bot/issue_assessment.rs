@@ -10,11 +10,20 @@ pub enum IssueVerdict {
 }
 
 impl IssueVerdict {
+    #[allow(dead_code)] // legacy label; walkthrough uses plain_label
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Addressed => "addressed",
             Self::Partial => "partial",
             Self::Unclear => "unclear",
+        }
+    }
+
+    fn plain_label(self) -> &'static str {
+        match self {
+            Self::Addressed => "looks covered",
+            Self::Partial => "partly covered",
+            Self::Unclear => "unclear from this PR",
         }
     }
 }
@@ -106,21 +115,27 @@ pub fn assessment_markdown(rows: &[(IssueContext, IssueVerdict)]) -> String {
                 && !t.contains("configure linear")
                 && !t.contains("configure jira_*")
         })
+        .take(3)
         .collect();
     if rows.is_empty() {
         return String::new();
     }
-    let mut out = String::from("**Linked issues**\n\n");
+    let mut out = String::from("## Linked issues\n\n");
     for (issue, verdict) in rows {
         let label = if issue.number > 0 {
-            format!("#{} — {}", issue.number, issue.title)
+            let title: String = issue.title.chars().take(72).collect();
+            if title.is_empty() {
+                format!("#{}", issue.number)
+            } else {
+                format!("#{}: {title}", issue.number)
+            }
         } else {
-            issue.title.clone()
+            issue.title.chars().take(72).collect()
         };
         out.push_str(&format!(
-            "- {} · `{}`\n",
+            "- {} ({})\n",
             label.replace('|', "\\|"),
-            verdict.as_str()
+            verdict.plain_label()
         ));
     }
     out.push('\n');
@@ -130,6 +145,28 @@ pub fn assessment_markdown(rows: &[(IssueContext, IssueVerdict)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn assessment_markdown_caps_at_three() {
+        let rows: Vec<(IssueContext, IssueVerdict)> = (1..=5)
+            .map(|n| {
+                (
+                    IssueContext {
+                        number: n,
+                        title: format!("Issue {n}"),
+                        body: None,
+                    },
+                    IssueVerdict::Unclear,
+                )
+            })
+            .collect();
+        let md = assessment_markdown(&rows);
+        assert!(md.contains("## Linked issues"));
+        assert!(md.contains("#1: Issue 1"));
+        assert!(md.contains("#3: Issue 3"));
+        assert!(!md.contains("#4:"));
+        assert!(md.contains("unclear from this PR"));
+    }
 
     #[test]
     fn scores_path_overlap_as_partial_or_addressed() {
