@@ -37,26 +37,6 @@ impl Default for ReviewOptions {
     }
 }
 
-/// Public origin for hosted walkthrough assets (`/branding/review-banner.svg`).
-async fn public_base_url(pool: Option<&crate::db::DbPool>) -> Option<String> {
-    if let Some(pool) = pool {
-        if let Ok(Some(url)) = crate::db::config::get_config(pool, "public_url").await {
-            let t = url.trim();
-            if !t.is_empty() {
-                return Some(t.trim_end_matches('/').to_string());
-            }
-        }
-    }
-    std::env::var("PUBLIC_URL").ok().and_then(|u| {
-        let t = u.trim();
-        if t.is_empty() {
-            None
-        } else {
-            Some(t.trim_end_matches('/').to_string())
-        }
-    })
-}
-
 pub async fn review_pr_with_options(
     token: &str,
     repo_name: &str,
@@ -766,24 +746,39 @@ pub async fn review_pr_with_options(
         review_comments.push(comment);
     }
 
+    // Load prior findings before save_review_to_db so same-SHA re-reviews can delta.
+    let progress = load_finding_progress(repo_name, pr_number, &findings).await;
+
     // Only ship walkthrough when there are genuinely no findings (no APPROVE).
     if findings.is_empty() {
-        let public_base = public_base_url(pool).await;
-        let body = crate::bot::markdown::clean_approve_body_ext(
-            agent_badge_owned.as_deref(),
-            &blast_md,
-            &dep_delta_md,
-            public_base.as_deref(),
-        );
-        // Canonical summary is an issue comment we update in place on each push.
-        post_or_update_comment(
+        let sequence = maybe_sequence_diagram(
+            repo_llm_enabled && !low_signal_only,
+            pool,
+            &pr_title,
+            &files,
+            &changed_paths,
+        )
+        .await;
+        post_split_review_comments(
             client,
             &auth_header,
             repo_name,
             pr_number,
-            &body,
             &state,
-            "walkthrough",
+            &findings,
+            false,
+            &pr_title,
+            &files,
+            &reviewers,
+            &config,
+            &runtime,
+            agent_badge_owned.as_deref(),
+            &related_prs,
+            &issue_assessment_md,
+            &blast_md,
+            &dep_delta_md,
+            sequence.as_deref(),
+            progress.as_ref(),
         )
         .await?;
         if !head_sha.is_empty() {
@@ -841,17 +836,20 @@ pub async fn review_pr_with_options(
         return Ok(());
     }
 
-    let public_base = public_base_url(pool).await;
-    let walkthrough_extras = crate::bot::markdown::WalkthroughExtras {
-        related_prs: &related_prs,
-        issue_assessment_md: &issue_assessment_md,
-        agent_badge: agent_badge_owned.as_deref(),
-        blast_md: &blast_md,
-        dep_delta_md: &dep_delta_md,
-        public_base_url: public_base.as_deref(),
-    };
-
-    let body = crate::bot::markdown::walkthrough_body_ext(
+    let sequence = maybe_sequence_diagram(
+        repo_llm_enabled && !low_signal_only,
+        pool,
+        &pr_title,
+        &files,
+        &changed_paths,
+    )
+    .await;
+    post_split_review_comments(
+        client,
+        &auth_header,
+        repo_name,
+        pr_number,
+        &state,
         &findings,
         has_blocking,
         &pr_title,
@@ -859,23 +857,13 @@ pub async fn review_pr_with_options(
         &reviewers,
         &config,
         &runtime,
-        true,
-        // Mermaid is rendered by GitHub client-side — no LLM required.
-        true,
-        walkthrough_extras,
-    );
-
-    // Canonical walkthrough is always an issue comment, updated in place on new
-    // commits (review_comments slot). Previously we only updated on Review API
-    // failure, so every successful push posted a brand-new full PR review.
-    post_or_update_comment(
-        client,
-        &auth_header,
-        repo_name,
-        pr_number,
-        &body,
-        &state,
-        "walkthrough",
+        agent_badge_owned.as_deref(),
+        &related_prs,
+        &issue_assessment_md,
+        &blast_md,
+        &dep_delta_md,
+        sequence.as_deref(),
+        progress.as_ref(),
     )
     .await?;
 
@@ -889,15 +877,22 @@ pub async fn review_pr_with_options(
         } else {
             "COMMENT"
         };
-        let review_body = serde_json::json!({
-            "body": format!(
-                "### Codasaurus\n\n\
-                 Review for `{sha_short}` — full walkthrough is in the summary comment \
-                 (updated in place on each push).\n\n\
-                 {} inline finding{}.",
+        let summary = if has_blocking {
+            format!(
+                "Review for `{sha_short}` — start with **What to do next** in the overview, \
+                 then the {} inline thread{}.",
                 review_comments.len(),
                 if review_comments.len() == 1 { "" } else { "s" }
-            ),
+            )
+        } else {
+            format!(
+                "Review for `{sha_short}` — optional notes on the diff; overview has the checklist \
+                 ({} inline).",
+                review_comments.len()
+            )
+        };
+        let review_body = serde_json::json!({
+            "body": format!("### Codasaurus\n\n{summary}"),
             "event": review_event,
             "comments": review_comments,
         });
@@ -1045,6 +1040,190 @@ pub async fn review_pr_with_options(
     }
 
     // Walkthrough already covers open/push; slash `describe` is the LLM path.
+    Ok(())
+}
+
+/// Diff current findings against the previous completed review for this PR.
+async fn load_finding_progress(
+    repo_name: &str,
+    pr_number: i64,
+    findings: &detectors::Findings,
+) -> Option<crate::bot::markdown::FindingProgress> {
+    let pool = crate::bot::CONFIG_POOL.get()?;
+    let repo = crate::db::repos::get_repo_by_full_name(pool, repo_name)
+        .await
+        .ok()
+        .flatten()?;
+    let prior = crate::db::reviews::get_latest_completed_review_for_pr(pool, repo.id, pr_number)
+        .await
+        .ok()
+        .flatten()?;
+    let prior_rows = crate::db::reviews::get_findings_for_review(pool, prior.id)
+        .await
+        .ok()?;
+    if prior_rows.is_empty() && findings.is_empty() {
+        return None;
+    }
+    let prior: Vec<(String, String, String)> = prior_rows
+        .into_iter()
+        .map(|f| {
+            let fp = f.fingerprint.unwrap_or_default();
+            let label = crate::bot::markdown::guide_label_parts(
+                &f.detector,
+                &f.message,
+                &f.file_path,
+                f.line_start,
+            );
+            (fp, label, f.severity)
+        })
+        .collect();
+    crate::bot::markdown::compute_finding_progress(&findings.findings, &prior)
+}
+
+async fn maybe_sequence_diagram(
+    llm_ok: bool,
+    pool: Option<&crate::db::DbPool>,
+    pr_title: &str,
+    files: &[serde_json::Value],
+    changed_paths: &[String],
+) -> Option<String> {
+    if !llm_ok || !crate::bot::markdown::should_attempt_sequence_diagram(changed_paths) {
+        return None;
+    }
+    let llm_cfg = crate::llm::LlmConfig::from_db_or_env(pool).await?;
+    let files_list = changed_paths
+        .iter()
+        .take(40)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut diff = String::new();
+    for f in files.iter().take(20) {
+        let name = f["filename"].as_str().unwrap_or("?");
+        let patch = f["patch"].as_str().unwrap_or("");
+        if patch.is_empty() {
+            continue;
+        }
+        use std::fmt::Write as _;
+        let _ = write!(diff, "--- a/{name}\n+++ b/{name}\n{patch}\n");
+        if diff.len() > 8_000 {
+            break;
+        }
+    }
+    if diff.is_empty() {
+        return None;
+    }
+    match crate::llm::sequence_diagram_for_diff(pr_title, &files_list, &diff, &llm_cfg).await {
+        Ok(raw) => crate::bot::markdown::sanitize_sequence_mermaid(&raw).map(|(m, _)| m),
+        Err(e) => {
+            tracing::debug!(error = %e, "sequence diagram skipped");
+            None
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn post_split_review_comments(
+    client: &reqwest::Client,
+    auth_header: &str,
+    repo_name: &str,
+    pr_number: i64,
+    state: &Option<ReviewState>,
+    findings: &detectors::Findings,
+    has_blocking: bool,
+    pr_title: &str,
+    files: &[serde_json::Value],
+    reviewers: &[String],
+    config: &crate::config::Config,
+    runtime: &crate::bot_runtime::BotRuntimeConfig,
+    agent_badge: Option<&str>,
+    related_prs: &[String],
+    issue_assessment_md: &str,
+    blast_md: &str,
+    dep_delta_md: &str,
+    sequence_mermaid: Option<&str>,
+    progress: Option<&crate::bot::markdown::FindingProgress>,
+) -> Result<()> {
+    let overview = crate::bot::markdown::overview_comment_body(
+        findings,
+        has_blocking,
+        pr_title,
+        files,
+        runtime,
+        agent_badge,
+        progress,
+    );
+    post_or_update_comment(
+        client,
+        auth_header,
+        repo_name,
+        pr_number,
+        &overview,
+        state,
+        "walkthrough",
+    )
+    .await?;
+
+    let extras = crate::bot::markdown::WalkthroughExtras {
+        related_prs,
+        issue_assessment_md,
+        blast_md,
+        dep_delta_md,
+        sequence_mermaid,
+        sequence_caption: None,
+    };
+    if let Some(ctx) = crate::bot::markdown::context_comment_body(&extras, runtime) {
+        post_or_update_comment(
+            client,
+            auth_header,
+            repo_name,
+            pr_number,
+            &ctx,
+            state,
+            "review_context",
+        )
+        .await?;
+    } else if let Some(s) = state {
+        // Clear stale context from a prior SHA when this run has nothing to show.
+        if s.get_comment_id_async(repo_name, pr_number, "review_context")
+            .await
+            .ok()
+            .flatten()
+            .is_some()
+        {
+            let stub = crate::bot::markdown::context_comment_stub();
+            let _ = post_or_update_comment(
+                client,
+                auth_header,
+                repo_name,
+                pr_number,
+                &stub,
+                state,
+                "review_context",
+            )
+            .await;
+        }
+    }
+
+    let checks = crate::bot::markdown::checks_comment_body(
+        findings,
+        has_blocking,
+        pr_title,
+        files,
+        reviewers,
+        config,
+        runtime,
+    );
+    post_or_update_comment(
+        client,
+        auth_header,
+        repo_name,
+        pr_number,
+        &checks,
+        state,
+        "review_checks",
+    )
+    .await?;
     Ok(())
 }
 

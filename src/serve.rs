@@ -184,7 +184,10 @@ fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> 
         .route("/health/ready", get(ready_handler))
         // Bundled branding assets for App badge upload and PR walkthrough banner.
         .route("/branding/logo.png", get(branding_logo_png))
-        .route("/branding/review-banner.svg", get(branding_review_banner_svg))
+        .route(
+            "/branding/review-banner.svg",
+            get(branding_review_banner_svg),
+        )
         .route("/webhook", webhook_handler.clone())
         .route("/webhook/", webhook_handler);
 

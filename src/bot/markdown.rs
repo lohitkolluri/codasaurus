@@ -1,11 +1,11 @@
 //! Readable PR comment markdown for GitHub review threads.
 //!
-//! Prefer native GFM (headings, lists, `<details>`). Hosted images/badges are
-//! secondary; keep the above-the-fold walkthrough short and finding-free.
+//! Guide first: name what to do next, celebrate progress, keep machinery tucked away.
 
 use crate::bot_runtime::BotRuntimeConfig;
 use crate::config::Config;
 use crate::detectors::{Finding, Findings};
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 /// Codasaurus theme colors (dashboard tokens) for shields.io badges.
@@ -13,7 +13,8 @@ const LABEL_COLOR: &str = "1a1a1a";
 const COLOR_SHIP: &str = "16a34a";
 const COLOR_HOLD: &str = "dc2626";
 const COLOR_REVIEW: &str = "d97706";
-const COLOR_INFO: &str = "9a9a9a";
+const COLOR_INFO: &str = "64748b";
+const COLOR_MUTED: &str = "9a9a9a";
 const COLOR_ACCENT: &str = "ff6659";
 
 /// shields.io badge (flat-square) with dark label — safe for GitHub PR markdown.
@@ -42,12 +43,12 @@ fn urlencoding_lite(s: &str) -> String {
         .collect()
 }
 
-/// Severity badge — text label + themed shield (not color-only).
+/// Soft severity cue for inline comments (no badge theater).
 pub fn severity_badge(severity: &str) -> String {
     match severity {
-        "blocking" => format!("`BLOCKER` {}", shield("sev", "blocking", COLOR_HOLD)),
-        "warning" => format!("`HIGH` {}", shield("sev", "warning", COLOR_REVIEW)),
-        _ => format!("`ADVISORY` {}", shield("sev", "info", COLOR_INFO)),
+        "blocking" => "**Needs fix**".into(),
+        "warning" => "**Note**".into(),
+        _ => "**FYI**".into(),
     }
 }
 
@@ -71,7 +72,7 @@ pub fn commands_details() -> String {
         .into()
 }
 
-/// Inline finding comment — location is the thread; body = impact + action.
+/// Inline finding comment — lead with the action; tuck bot machinery away.
 pub fn inline_finding_comment(f: &Finding) -> String {
     let badge = severity_badge(f.severity);
     let title = finding_title(f);
@@ -80,27 +81,33 @@ pub fn inline_finding_comment(f: &Finding) -> String {
     let fp = short_fp(f);
     let provenance = crate::bot::provenance::provenance_line(f);
 
-    let fix_cta = if f.codemod.as_ref().is_some_and(|c| !c.is_empty()) {
-        format!(" · `@codasaurus fix {fp}`")
-    } else {
-        String::new()
-    };
     let mut body = format!(
-        "{badge} **{title}**\n\n\
-         **Impact:** {why}\n\n\
-         **Action:** {action}\n\n\
-         <details>\n<summary>Evidence</summary>\n\n{provenance}\n\n</details>\n\n\
-         ---\n\
-         <sub><code>fingerprint: {fp}</code> · <code>@codasaurus ignore {fp}</code>{fix_cta} · 👎 to dismiss</sub>"
+        "{badge} · **{title}**\n\n\
+         **Do this:** {action}\n\n\
+         <details>\n<summary>Why it matters</summary>\n\n{why}\n\n{provenance}\n\n</details>\n"
     );
 
     if let Some(ref code) = f.codemod {
-        let _ = write!(
-            body,
-            "\n\n```suggestion\n{}\n```\n\n<sub>Or reply `@codasaurus fix {fp}` (needs Contents Write + allow_auto_fix).</sub>",
-            code.trim_end()
-        );
+        let _ = write!(body, "\n```suggestion\n{}\n```\n", code.trim_end());
     }
+
+    let _ = write!(
+        body,
+        "\n<details>\n<summary>Dismiss / fix commands</summary>\n\n\
+         <code>fingerprint: {fp}</code>\n\n\
+         `@codasaurus ignore {fp}` · 👎 to dismiss\
+         {}{}\n\n</details>\n",
+        if f.codemod.as_ref().is_some_and(|c| !c.is_empty()) {
+            format!(" · `@codasaurus fix {fp}`")
+        } else {
+            String::new()
+        },
+        if f.codemod.as_ref().is_some_and(|c| !c.is_empty()) {
+            " (needs Contents Write + allow_auto_fix)"
+        } else {
+            ""
+        },
+    );
 
     body
 }
@@ -194,53 +201,340 @@ pub fn redact_secrets(s: &str) -> String {
     out.trim_end().to_string()
 }
 
-/// Optional walkthrough sections (blast radius, dep delta, agent badge, …).
+/// Optional sections for the split review comments.
 #[derive(Debug, Clone, Default)]
 pub struct WalkthroughExtras<'a> {
     pub related_prs: &'a [String],
     pub issue_assessment_md: &'a str,
-    pub agent_badge: Option<&'a str>,
     pub blast_md: &'a str,
     pub dep_delta_md: &'a str,
-    /// Canonical public origin (`https://host`) for `/branding/review-banner.svg`.
-    pub public_base_url: Option<&'a str>,
+    /// Sanitized Mermaid `sequenceDiagram` body (no fences), if any.
+    pub sequence_mermaid: Option<&'a str>,
+    /// One short caption under the sequence diagram.
+    pub sequence_caption: Option<&'a str>,
 }
 
-/// Overview header: optional hosted banner + themed verdict badges.
-fn write_review_header(
-    body: &mut String,
-    public_base_url: Option<&str>,
-    verdict_label: &str,
-    verdict_color: &str,
-    verdict_detail: &str,
-    counts_badge: &str,
-) {
-    // Stable slot marker for idempotent updates / tooling.
-    let _ = writeln!(body, "<!-- codasaurus:overview:v1 -->\n");
-    if let Some(base) = public_base_url.map(str::trim).filter(|s| !s.is_empty()) {
-        let base = base.trim_end_matches('/');
-        let _ = writeln!(
-            body,
-            "<img src=\"{base}/branding/review-banner.svg\" alt=\"Codasaurus\" width=\"720\" />\n"
-        );
-    } else {
-        let _ = writeln!(
-            body,
-            "## {} Codasaurus\n",
-            shield("codasaurus", "review", LABEL_COLOR)
+/// One item in a resolve / still-open / new narrative.
+#[derive(Debug, Clone)]
+pub struct ProgressItem {
+    pub label: String,
+    pub severity: String,
+}
+
+/// Diff of findings vs the previous completed review for this PR.
+#[derive(Debug, Clone, Default)]
+pub struct FindingProgress {
+    pub resolved: Vec<ProgressItem>,
+    pub still_open: Vec<ProgressItem>,
+    pub newly_found: Vec<ProgressItem>,
+}
+
+impl FindingProgress {
+    pub fn is_empty(&self) -> bool {
+        self.resolved.is_empty() && self.still_open.is_empty() && self.newly_found.is_empty()
+    }
+}
+
+/// Strip `{review_id}:` prefix from persisted fingerprints.
+pub fn raw_fingerprint(stored: &str) -> &str {
+    if let Some((prefix, rest)) = stored.split_once(':') {
+        if !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit()) && rest.len() >= 32 {
+            return rest;
+        }
+    }
+    stored
+}
+
+/// Compare current findings to a prior review's stored findings.
+pub fn compute_finding_progress(
+    current: &[Finding],
+    prior: &[(String, String, String)],
+) -> Option<FindingProgress> {
+    if prior.is_empty() {
+        return None;
+    }
+
+    let mut prior_by_fp: HashMap<&str, (&str, &str)> = HashMap::new();
+    for (fp, label, sev) in prior {
+        prior_by_fp.insert(raw_fingerprint(fp), (label.as_str(), sev.as_str()));
+    }
+    let prior_fps: HashSet<&str> = prior_by_fp.keys().copied().collect();
+
+    let mut current_by_fp: HashMap<String, ProgressItem> = HashMap::new();
+    for f in current {
+        let fp = f.fingerprint();
+        current_by_fp.insert(
+            fp,
+            ProgressItem {
+                label: guide_label(f),
+                severity: f.severity.to_string(),
+            },
         );
     }
-    let verdict_badge = shield("verdict", verdict_label, verdict_color);
-    let _ = writeln!(body, "{verdict_badge} {counts_badge}\n");
-    let _ = writeln!(body, "**{verdict_detail}**\n");
+    let current_fps: HashSet<&str> = current_by_fp.keys().map(String::as_str).collect();
+
+    let mut progress = FindingProgress::default();
+    for fp in prior_fps.difference(&current_fps) {
+        if let Some((label, sev)) = prior_by_fp.get(fp) {
+            progress.resolved.push(ProgressItem {
+                label: (*label).to_string(),
+                severity: (*sev).to_string(),
+            });
+        }
+    }
+    for fp in current_fps.intersection(&prior_fps) {
+        if let Some(item) = current_by_fp.get(*fp) {
+            progress.still_open.push(item.clone());
+        }
+    }
+    for fp in current_fps.difference(&prior_fps) {
+        if let Some(item) = current_by_fp.get(*fp) {
+            progress.newly_found.push(item.clone());
+        }
+    }
+
+    // Prefer blocking / warning order in each bucket.
+    let rank = |s: &str| match s {
+        "blocking" => 0,
+        "warning" => 1,
+        _ => 2,
+    };
+    for bucket in [
+        &mut progress.resolved,
+        &mut progress.still_open,
+        &mut progress.newly_found,
+    ] {
+        bucket.sort_by(|a, b| {
+            rank(&a.severity)
+                .cmp(&rank(&b.severity))
+                .then(a.label.cmp(&b.label))
+        });
+    }
+
+    Some(progress)
 }
 
-/// Build the main walkthrough / summary comment body.
-///
-/// Shape: short prose Walkthrough, Changes list, estimated effort.
-/// Findings stay on inline review comments — not duplicated here.
-#[allow(clippy::too_many_arguments)]
-pub fn walkthrough_body_ext(
+fn guide_label(f: &Finding) -> String {
+    let title = finding_title(f);
+    if f.line > 0 {
+        format!("{title} — `{}:{}`", f.file, f.line)
+    } else {
+        format!("{title} — `{}`", f.file)
+    }
+}
+
+/// Short label for a prior DB finding (no live `Finding` struct).
+pub fn guide_label_parts(detector: &str, message: &str, file: &str, line: Option<i32>) -> String {
+    let stub = Finding {
+        detector: detector.to_string(),
+        severity: "info",
+        file: file.to_string(),
+        line: line.unwrap_or(0) as usize,
+        column: 0,
+        message: message.to_string(),
+        suggestion: None,
+        evidence: None,
+        codemod: None,
+    };
+    guide_label(&stub)
+}
+
+fn write_slot_header(body: &mut String, marker: &str, title: &str) {
+    let _ = writeln!(body, "<!-- {marker} -->\n");
+    let _ = writeln!(body, "### {title}\n");
+}
+
+/// Top-of-overview status strip: severity counts + ready-to-merge.
+fn status_badge_strip(blocking: usize, warning: usize, info: usize, ready: bool) -> String {
+    let blocking_color = if blocking > 0 {
+        COLOR_HOLD
+    } else {
+        COLOR_MUTED
+    };
+    let warning_color = if warning > 0 {
+        COLOR_REVIEW
+    } else {
+        COLOR_MUTED
+    };
+    let info_color = if info > 0 { COLOR_INFO } else { COLOR_MUTED };
+    let (ready_msg, ready_color) = if ready {
+        ("YES", COLOR_SHIP)
+    } else {
+        ("NO", COLOR_HOLD)
+    };
+    format!(
+        "{} {} {} {}\n",
+        shield("BLOCKING", &blocking.to_string(), blocking_color),
+        shield("WARNING", &warning.to_string(), warning_color),
+        shield("INFO", &info.to_string(), info_color),
+        shield("READY TO MERGE", ready_msg, ready_color),
+    )
+}
+
+/// Message 1: status badges + prose + what-to-do checklist + progress + Changes.
+pub fn overview_comment_body(
+    findings: &Findings,
+    has_blocking: bool,
+    pr_title: &str,
+    files: &[serde_json::Value],
+    runtime: &BotRuntimeConfig,
+    agent_badge: Option<&str>,
+    progress: Option<&FindingProgress>,
+) -> String {
+    let counts = findings.count_by_severity();
+    let blocking = *counts.get("blocking").unwrap_or(&0);
+    let warning = *counts.get("warning").unwrap_or(&0);
+    let info = *counts.get("info").unwrap_or(&0);
+    let total = findings.findings.len();
+    let ready = !has_blocking && blocking == 0;
+
+    let mut body = String::with_capacity(1536);
+    write_slot_header(&mut body, "codasaurus:overview:v1", "Codasaurus");
+    body.push_str(&status_badge_strip(blocking, warning, info, ready));
+    body.push('\n');
+    if let Some(badge) = agent_badge.filter(|s| !s.is_empty()) {
+        let _ = writeln!(body, "{badge}\n");
+    }
+    let _ = writeln!(
+        body,
+        "{}\n",
+        walkthrough_prose(pr_title, files, total, blocking, warning, has_blocking)
+    );
+
+    if let Some(p) = progress.filter(|p| !p.is_empty()) {
+        write_progress_section(&mut body, p);
+    }
+
+    write_next_actions(&mut body, &findings.findings);
+
+    let _ = writeln!(body, "## Changes\n");
+    write_changed_files_table(&mut body, files);
+    if body.len() > runtime.max_comment_bytes {
+        truncate_utf8_owned(&mut body, runtime.max_comment_bytes);
+    }
+    body
+}
+
+fn write_next_actions(body: &mut String, findings: &[Finding]) {
+    if findings.is_empty() {
+        return;
+    }
+    let mut ordered: Vec<&Finding> = findings.iter().collect();
+    ordered.sort_by_key(|f| match f.severity {
+        "blocking" => 0,
+        "warning" => 1,
+        _ => 2,
+    });
+    let _ = writeln!(body, "## What to do next\n");
+    for (i, f) in ordered.iter().take(5).enumerate() {
+        let cue = match f.severity {
+            "blocking" => "fix",
+            "warning" => "note",
+            _ => "fyi",
+        };
+        let _ = writeln!(body, "{}. **{cue}** — {}", i + 1, guide_label(f));
+    }
+    if ordered.len() > 5 {
+        let _ = writeln!(
+            body,
+            "\n_{} more on the diff — see inline comments._",
+            ordered.len() - 5
+        );
+    }
+    body.push('\n');
+}
+
+fn write_progress_section(body: &mut String, progress: &FindingProgress) {
+    let _ = writeln!(body, "## Since last review\n");
+    if !progress.resolved.is_empty() {
+        let _ = writeln!(body, "**Resolved**");
+        for item in progress.resolved.iter().take(5) {
+            let _ = writeln!(body, "- ~~{}~~", escape_md(&item.label));
+        }
+        body.push('\n');
+    }
+    if !progress.still_open.is_empty() {
+        let _ = writeln!(body, "**Still open**");
+        for item in progress.still_open.iter().take(5) {
+            let _ = writeln!(body, "- {}", escape_md(&item.label));
+        }
+        body.push('\n');
+    }
+    if !progress.newly_found.is_empty() {
+        let _ = writeln!(body, "**New**");
+        for item in progress.newly_found.iter().take(5) {
+            let _ = writeln!(body, "- {}", escape_md(&item.label));
+        }
+        body.push('\n');
+    }
+}
+
+/// Message 2: sequence diagram + blast / related / deps. `None` when empty.
+pub fn context_comment_body(
+    extras: &WalkthroughExtras<'_>,
+    runtime: &BotRuntimeConfig,
+) -> Option<String> {
+    let has_seq = extras
+        .sequence_mermaid
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    let has_blast = !extras.blast_md.trim().is_empty();
+    let has_dep = !extras.dep_delta_md.trim().is_empty();
+    let has_related = !extras.related_prs.is_empty();
+    let has_issues = !extras.issue_assessment_md.trim().is_empty();
+    if !has_seq && !has_blast && !has_dep && !has_related && !has_issues {
+        return None;
+    }
+
+    let mut body = String::with_capacity(1024);
+    write_slot_header(&mut body, "codasaurus:context:v1", "Context");
+
+    if has_seq {
+        let _ = writeln!(body, "## Flow\n");
+        let _ = writeln!(
+            body,
+            "```mermaid\n{}\n```\n",
+            extras.sequence_mermaid.unwrap_or("").trim()
+        );
+        if let Some(cap) = extras.sequence_caption.filter(|s| !s.trim().is_empty()) {
+            let _ = writeln!(body, "_{}_\n", escape_md(cap.trim()));
+        }
+    }
+    if has_issues {
+        body.push_str(extras.issue_assessment_md.trim());
+        body.push_str("\n\n");
+    }
+    if has_blast {
+        let _ = writeln!(body, "## Blast radius\n");
+        body.push_str(extras.blast_md.trim());
+        body.push_str("\n\n");
+    }
+    if has_dep {
+        let _ = writeln!(body, "## Dependencies\n");
+        body.push_str(extras.dep_delta_md.trim());
+        body.push_str("\n\n");
+    }
+    if has_related {
+        let _ = writeln!(body, "## Related PRs\n");
+        for r in extras.related_prs.iter().take(3) {
+            let _ = writeln!(body, "- {r}");
+        }
+        body.push('\n');
+    }
+
+    if body.len() > runtime.max_comment_bytes {
+        truncate_utf8_owned(&mut body, runtime.max_comment_bytes);
+    }
+    Some(body)
+}
+
+/// One-line stub so a prior context comment does not keep a stale diagram.
+pub fn context_comment_stub() -> String {
+    "<!-- codasaurus:context:v1 -->\n\n_No extra context for this change._\n".into()
+}
+
+/// Message 3: pre-merge guidance. Quiet when green; teaches when unchecked.
+pub fn checks_comment_body(
     findings: &Findings,
     has_blocking: bool,
     pr_title: &str,
@@ -248,193 +542,239 @@ pub fn walkthrough_body_ext(
     reviewers: &[String],
     config: &Config,
     runtime: &BotRuntimeConfig,
-    include_brand_gif: bool,
-    include_mermaid: bool,
-    extras: WalkthroughExtras<'_>,
 ) -> String {
-    let related_prs = extras.related_prs;
-    let issue_assessment_md = extras.issue_assessment_md;
     let counts = findings.count_by_severity();
     let blocking = *counts.get("blocking").unwrap_or(&0);
     let warning = *counts.get("warning").unwrap_or(&0);
-    let info = *counts.get("info").unwrap_or(&0);
     let total = findings.findings.len();
+    let title_ok = !pr_title.trim().is_empty();
+    let warnings_ok = warning <= config.pre_merge.max_warnings;
+    let all_clear = !has_blocking && warnings_ok && title_ok && total == 0;
 
-    let (verdict_label, verdict_color, verdict_detail) = if findings.is_empty() {
-        ("ship", COLOR_SHIP, "No findings — ready to merge.")
-    } else if has_blocking {
-        (
-            "hold",
-            COLOR_HOLD,
-            "Blocking findings must be fixed or dismissed.",
-        )
-    } else {
-        (
-            "review",
-            COLOR_REVIEW,
-            "Non-blocking findings remain — see inline comments.",
-        )
-    };
+    let mut body = String::with_capacity(512);
+    write_slot_header(&mut body, "codasaurus:checks:v1", "Checks");
 
-    let mut body = String::with_capacity(2048);
-
-    let counts_msg = format!("{blocking}b/{warning}w/{info}i");
-    let counts_badge = shield(
-        "findings",
-        &counts_msg,
-        if blocking > 0 {
-            COLOR_HOLD
-        } else if warning > 0 {
-            COLOR_REVIEW
-        } else {
-            COLOR_SHIP
-        },
-    );
-
-    write_review_header(
-        &mut body,
-        extras.public_base_url,
-        verdict_label,
-        verdict_color,
-        verdict_detail,
-        &counts_badge,
-    );
-    if let Some(badge) = extras.agent_badge {
-        let _ = writeln!(body, "{badge}\n");
+    if all_clear {
+        let _ = writeln!(
+            body,
+            "All clear — nothing to fix before merge from automated checks.\n"
+        );
+        if !reviewers.is_empty() {
+            let _ = writeln!(
+                body,
+                "Suggested eyes: {}\n",
+                reviewers
+                    .iter()
+                    .take(4)
+                    .map(|r| format!("@{r}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+        }
+        body.push_str(&commands_details());
+        if body.len() > runtime.max_comment_bytes {
+            truncate_utf8_owned(&mut body, runtime.max_comment_bytes);
+        }
+        return body;
     }
 
-    let _ = writeln!(body, "## Walkthrough\n");
-    let _ = writeln!(
-        body,
-        "{}\n",
-        walkthrough_prose(pr_title, files, total, blocking, warning)
-    );
+    let _ = writeln!(body, "## Before merge\n");
 
-    let _ = writeln!(body, "## Changes\n");
-    write_changed_files_summary(&mut body, files);
+    let warn_hint = format!(
+        "At most {} warning{} allowed — address notes on the diff or ask a reviewer.",
+        config.pre_merge.max_warnings,
+        if config.pre_merge.max_warnings == 1 {
+            ""
+        } else {
+            "s"
+        }
+    );
+    let checks = [
+        (
+            "No blocking findings",
+            !has_blocking,
+            "Work through **What to do next** (items marked **fix**), then push.",
+        ),
+        (
+            "Warning budget within limit",
+            warnings_ok,
+            warn_hint.as_str(),
+        ),
+        (
+            "PR has a title",
+            title_ok,
+            "Add a short PR title that says what changed.",
+        ),
+    ];
+    for (label, ok, hint) in checks {
+        let mark = if ok { "x" } else { " " };
+        let _ = writeln!(body, "- [{mark}] **{label}**");
+        if !ok {
+            let _ = writeln!(body, "  - {hint}");
+        }
+    }
+    body.push('\n');
 
     let effort = estimate_review_effort(files.len(), total, blocking);
     let (effort_label, minutes) = effort_label_and_minutes(effort);
-    let _ = writeln!(body, "## Review effort\n");
     let _ = writeln!(
         body,
-        "**{effort}/5** ({effort_label}) · ~{minutes} min · {} file{}\n",
+        "Reviewer time ~{minutes} min ({effort}/5 · {effort_label} · {} file{})\n",
         files.len(),
         if files.len() == 1 { "" } else { "s" },
     );
-    if total > 0 {
-        let _ = writeln!(
-            body,
-            "**Actionable inline comments:** {total} (high-signal only)\n"
-        );
-    }
-
-    // Mermaid only when it adds structure (2+ areas).
-    if include_mermaid {
-        if let Some(diagram) = mermaid_change_flow(files) {
-            let _ = writeln!(body, "<details>\n<summary>Change map</summary>\n");
-            let _ = writeln!(body, "```mermaid\n{diagram}\n```\n");
-            let _ = writeln!(body, "</details>\n");
-        }
-    }
-
-    let has_context = !issue_assessment_md.is_empty()
-        || !extras.blast_md.is_empty()
-        || !extras.dep_delta_md.is_empty()
-        || !related_prs.is_empty();
-    if has_context {
-        let _ = writeln!(body, "<details>\n<summary>Context</summary>\n");
-        if !issue_assessment_md.is_empty() {
-            body.push_str(issue_assessment_md);
-            if !issue_assessment_md.ends_with('\n') {
-                body.push('\n');
-            }
-            body.push('\n');
-        }
-        if !extras.blast_md.is_empty() {
-            body.push_str(extras.blast_md);
-            if !extras.blast_md.ends_with('\n') {
-                body.push('\n');
-            }
-        }
-        if !extras.dep_delta_md.is_empty() {
-            body.push_str(extras.dep_delta_md);
-            if !extras.dep_delta_md.ends_with('\n') {
-                body.push('\n');
-            }
-        }
-        if !related_prs.is_empty() {
-            let _ = writeln!(body, "**Related PRs**\n");
-            for r in related_prs.iter().take(3) {
-                let _ = writeln!(body, "- {r}");
-            }
-            if related_prs.len() > 3 {
-                let _ = writeln!(
-                    body,
-                    "- _…{} more — `@codasaurus similar`_",
-                    related_prs.len() - 3
-                );
-            }
-            let _ = writeln!(body);
-        }
-        let _ = writeln!(body, "</details>\n");
-    }
-
-    let checks = [
-        (!has_blocking, "No blocking findings"),
-        (
-            warning <= config.pre_merge.max_warnings,
-            "Warning budget within limit",
-        ),
-        (!pr_title.trim().is_empty(), "PR has a title"),
-    ];
-    let passed = checks.iter().filter(|(ok, _)| *ok).count();
-    let failed = checks.len() - passed;
-    let _ = writeln!(
-        body,
-        "<details>\n<summary>Pre-merge checks · ✓ {passed} · ✗ {failed}</summary>\n"
-    );
-    for (ok, label) in checks {
-        let mark = if ok { "✓" } else { "✗" };
-        let _ = writeln!(body, "- {mark} {label}");
-    }
-    let _ = writeln!(body, "\n</details>\n");
 
     if !reviewers.is_empty() {
         let _ = writeln!(
             body,
-            "**Suggested reviewers:** {}",
+            "Suggested eyes: {}\n",
             reviewers
                 .iter()
+                .take(4)
                 .map(|r| format!("@{r}"))
                 .collect::<Vec<_>>()
-                .join(", ")
+                .join(" ")
         );
-        let _ = writeln!(body);
     }
 
     body.push_str(&commands_details());
-
-    if include_brand_gif {
-        let _ = writeln!(
-            body,
-            "<sub>Self-hosted · BYOK · fail-closed offline mode</sub>"
-        );
-    }
-
     if body.len() > runtime.max_comment_bytes {
         truncate_utf8_owned(&mut body, runtime.max_comment_bytes);
     }
     body
 }
 
-/// One short prose paragraph summarizing the PR.
+/// Sanitize LLM Mermaid sequence output. Returns `None` if unusable.
+pub fn sanitize_sequence_mermaid(raw: &str) -> Option<(String, Option<String>)> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("none")
+        || trimmed.eq_ignore_ascii_case("abstain")
+    {
+        return None;
+    }
+
+    // Strip optional fences / leading prose.
+    let mut mermaid = trimmed.to_string();
+    if let Some(idx) = mermaid.find("```") {
+        let after = &mermaid[idx + 3..];
+        let after = after.strip_prefix("mermaid").unwrap_or(after).trim_start();
+        if let Some(end) = after.find("```") {
+            mermaid = after[..end].trim().to_string();
+        } else {
+            mermaid = after.trim().to_string();
+        }
+    }
+    if !mermaid.to_ascii_lowercase().contains("sequencediagram") {
+        // Allow body-only; prepend header.
+        if mermaid
+            .lines()
+            .any(|l| l.contains("->>") || l.contains("-->>"))
+        {
+            mermaid = format!("sequenceDiagram\n{mermaid}");
+        } else {
+            return None;
+        }
+    }
+
+    let reserved = [
+        "loop",
+        "alt",
+        "opt",
+        "par",
+        "and",
+        "end",
+        "note",
+        "rect",
+        "critical",
+        "break",
+        "participant",
+        "actor",
+    ];
+    let mut lines_out = Vec::new();
+    let mut participants = 0usize;
+    let mut arrows = 0usize;
+    for line in mermaid.lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        let lower = t.to_ascii_lowercase();
+        if lower.starts_with("participant ") || lower.starts_with("actor ") {
+            participants += 1;
+            if participants > 6 {
+                continue;
+            }
+            let rest = t
+                .split_whitespace()
+                .nth(1)
+                .unwrap_or("P")
+                .trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_');
+            let id = if rest.is_empty() || reserved.iter().any(|r| rest.eq_ignore_ascii_case(r)) {
+                format!("P{participants}")
+            } else {
+                rest.chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .take(24)
+                    .collect::<String>()
+            };
+            let label = t
+                .split_once(" as ")
+                .map(|(_, l)| l.trim())
+                .filter(|l| !l.is_empty())
+                .unwrap_or(rest);
+            let label = label.chars().take(32).collect::<String>();
+            lines_out.push(format!("  participant {id} as {label}"));
+            continue;
+        }
+        if t.contains("->>") || t.contains("-->>") || t.contains("->") {
+            arrows += 1;
+            if arrows > 10 {
+                continue;
+            }
+            lines_out.push(format!("  {t}"));
+            continue;
+        }
+        if lower == "sequencediagram" {
+            lines_out.push("sequenceDiagram".into());
+            continue;
+        }
+        // Keep simple alt/opt/end blocks but cap noise.
+        if lower.starts_with("alt ")
+            || lower.starts_with("opt ")
+            || lower.starts_with("else")
+            || lower == "end"
+            || lower.starts_with("note ")
+        {
+            lines_out.push(format!("  {t}"));
+        }
+    }
+    if arrows == 0 {
+        return None;
+    }
+    if !lines_out.iter().any(|l| l == "sequenceDiagram") {
+        lines_out.insert(0, "sequenceDiagram".into());
+    }
+    Some((lines_out.join("\n"), None))
+}
+
+/// True when a sequence diagram is worth attempting (≥2 high-signal source files).
+pub fn should_attempt_sequence_diagram(paths: &[String]) -> bool {
+    let high = paths
+        .iter()
+        .filter(|p| !crate::llm::is_low_signal_path(p))
+        .count();
+    high >= 2
+}
+
+/// One or two short sentences summarizing the PR (≤~280 chars).
 fn walkthrough_prose(
     pr_title: &str,
     files: &[serde_json::Value],
     total: usize,
     blocking: usize,
     warning: usize,
+    has_blocking: bool,
 ) -> String {
     use std::collections::BTreeMap;
     let title = pr_title.trim();
@@ -451,83 +791,52 @@ fn walkthrough_prose(
     }
     let mut areas: Vec<(String, usize)> = by_area.into_iter().collect();
     areas.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    let area_bits: Vec<String> = areas
+    let top: Vec<String> = areas
         .iter()
-        .take(4)
-        .map(|(a, n)| format!("`{a}` ({n} file{})", if *n == 1 { "" } else { "s" }))
+        .take(3)
+        .map(|(a, _)| format!("`{a}`"))
         .collect();
 
     let mut s = String::new();
     if !title.is_empty() {
-        s.push_str(&format!("**{}.** ", escape_md(title)));
+        s.push_str(&format!("{} — ", escape_md(title)));
     }
     if files.is_empty() {
-        s.push_str("No file changes were detected in the diff.");
-    } else if area_bits.len() == 1 {
+        s.push_str("No file changes in the diff.");
+    } else if top.len() <= 1 {
         s.push_str(&format!(
-            "Updates focus on {} across {} path{}.",
-            area_bits[0],
+            "Updates {} ({} file{}).",
+            top.first().map(String::as_str).unwrap_or("the repo"),
             files.len(),
             if files.len() == 1 { "" } else { "s" }
         ));
     } else {
-        s.push_str(&format!("Touches {}.", area_bits.join(", ")));
+        s.push_str(&format!(
+            "Touches {} across {} files.",
+            top.join(", "),
+            files.len()
+        ));
     }
     if total == 0 {
-        s.push_str(" Detectors found nothing to flag.");
-    } else if blocking > 0 {
+        s.push_str(" Nothing to fix from automated checks.");
+    } else if has_blocking || blocking > 0 {
         s.push_str(&format!(
-            " Review flagged **{blocking}** blocking and {warning} warning finding{} as inline comments.",
-            if total == 1 { "" } else { "s" }
+            " Start with the {blocking} fix{} below — details are on the diff.",
+            if blocking == 1 { "" } else { "es" }
+        ));
+    } else if warning > 0 {
+        s.push_str(&format!(
+            " {warning} optional note{} below — worth a look before merge.",
+            if warning == 1 { "" } else { "s" }
         ));
     } else {
-        s.push_str(&format!(
-            " {total} non-blocking finding{} posted as inline comments.",
-            if total == 1 { "" } else { "s" }
-        ));
+        s.push_str(" See the checklist below.");
+    }
+    // Hard cap verbosity.
+    if s.chars().count() > 280 {
+        s = s.chars().take(277).collect::<String>() + "…";
     }
     s
-}
-
-/// Clean / ship walkthrough when there are no findings (no APPROVE review event).
-pub fn clean_approve_body_ext(
-    agent_badge: Option<&str>,
-    blast_md: &str,
-    dep_delta_md: &str,
-    public_base_url: Option<&str>,
-) -> String {
-    let mut body = String::new();
-    let findings = shield("findings", "0b/0w/0i", COLOR_SHIP);
-    write_review_header(
-        &mut body,
-        public_base_url,
-        "ship",
-        COLOR_SHIP,
-        "No findings — ready to merge. Detectors found nothing to block.",
-        &findings,
-    );
-    if let Some(badge) = agent_badge.filter(|s| !s.is_empty()) {
-        body.push_str(badge);
-        body.push('\n');
-    }
-    if !blast_md.is_empty() || !dep_delta_md.is_empty() {
-        let _ = writeln!(body, "<details>\n<summary>Context</summary>\n");
-        if !blast_md.is_empty() {
-            body.push_str(blast_md);
-            if !blast_md.ends_with('\n') {
-                body.push('\n');
-            }
-        }
-        if !dep_delta_md.is_empty() {
-            body.push_str(dep_delta_md);
-            if !dep_delta_md.ends_with('\n') {
-                body.push('\n');
-            }
-        }
-        let _ = writeln!(body, "</details>\n");
-    }
-    body.push_str(&commands_details());
-    body
 }
 
 pub fn help_body() -> String {
@@ -593,131 +902,49 @@ fn effort_label_and_minutes(effort: u8) -> (&'static str, u16) {
     }
 }
 
-/// Grouped changed-files as short cohort bullets (no markdown tables).
-fn write_changed_files_summary(body: &mut String, files: &[serde_json::Value]) {
-    use std::collections::BTreeMap;
+/// Compact Changes table (≤8 rows) + full file list in details.
+fn write_changed_files_table(body: &mut String, files: &[serde_json::Value]) {
     if files.is_empty() {
         let _ = writeln!(body, "_No files in diff._\n");
         return;
     }
 
-    let mut by_area: BTreeMap<String, Vec<(&str, &str)>> = BTreeMap::new();
-    for file in files {
+    let _ = writeln!(body, "| Path | What changed |\n| --- | --- |");
+    for file in files.iter().take(8) {
         let name = file["filename"].as_str().unwrap_or("?");
         let status = file["status"].as_str().unwrap_or("modified");
-        let area = name
-            .split('/')
-            .next()
-            .filter(|p| !p.is_empty() && *p != name)
-            .unwrap_or("(root)")
-            .to_string();
-        by_area.entry(area).or_default().push((name, status));
-    }
-
-    for (area, entries) in by_area.iter().take(6) {
-        let summary = area_change_summary(area, entries);
-        let sample: Vec<&str> = entries
-            .iter()
-            .take(3)
-            .map(|(n, _)| n.rsplit('/').next().unwrap_or(n))
-            .collect();
-        let sample_s = sample
-            .iter()
-            .map(|n| format!("`{n}`"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let more = if entries.len() > 3 {
-            format!(" +{}", entries.len() - 3)
-        } else {
-            String::new()
+        let what = match status {
+            "added" => "added",
+            "removed" | "deleted" => "removed",
+            "renamed" => "renamed",
+            _ => "updated",
         };
-        let _ = writeln!(
-            body,
-            "- **{area}** ({}) — {sample_s}{more}. {summary}",
-            entries.len()
-        );
+        let short = if name.len() > 48 {
+            format!("…{}", &name[name.len().saturating_sub(45)..])
+        } else {
+            name.to_string()
+        };
+        let _ = writeln!(body, "| `{short}` | {what} |");
     }
-    if by_area.len() > 6 {
-        let _ = writeln!(body, "- _…{} more areas_", by_area.len() - 6);
+    if files.len() > 8 {
+        let _ = writeln!(body, "| _…{} more_ | |", files.len() - 8);
     }
     let _ = writeln!(body);
 
-    let _ = writeln!(body, "<details>\n<summary>File list</summary>\n");
-    for file in files.iter().take(25) {
+    let _ = writeln!(
+        body,
+        "<details>\n<summary>All files ({})</summary>\n",
+        files.len()
+    );
+    for file in files.iter().take(40) {
         let name = file["filename"].as_str().unwrap_or("?");
         let status = file["status"].as_str().unwrap_or("modified");
         let _ = writeln!(body, "- `{name}` ({status})");
     }
-    if files.len() > 25 {
-        let _ = writeln!(body, "- _…{} more_", files.len() - 25);
+    if files.len() > 40 {
+        let _ = writeln!(body, "- _…{} more_", files.len() - 40);
     }
     let _ = writeln!(body, "\n</details>\n");
-}
-
-fn area_change_summary(area: &str, entries: &[(&str, &str)]) -> String {
-    let added = entries.iter().filter(|(_, s)| *s == "added").count();
-    let removed = entries.iter().filter(|(_, s)| *s == "removed").count();
-    let modified = entries.len().saturating_sub(added + removed);
-    let focus = match area {
-        "src" => "core review / bot logic",
-        "svelte-dashboard" => "dashboard UI",
-        "docs" | "assets" => "docs / assets",
-        ".github" => "CI / GitHub config",
-        "(root)" => "repo root config",
-        _ => "updates in this area",
-    };
-    let mut parts = Vec::new();
-    if modified > 0 {
-        parts.push(format!("{modified} updated"));
-    }
-    if added > 0 {
-        parts.push(format!("{added} added"));
-    }
-    if removed > 0 {
-        parts.push(format!("{removed} removed"));
-    }
-    if parts.is_empty() {
-        focus.into()
-    } else {
-        format!("{} — {focus}", parts.join(", "))
-    }
-}
-
-/// Mermaid change-map when 2+ top-level areas (skip trivial single-area PRs).
-fn mermaid_change_flow(files: &[serde_json::Value]) -> Option<String> {
-    use std::collections::BTreeMap;
-    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for f in files {
-        let name = f["filename"].as_str().unwrap_or("");
-        if name.is_empty() {
-            continue;
-        }
-        let top = name
-            .split('/')
-            .next()
-            .unwrap_or(name)
-            .chars()
-            .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
-            .take(24)
-            .collect::<String>();
-        if top.is_empty() {
-            continue;
-        }
-        *counts.entry(top).or_default() += 1;
-    }
-    if counts.len() < 2 {
-        return None;
-    }
-    let mut nodes: Vec<(String, usize)> = counts.into_iter().collect();
-    nodes.sort_by(|a, b| b.1.cmp(&a.1));
-    nodes.truncate(8);
-
-    let mut out = String::from("flowchart TB\n  PR[Pull request] --> Review[Codasaurus]\n");
-    for (i, (name, n)) in nodes.iter().enumerate() {
-        let id = format!("N{i}");
-        let _ = writeln!(out, "  Review --> {id}[{name} x{n}]");
-    }
-    Some(out)
 }
 
 fn truncate_utf8_owned(s: &mut String, max_bytes: usize) {
@@ -773,20 +1000,19 @@ mod tests {
         };
         let body = inline_finding_comment(&f);
         assert!(body.contains("<details>"));
-        assert!(body.contains("Evidence"));
-        assert!(body.contains("**Impact:**"));
-        assert!(body.contains("**Action:**"));
+        assert!(body.contains("Why it matters"));
+        assert!(body.contains("**Do this:**"));
         assert!(body.contains("@codasaurus ignore"));
     }
 
     #[test]
     fn help_lists_impact() {
-        assert!(help_body().contains("impact"));
+        assert!(help_body().contains("review"));
         assert!(commands_details().contains("@codasaurus help"));
     }
 
     #[test]
-    fn walkthrough_is_prose_changes_effort() {
+    fn overview_is_lean_with_changes_table() {
         let findings = Findings {
             findings: vec![Finding {
                 detector: "boilerplate".into(),
@@ -804,72 +1030,172 @@ mod tests {
             serde_json::json!({"filename": "src/bot/mod.rs", "status": "modified"}),
             serde_json::json!({"filename": "CHANGELOG.md", "status": "modified"}),
         ];
-        let config = Config::default();
         let runtime = BotRuntimeConfig::default();
-        let body = walkthrough_body_ext(
+        let body = overview_comment_body(
             &findings,
             false,
             "Stop stacking comments",
             &files,
-            &[],
-            &config,
             &runtime,
-            false,
-            true,
-            WalkthroughExtras::default(),
+            None,
+            None,
         );
-        assert!(body.contains("## Walkthrough"));
-        assert!(body.contains("## Changes"));
-        assert!(body.contains("## Review effort"));
-        assert!(body.contains("Actionable inline comments:"));
         assert!(body.contains("<!-- codasaurus:overview:v1 -->"));
-        assert!(body.contains("<summary>Pre-merge checks"));
-        // Findings belong on inline comments — not listed in the walkthrough.
-        assert!(!body.contains("**Findings**"));
-        assert!(!body.contains("| Sev |"));
-        assert!(!body.contains("| Area |"));
-        assert!(body.contains("0b%2F1w%2F0i") || body.contains("1w"));
-        // Banner when PUBLIC_URL / extras.public_base_url is set.
-        let with_banner = walkthrough_body_ext(
+        assert!(body.contains("## What to do next"));
+        assert!(body.contains("src/bot/commands.rs"));
+        assert!(body.contains("## Changes"));
+        assert!(body.contains("| Path | What changed |"));
+        assert!(body.contains("shields.io"));
+        assert!(body.contains("alt=\"BLOCKING:"));
+        assert!(body.contains("alt=\"WARNING:"));
+        assert!(body.contains("alt=\"INFO:"));
+        assert!(body.contains("alt=\"READY TO MERGE:"));
+        assert!(!body.contains("review-banner"));
+        assert!(!body.contains("## Review effort"));
+        assert!(!body.contains("Pre-merge"));
+        assert!(!body.contains("flowchart TB"));
+
+        let checks = checks_comment_body(
             &findings,
             false,
             "Stop stacking comments",
             &files,
-            &[],
-            &config,
+            &["alice".into()],
+            &Config::default(),
             &runtime,
+        );
+        assert!(checks.contains("## Before merge") || checks.contains("All clear"));
+        assert!(checks.contains("@alice"));
+
+        let clean = checks_comment_body(
+            &Findings::default(),
             false,
-            true,
-            WalkthroughExtras {
-                public_base_url: Some("https://codasaurus.example"),
+            "Clean PR",
+            &files,
+            &[],
+            &Config::default(),
+            &runtime,
+        );
+        assert!(clean.contains("All clear"));
+        assert!(!clean.contains("## Before merge"));
+
+        let progress = FindingProgress {
+            resolved: vec![ProgressItem {
+                label: "Old issue — `a.rs:1`".into(),
+                severity: "blocking".into(),
+            }],
+            still_open: vec![ProgressItem {
+                label: "Boilerplate code — `src/bot/commands.rs:10`".into(),
+                severity: "warning".into(),
+            }],
+            newly_found: vec![],
+        };
+        let with_progress = overview_comment_body(
+            &findings,
+            false,
+            "Stop stacking comments",
+            &files,
+            &runtime,
+            None,
+            Some(&progress),
+        );
+        assert!(with_progress.contains("## Since last review"));
+        assert!(with_progress.contains("**Resolved**"));
+        assert!(with_progress.contains("**Still open**"));
+
+        let ctx = context_comment_body(
+            &WalkthroughExtras {
+                related_prs: &["#1".into()],
+                blast_md: "blast",
                 ..Default::default()
             },
-        );
-        assert!(with_banner.contains(
-            "https://codasaurus.example/branding/review-banner.svg"
-        ));
+            &runtime,
+        )
+        .expect("context");
+        assert!(ctx.contains("## Related PRs"));
+        assert!(ctx.contains("## Blast radius"));
+        assert!(context_comment_body(&WalkthroughExtras::default(), &runtime).is_none());
     }
 
     #[test]
-    fn mermaid_skips_single_area() {
-        let files = vec![
-            serde_json::json!({"filename": "src/a.rs"}),
-            serde_json::json!({"filename": "src/b.rs"}),
+    fn progress_set_diff() {
+        let a = Finding {
+            detector: "secrets".into(),
+            severity: "blocking",
+            file: "a.rs".into(),
+            line: 1,
+            column: 0,
+            message: "key".into(),
+            suggestion: None,
+            evidence: None,
+            codemod: None,
+        };
+        let b = Finding {
+            detector: "todo-leaks".into(),
+            severity: "warning",
+            file: "b.rs".into(),
+            line: 2,
+            column: 0,
+            message: "TODO".into(),
+            suggestion: None,
+            evidence: None,
+            codemod: None,
+        };
+        let prior = vec![
+            (
+                format!("9:{}", a.fingerprint()),
+                guide_label(&a),
+                "blocking".into(),
+            ),
+            (
+                format!("9:{}", b.fingerprint()),
+                guide_label(&b),
+                "warning".into(),
+            ),
         ];
-        assert!(mermaid_change_flow(&files).is_none());
+        let current = vec![b.clone()];
+        let p = compute_finding_progress(&current, &prior).expect("progress");
+        assert_eq!(p.resolved.len(), 1);
+        assert!(p.resolved[0].label.contains("Credential"));
+        assert_eq!(p.still_open.len(), 1);
+        assert!(p.newly_found.is_empty());
     }
 
     #[test]
-    fn mermaid_change_map_from_files() {
-        let files = vec![
-            serde_json::json!({"filename": "src/bot/mod.rs", "status": "modified"}),
-            serde_json::json!({"filename": "src/api/setup.rs", "status": "modified"}),
-            serde_json::json!({"filename": "docs/setup.md", "status": "added"}),
-        ];
-        let diagram = mermaid_change_flow(&files).expect("diagram");
-        assert!(diagram.contains("flowchart TB"));
-        assert!(diagram.contains("src"));
-        assert!(diagram.contains("docs"));
+    fn inline_leads_with_action() {
+        let f = Finding {
+            detector: "secrets".into(),
+            severity: "blocking",
+            file: "a.rs".into(),
+            line: 1,
+            column: 0,
+            message: "key".into(),
+            suggestion: None,
+            evidence: Some("AKIA".into()),
+            codemod: None,
+        };
+        let body = inline_finding_comment(&f);
+        assert!(body.contains("**Do this:**"));
+        assert!(body.contains("Needs fix"));
+        assert!(body.contains("Dismiss / fix commands"));
+        assert!(!body.contains("shields.io"));
+        assert!(body.contains("fingerprint:"));
+    }
+
+    #[test]
+    fn sanitize_sequence_accepts_arrows() {
+        let raw = "```mermaid\nsequenceDiagram\nparticipant Client\nparticipant API\nClient->>API: GET /x\n```";
+        let (m, _) = sanitize_sequence_mermaid(raw).expect("ok");
+        assert!(m.contains("sequenceDiagram"));
+        assert!(m.contains("Client->>API"));
+        assert!(!m.to_ascii_lowercase().contains("flowchart"));
+    }
+
+    #[test]
+    fn sanitize_renames_reserved_participant() {
+        let raw = "sequenceDiagram\nparticipant loop\nparticipant API\nloop->>API: x\n";
+        let (m, _) = sanitize_sequence_mermaid(raw).expect("ok");
+        assert!(!m.lines().any(|l| l.trim() == "participant loop"));
     }
 
     #[test]

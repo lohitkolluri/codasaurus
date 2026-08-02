@@ -134,18 +134,14 @@ pub fn reverify_llm_issues(
                 let tokens: Vec<&str> = issue
                     .description
                     .split_whitespace()
-                    .chain(
-                        issue
-                            .rationale
-                            .as_deref()
-                            .unwrap_or("")
-                            .split_whitespace(),
-                    )
+                    .chain(issue.rationale.as_deref().unwrap_or("").split_whitespace())
                     .filter(|w| w.len() >= 6)
                     .take(8)
                     .collect();
                 if !tokens.is_empty() {
-                    let any_hit = tokens.iter().any(|t| content_l.contains(&t.to_ascii_lowercase()));
+                    let any_hit = tokens
+                        .iter()
+                        .any(|t| content_l.contains(&t.to_ascii_lowercase()));
                     if !any_hit && (issue.line == 0 || sev == "critical") {
                         tracing::debug!(
                             file = %issue.file,
