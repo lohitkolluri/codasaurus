@@ -145,6 +145,14 @@ impl LearningStore {
         Ok(())
     }
 
+    pub async fn un_dismiss_fingerprint(&self, fingerprint: &str) -> Result<bool> {
+        Ok(db_execute!(
+            &self.pool,
+            "DELETE FROM dismissed_findings WHERE fingerprint = ?",
+            fingerprint
+        )? > 0)
+    }
+
     pub async fn count_dismissals_for_detector(&self, detector: &str) -> Result<i64> {
         Ok(db_scalar!(
             &self.pool,
