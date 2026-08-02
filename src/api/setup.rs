@@ -540,6 +540,7 @@ fn build_manifest(public_url: &str) -> serde_json::Value {
             "pull_request",
             "issue_comment",
             "reaction",
+            "pull_request_review_thread",
             "installation",
             "installation_repositories"
         ]

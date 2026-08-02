@@ -42,6 +42,7 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - Go ecosystem support: `hallucinated_imports` and `phantom_deps` now verify imports and `go.mod` declarations against proxy.golang.org.
 - New Tier-1 detector `lockfile_drift`: flags dependencies declared in `package.json`, `Cargo.toml`, or `go.mod` that are missing from their lockfile (`package-lock.json`, `Cargo.lock`, `go.sum`).
 - New Tier-1 detector `license_drift`: flags declared npm / PyPI / crates.io dependencies that carry copyleft-style licenses.
+- Resolving a review thread on a Codasaurus finding comment now dismisses that fingerprint repo-wide (same ACL and learning path as a 👎 reaction); unresolving the thread re-enables the finding.
 - `@codasaurus retry` command re-runs the latest review for a PR.
 - ARM64 Linux release binary (`aarch64-unknown-linux-gnu`) in the release workflow.
 - CLI `codasaurus reset-password --email … --password …` for emergency local dashboard recovery (no email flow).

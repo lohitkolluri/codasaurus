@@ -27,6 +27,7 @@ mod reactions;
 pub(crate) mod related_prs;
 pub(crate) mod repo_context;
 mod review;
+mod threads;
 pub(crate) use review::{github_api_headers, next_github_link, GITHUB_CLIENT};
 pub(crate) mod strictness;
 pub(crate) mod title_fix;
@@ -204,6 +205,8 @@ pub(crate) struct WebhookPayload {
     issue: Option<serde_json::Value>,
     /// `reaction` webhook event payload
     reaction: Option<serde_json::Value>,
+    /// `pull_request_review_thread` webhook event payload
+    thread: Option<serde_json::Value>,
     /// Actor who triggered the event (reactions, etc.)
     sender: Option<serde_json::Value>,
     /// Sent in `installation.created` event
@@ -310,20 +313,13 @@ fn author_can_command(payload: &WebhookPayload) -> bool {
 
 /// Who may dismiss findings via emoji reactions (same trust bar as slash commands).
 fn reactor_can_dismiss(payload: &WebhookPayload) -> bool {
-    let reaction_assoc = payload
+    let assoc = payload
         .reaction
         .as_ref()
         .and_then(|r| r.get("author_association"))
         .and_then(|a| a.as_str())
         .unwrap_or("");
-    if matches!(
-        reaction_assoc,
-        "OWNER" | "MEMBER" | "COLLABORATOR" | "CONTRIBUTOR"
-    ) {
-        return true;
-    }
-
-    let reactor = payload
+    let login = payload
         .reaction
         .as_ref()
         .and_then(|r| r.pointer("/user/login"))
@@ -334,23 +330,64 @@ fn reactor_can_dismiss(payload: &WebhookPayload) -> bool {
                 .as_ref()
                 .and_then(|s| s.get("login"))
                 .and_then(|v| v.as_str())
-        })
-        .unwrap_or("");
-    if reactor.is_empty() {
-        return false;
-    }
+        });
+    actor_can_dismiss(
+        assoc,
+        login,
+        repo_owner_login(payload),
+        pr_author_login(payload),
+    )
+}
 
-    let repo_owner = payload
+/// Who may dismiss findings by resolving a review thread (same trust bar as reactions).
+fn thread_resolver_can_dismiss(payload: &WebhookPayload) -> bool {
+    let assoc = payload
+        .thread
+        .as_ref()
+        .and_then(|t| t.pointer("/comments/0/author_association"))
+        .and_then(|a| a.as_str())
+        .unwrap_or("");
+    let login = payload
+        .thread
+        .as_ref()
+        .and_then(|t| t.pointer("/comments/0/user/login"))
+        .and_then(|v| v.as_str())
+        .or_else(|| {
+            payload
+                .sender
+                .as_ref()
+                .and_then(|s| s.get("login"))
+                .and_then(|v| v.as_str())
+        });
+    actor_can_dismiss(
+        assoc,
+        login,
+        repo_owner_login(payload),
+        pr_author_login(payload),
+    )
+}
+
+fn actor_can_dismiss(assoc: &str, login: Option<&str>, repo_owner: &str, pr_author: &str) -> bool {
+    if matches!(assoc, "OWNER" | "MEMBER" | "COLLABORATOR" | "CONTRIBUTOR") {
+        return true;
+    }
+    let Some(login) = login.filter(|l| !l.is_empty()) else {
+        return false;
+    };
+    login.eq_ignore_ascii_case(repo_owner) || login.eq_ignore_ascii_case(pr_author)
+}
+
+fn repo_owner_login(payload: &WebhookPayload) -> &str {
+    payload
         .repo
         .as_ref()
         .and_then(|r| r.pointer("/owner/login"))
         .and_then(|v| v.as_str())
-        .unwrap_or("");
-    if reactor.eq_ignore_ascii_case(repo_owner) {
-        return true;
-    }
+        .unwrap_or("")
+}
 
-    let pr_author = payload
+fn pr_author_login(payload: &WebhookPayload) -> &str {
+    payload
         .issue
         .as_ref()
         .and_then(|i| i.pointer("/user/login"))
@@ -362,8 +399,7 @@ fn reactor_can_dismiss(payload: &WebhookPayload) -> bool {
                 .and_then(|pr| pr.pointer("/user/login"))
                 .and_then(|v| v.as_str())
         })
-        .unwrap_or("");
-    reactor.eq_ignore_ascii_case(pr_author)
+        .unwrap_or("")
 }
 
 pub(crate) async fn handle_webhook(
@@ -613,6 +649,36 @@ pub(crate) async fn handle_webhook(
                 }
             });
         }
+    } else if event == "pull_request_review_thread"
+        && matches!(payload.action.as_str(), "resolved" | "unresolved")
+    {
+        let repo_full_name = payload
+            .repo
+            .as_ref()
+            .and_then(|r| r["full_name"].as_str())
+            .unwrap_or("")
+            .to_string();
+        if !repo_full_name.is_empty() {
+            if let Some(thread) = payload.thread.clone() {
+                let action = payload.action.clone();
+                let allowed = thread_resolver_can_dismiss(&payload);
+                tokio::spawn(async move {
+                    if let Some(pool) = bot_db_pool() {
+                        if let Err(e) = threads::handle_thread_event(
+                            pool,
+                            &action,
+                            &thread,
+                            &repo_full_name,
+                            allowed,
+                        )
+                        .await
+                        {
+                            tracing::warn!(error = %e, "review thread learning failed");
+                        }
+                    }
+                });
+            }
+        }
     } else if event == "installation" && payload.action == "created" {
         tokio::spawn(handle_installation_created(
             payload.installation,
@@ -853,6 +919,7 @@ mod author_acl_tests {
             pull_request: None,
             installation: None,
             reaction: None,
+            thread: None,
             sender: None,
             repositories: None,
             repositories_added: None,
@@ -904,5 +971,57 @@ mod author_acl_tests {
     #[test]
     fn rejects_unrelated_none() {
         assert!(!author_can_command(&payload("NONE", "eve", "alice", "bob")));
+    }
+
+    fn thread_payload(
+        assoc: &str,
+        resolver: &str,
+        repo_owner: &str,
+        pr_author: &str,
+    ) -> WebhookPayload {
+        let mut p = payload(assoc, resolver, repo_owner, pr_author);
+        p.thread = Some(serde_json::json!({
+            "node_id": "PRRT_x",
+            "comments": [{
+                "author_association": assoc,
+                "user": { "login": resolver },
+                "body": "**Secrets** · `blocking`\n<sub>`fingerprint: abcdef012345`</sub>"
+            }]
+        }));
+        p.pull_request = Some(serde_json::json!({
+            "user": { "login": pr_author }
+        }));
+        p
+    }
+
+    #[test]
+    fn thread_owner_association_allows_dismiss() {
+        assert!(thread_resolver_can_dismiss(&thread_payload(
+            "OWNER", "alice", "alice", "bob"
+        )));
+    }
+
+    #[test]
+    fn thread_repo_owner_login_allows_even_if_none() {
+        assert!(thread_resolver_can_dismiss(&thread_payload(
+            "NONE", "alice", "alice", "carol"
+        )));
+    }
+
+    #[test]
+    fn thread_pr_author_allows() {
+        assert!(thread_resolver_can_dismiss(&thread_payload(
+            "FIRST_TIME_CONTRIBUTOR",
+            "bob",
+            "org",
+            "bob"
+        )));
+    }
+
+    #[test]
+    fn thread_unrelated_none_rejected() {
+        assert!(!thread_resolver_can_dismiss(&thread_payload(
+            "NONE", "eve", "alice", "bob"
+        )));
     }
 }
