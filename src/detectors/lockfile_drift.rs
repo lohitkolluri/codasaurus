@@ -27,27 +27,22 @@ enum ManifestKind {
     Go,
 }
 
+type ManifestExtractor = fn(&str) -> Vec<String>;
+type LockfileExtractor = fn(&str) -> HashSet<String>;
+
 struct LockfileSpec {
     name: &'static str,
-    extract: fn(&str) -> HashSet<String>,
+    extract: LockfileExtractor,
 }
 
 impl ManifestKind {
     fn lockfile(self) -> LockfileSpec {
-        match self {
-            ManifestKind::Npm => LockfileSpec {
-                name: "package-lock.json",
-                extract: extract_npm_lock_deps,
-            },
-            ManifestKind::Cargo => LockfileSpec {
-                name: "Cargo.lock",
-                extract: extract_cargo_lock_deps,
-            },
-            ManifestKind::Go => LockfileSpec {
-                name: "go.sum",
-                extract: extract_go_sum_deps,
-            },
-        }
+        let (name, extract): (&'static str, LockfileExtractor) = match self {
+            ManifestKind::Npm => ("package-lock.json", extract_npm_lock_deps),
+            ManifestKind::Cargo => ("Cargo.lock", extract_cargo_lock_deps),
+            ManifestKind::Go => ("go.sum", extract_go_sum_deps),
+        };
+        LockfileSpec { name, extract }
     }
 }
 
@@ -61,46 +56,35 @@ fn collect_manifests(parsed_files: &[ParsedFile]) -> HashMap<String, Manifest> {
     let mut manifests = HashMap::new();
     for file in parsed_files {
         let path = file.path.to_lowercase();
-        let dir = directory_of(&file.path);
-        if path.ends_with("package.json") {
-            let deps = crate::dep_parser::extract_npm_deps(&file.raw_content);
-            if !deps.is_empty() {
-                manifests.insert(
-                    dir,
-                    Manifest {
-                        path: file.path.clone(),
-                        deps: deps.into_iter().collect(),
-                        kind: ManifestKind::Npm,
-                    },
-                );
-            }
-        } else if path.ends_with("cargo.toml") {
-            let deps = crate::dep_parser::extract_cargo_deps(&file.raw_content);
-            if !deps.is_empty() {
-                manifests.insert(
-                    dir,
-                    Manifest {
-                        path: file.path.clone(),
-                        deps: deps.into_iter().collect(),
-                        kind: ManifestKind::Cargo,
-                    },
-                );
-            }
-        } else if path.ends_with("go.mod") {
-            let deps = crate::dep_parser::extract_go_mod_deps(&file.raw_content);
-            if !deps.is_empty() {
-                manifests.insert(
-                    dir,
-                    Manifest {
-                        path: file.path.clone(),
-                        deps: deps.into_iter().collect(),
-                        kind: ManifestKind::Go,
-                    },
-                );
-            }
+        let Some((kind, extract)) = manifest_kind_for(&path) else {
+            continue;
+        };
+        let deps = extract(&file.raw_content);
+        if deps.is_empty() {
+            continue;
         }
+        manifests.insert(
+            directory_of(&file.path),
+            Manifest {
+                path: file.path.clone(),
+                deps: deps.into_iter().collect(),
+                kind,
+            },
+        );
     }
     manifests
+}
+
+fn manifest_kind_for(path: &str) -> Option<(ManifestKind, ManifestExtractor)> {
+    if path.ends_with("package.json") {
+        Some((ManifestKind::Npm, crate::dep_parser::extract_npm_deps))
+    } else if path.ends_with("cargo.toml") {
+        Some((ManifestKind::Cargo, crate::dep_parser::extract_cargo_deps))
+    } else if path.ends_with("go.mod") {
+        Some((ManifestKind::Go, crate::dep_parser::extract_go_mod_deps))
+    } else {
+        None
+    }
 }
 
 fn directory_of(path: &str) -> String {
