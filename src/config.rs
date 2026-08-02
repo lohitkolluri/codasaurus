@@ -25,6 +25,9 @@ pub struct Config {
 
     #[serde(default)]
     pub confidence: ConfidenceConfig,
+
+    #[serde(default)]
+    pub index: IndexConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -172,6 +175,40 @@ pub struct ConfidenceConfig {
     pub drop_ungrounded: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_index_languages")]
+    pub languages: Vec<String>,
+    #[serde(default = "default_index_max_files")]
+    pub max_files: usize,
+}
+
+impl Default for IndexConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            languages: default_index_languages(),
+            max_files: default_index_max_files(),
+        }
+    }
+}
+
+fn default_index_languages() -> Vec<String> {
+    vec![
+        "rust".into(),
+        "go".into(),
+        "python".into(),
+        "javascript".into(),
+        "typescript".into(),
+    ]
+}
+
+fn default_index_max_files() -> usize {
+    50_000
+}
+
 fn default_false() -> bool {
     false
 }
@@ -270,6 +307,7 @@ impl Default for Config {
             pre_merge: PreMergeConfig::default(),
             quality_gate: QualityGateConfig::default(),
             confidence: ConfidenceConfig::default(),
+            index: IndexConfig::default(),
         }
     }
 }

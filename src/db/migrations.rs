@@ -252,6 +252,86 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     migrate_v16_dismissal_provenance(pool).await?;
     migrate_v17_baseline_and_gates(pool).await?;
     migrate_v18_confidence(pool).await?;
+    migrate_v19_symbol_index(pool).await?;
+    Ok(())
+}
+
+/// v19: whole-repo symbol graph index (tree-sitter output persisted).
+async fn migrate_v19_symbol_index(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
+    if current.unwrap_or(0) >= 19 {
+        return Ok(());
+    }
+
+    let _ = sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS repo_symbols (
+            repo_full_name TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            symbol_name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            signature TEXT,
+            line INTEGER,
+            PRIMARY KEY (repo_full_name, file_path, symbol_name, line)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_repo_symbols_lookup ON repo_symbols(repo_full_name, file_path)",
+    )
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS repo_edges (
+            repo_full_name TEXT NOT NULL,
+            from_symbol TEXT NOT NULL,
+            to_symbol TEXT NOT NULL,
+            edge_kind TEXT NOT NULL,
+            PRIMARY KEY (repo_full_name, from_symbol, to_symbol, edge_kind)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_repo_edges_lookup ON repo_edges(repo_full_name, from_symbol)",
+    )
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_repo_edges_target ON repo_edges(repo_full_name, to_symbol)",
+    )
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS index_status (
+            repo_full_name TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            built_at TIMESTAMPTZ,
+            error TEXT
+        )
+        "#,
+    )
+    .execute(pool)
+    .await;
+
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (19) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 

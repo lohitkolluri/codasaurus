@@ -11,6 +11,7 @@ pub mod detectors;
 pub mod gates;
 pub mod github_jwt;
 pub mod graph;
+pub mod index;
 pub mod learning;
 pub mod llm;
 pub mod metrics;
