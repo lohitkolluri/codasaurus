@@ -127,9 +127,7 @@ pub async fn create_findings_check_run(
 
     let mut summary = format!(
         "### Codasaurus check\n\n\
-         | Blocking | Warning | Info |\n\
-         | ---: | ---: | ---: |\n\
-         | **{blocking}** | {warning} | {info} |\n\n\
+         **{blocking}** blocking · {warning} warning · {info} info\n\n\
          Inline review comments and walkthrough are on the PR."
     );
     if !summary_extra.trim().is_empty() {

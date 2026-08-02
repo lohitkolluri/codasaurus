@@ -110,9 +110,12 @@ pub fn blast_markdown(report: &BlastReport) -> String {
             out.push('\n');
         }
         if !report.fan_in.is_empty() {
-            out.push_str("| Import / module | Importers in this PR |\n| --- | ---: |\n");
+            out.push_str("Top imports in this PR:\n");
             for (name, n) in report.fan_in.iter().take(6) {
-                out.push_str(&format!("| `{name}` | {n} |\n"));
+                out.push_str(&format!(
+                    "- `{name}` · {n} importer{}\n",
+                    if *n == 1 { "" } else { "s" }
+                ));
             }
             out.push('\n');
         }

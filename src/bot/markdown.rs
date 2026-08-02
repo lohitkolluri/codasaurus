@@ -366,10 +366,8 @@ pub fn walkthrough_body_ext(
     }
 
     if !findings.is_empty() {
-        let _ = writeln!(body, "#### Findings\n");
-        let _ = writeln!(body, "| Sev | Finding | Location |");
-        let _ = writeln!(body, "| --- | --- | --- |");
-        for f in findings.findings.iter().take(15) {
+        let _ = writeln!(body, "**Findings**\n");
+        for f in findings.findings.iter().take(12) {
             let loc = if f.line > 0 {
                 format!("`{}:{}`", f.file, f.line)
             } else {
@@ -377,22 +375,22 @@ pub fn walkthrough_body_ext(
             };
             let _ = writeln!(
                 body,
-                "| `{}` | {} | {loc} |",
+                "- **{}** · {} — {loc}",
                 f.severity,
                 escape_md(&finding_title(f))
             );
         }
-        if findings.findings.len() > 15 {
+        if findings.findings.len() > 12 {
             let _ = writeln!(
                 body,
-                "\n_{} more — see inline comments._",
-                findings.findings.len() - 15
+                "- _…{} more — see inline comments_",
+                findings.findings.len() - 12
             );
         }
         let _ = writeln!(body);
     }
 
-    let _ = writeln!(body, "#### Pre-merge checks\n");
+    let _ = writeln!(body, "**Pre-merge**\n");
     let checks = [
         (!has_blocking, "No blocking findings"),
         (
@@ -402,8 +400,8 @@ pub fn walkthrough_body_ext(
         (!pr_title.trim().is_empty(), "PR has a title"),
     ];
     for (ok, label) in checks {
-        let box_ = if ok { "[x]" } else { "[ ]" };
-        let _ = writeln!(body, "- {box_} {label}");
+        let mark = if ok { "✓" } else { "✗" };
+        let _ = writeln!(body, "- {mark} {label}");
     }
     let _ = writeln!(body);
 
@@ -594,10 +592,10 @@ fn effort_color(effort: u8) -> &'static str {
     }
 }
 
-/// Grouped changed-files summary by top-level path area (plain-language rows).
+/// Grouped changed-files summary as short bullets (no tables — they dominate GitHub threads).
 fn write_changed_files_summary(body: &mut String, files: &[serde_json::Value]) {
     use std::collections::BTreeMap;
-    let _ = writeln!(body, "#### Changes\n");
+    let _ = writeln!(body, "**Changes**\n");
     if files.is_empty() {
         let _ = writeln!(body, "_No files in diff._\n");
         return;
@@ -616,27 +614,28 @@ fn write_changed_files_summary(body: &mut String, files: &[serde_json::Value]) {
         by_area.entry(area).or_default().push((name, status));
     }
 
-    let _ = writeln!(body, "| Area | Files | Summary |");
-    let _ = writeln!(body, "| --- | ---: | --- |");
-    for (area, entries) in by_area.iter().take(10) {
+    for (area, entries) in by_area.iter().take(8) {
         let summary = area_change_summary(area, entries);
-        let _ = writeln!(body, "| `{area}` | {} | {summary} |", entries.len());
+        let _ = writeln!(
+            body,
+            "- `{area}` · {} file{} — {summary}",
+            entries.len(),
+            if entries.len() == 1 { "" } else { "s" }
+        );
     }
-    if by_area.len() > 10 {
-        let _ = writeln!(body, "| _…_ | | _{}_ more areas_ |", by_area.len() - 10);
+    if by_area.len() > 8 {
+        let _ = writeln!(body, "- _…{} more areas_", by_area.len() - 8);
     }
     let _ = writeln!(body);
 
     let _ = writeln!(body, "<details>\n<summary>File list</summary>\n");
-    let _ = writeln!(body, "| File | Status |");
-    let _ = writeln!(body, "| --- | --- |");
-    for file in files.iter().take(40) {
+    for file in files.iter().take(30) {
         let name = file["filename"].as_str().unwrap_or("?");
         let status = file["status"].as_str().unwrap_or("modified");
-        let _ = writeln!(body, "| `{name}` | `{status}` |");
+        let _ = writeln!(body, "- `{name}` ({status})");
     }
-    if files.len() > 40 {
-        let _ = writeln!(body, "| _…_ | _{} more_ |", files.len() - 40);
+    if files.len() > 30 {
+        let _ = writeln!(body, "- _…{} more_", files.len() - 30);
     }
     let _ = writeln!(body, "\n</details>\n");
 }
@@ -807,7 +806,10 @@ mod tests {
         assert!(body.contains("### Summary"));
         assert!(body.contains("<details>\n<summary><strong>Walkthrough</strong>"));
         assert!(!body.contains("<details open>"));
-        assert!(body.contains("| Sev | Finding | Location |"));
+        assert!(body.contains("**Findings**"));
+        assert!(body.contains("- **warning** ·"));
+        assert!(!body.contains("| Sev | Finding | Location |"));
+        assert!(!body.contains("| Area | Files | Summary |"));
         // Compact counts badge (slashes URL-encoded for shields.io).
         assert!(body.contains("0b%2F1w%2F0i") || body.contains("1w"));
     }
