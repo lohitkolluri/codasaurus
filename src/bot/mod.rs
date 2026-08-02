@@ -21,6 +21,7 @@ pub(crate) mod offline;
 mod policy;
 pub(crate) mod provenance;
 mod quality;
+pub(crate) mod readiness;
 pub(crate) use quality::{apply_signal_budget, SignalBudget};
 pub mod queue;
 mod reactions;
