@@ -49,7 +49,8 @@ async function request(method, path, body) {
         }
       }
       const err = new Error(
-        data.error || data.message || `Request failed: ${res.status}`,
+        (data && typeof data === "object" && (data.error || data.message)) ||
+          `Request failed: ${res.status}`,
       );
       err.status = res.status;
       throw err;

@@ -30,24 +30,41 @@ impl LearningStore {
     }
 
     pub async fn dismiss_async(&self, finding: &Finding) -> Result<()> {
+        self.dismiss_with_meta(finding, None, None, false).await
+    }
+
+    pub async fn dismiss_with_meta(
+        &self,
+        finding: &Finding,
+        pr_number: Option<i64>,
+        dismissed_by: Option<&str>,
+        is_maintainer: bool,
+    ) -> Result<()> {
         let fingerprint = finding.fingerprint();
         let repo: Option<String> = None;
+        let by = dismissed_by.map(str::to_string);
         db_execute!(
             &self.pool,
-            "INSERT INTO dismissed_findings (fingerprint, detector, file, line, message, repo_full_name)
-             VALUES (?, ?, ?, ?, ?, ?)
+            "INSERT INTO dismissed_findings (fingerprint, detector, file, line, message, repo_full_name, pr_number, dismissed_by, is_maintainer)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(fingerprint) DO UPDATE SET
                detector = excluded.detector,
                file = excluded.file,
                line = excluded.line,
                message = excluded.message,
-               repo_full_name = COALESCE(excluded.repo_full_name, dismissed_findings.repo_full_name)",
+               repo_full_name = COALESCE(excluded.repo_full_name, dismissed_findings.repo_full_name),
+               pr_number = COALESCE(excluded.pr_number, dismissed_findings.pr_number),
+               dismissed_by = COALESCE(excluded.dismissed_by, dismissed_findings.dismissed_by),
+               is_maintainer = dismissed_findings.is_maintainer OR excluded.is_maintainer",
             &fingerprint,
             &finding.detector,
             &finding.file,
             finding.line as i64,
             &finding.message,
-            &repo
+            &repo,
+            &pr_number,
+            &by,
+            is_maintainer
         )?;
         crate::metrics::record_dismissal();
         let _ = crate::learning::mine::promote_dismissal_to_rule(
@@ -55,6 +72,7 @@ impl LearningStore {
             &finding.detector,
             &finding.file,
             &finding.message,
+            None,
         )
         .await;
         Ok(())
@@ -67,10 +85,20 @@ impl LearningStore {
         file: &str,
         message: &str,
     ) -> Result<()> {
-        self.dismiss_fingerprint_for_repo(fingerprint, detector, file, message, None)
-            .await
+        self.dismiss_fingerprint_for_repo(
+            fingerprint,
+            detector,
+            file,
+            message,
+            None,
+            None,
+            None,
+            false,
+        )
+        .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn dismiss_fingerprint_for_repo(
         &self,
         fingerprint: &str,
@@ -78,27 +106,104 @@ impl LearningStore {
         file: &str,
         message: &str,
         repo_full_name: Option<&str>,
+        pr_number: Option<i64>,
+        dismissed_by: Option<&str>,
+        is_maintainer: bool,
     ) -> Result<()> {
         let repo = repo_full_name.map(str::to_string);
+        let by = dismissed_by.map(str::to_string);
         db_execute!(
             &self.pool,
-            "INSERT INTO dismissed_findings (fingerprint, detector, file, line, message, repo_full_name)
-             VALUES (?, ?, ?, 0, ?, ?)
+            "INSERT INTO dismissed_findings (fingerprint, detector, file, line, message, repo_full_name, pr_number, dismissed_by, is_maintainer)
+             VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?)
              ON CONFLICT(fingerprint) DO UPDATE SET
                detector = excluded.detector,
                file = excluded.file,
                message = excluded.message,
-               repo_full_name = COALESCE(excluded.repo_full_name, dismissed_findings.repo_full_name)",
+               repo_full_name = COALESCE(excluded.repo_full_name, dismissed_findings.repo_full_name),
+               pr_number = COALESCE(excluded.pr_number, dismissed_findings.pr_number),
+               dismissed_by = COALESCE(excluded.dismissed_by, dismissed_findings.dismissed_by),
+               is_maintainer = dismissed_findings.is_maintainer OR excluded.is_maintainer",
             fingerprint,
             detector,
             file,
             message,
-            &repo
+            &repo,
+            &pr_number,
+            &by,
+            is_maintainer
         )?;
         crate::metrics::record_dismissal();
-        let _ =
-            crate::learning::mine::promote_dismissal_to_rule(self, detector, file, message).await;
+        let _ = crate::learning::mine::promote_dismissal_to_rule(
+            self,
+            detector,
+            file,
+            message,
+            repo_full_name,
+        )
+        .await;
         Ok(())
+    }
+
+    pub async fn count_dismissals_for_detector(&self, detector: &str) -> Result<i64> {
+        Ok(db_scalar!(
+            &self.pool,
+            i64,
+            "SELECT COUNT(*) FROM dismissed_findings WHERE detector = ?",
+            detector
+        )?)
+    }
+
+    pub async fn count_distinct_prs_for_detector(
+        &self,
+        detector: &str,
+        repo_full_name: Option<&str>,
+    ) -> Result<i64> {
+        if let Some(repo) = repo_full_name.filter(|r| !r.is_empty()) {
+            Ok(db_scalar!(
+                &self.pool,
+                i64,
+                "SELECT COUNT(DISTINCT pr_number) FROM dismissed_findings
+                 WHERE detector = ? AND pr_number IS NOT NULL AND repo_full_name = ?",
+                detector,
+                repo
+            )?)
+        } else {
+            Ok(db_scalar!(
+                &self.pool,
+                i64,
+                "SELECT COUNT(DISTINCT pr_number) FROM dismissed_findings
+                 WHERE detector = ? AND pr_number IS NOT NULL
+                   AND (repo_full_name IS NULL OR repo_full_name = '')",
+                detector
+            )?)
+        }
+    }
+
+    pub async fn count_maintainer_dismissals_for_detector(
+        &self,
+        detector: &str,
+        repo_full_name: Option<&str>,
+    ) -> Result<i64> {
+        if let Some(repo) = repo_full_name.filter(|r| !r.is_empty()) {
+            Ok(db_scalar!(
+                &self.pool,
+                i64,
+                "SELECT COUNT(*) FROM dismissed_findings
+                 WHERE detector = ? AND is_maintainer = TRUE AND repo_full_name = ?",
+                detector,
+                repo
+            )?)
+        } else {
+            Ok(db_scalar!(
+                &self.pool,
+                i64,
+                "SELECT COUNT(*) FROM dismissed_findings
+                 WHERE detector = ? AND is_maintainer = TRUE
+                   AND (repo_full_name IS NULL OR repo_full_name = '')",
+                detector
+            )?)
+        }
     }
 
     pub fn add_rule(&self, rule: &crate::learning::LearnedRule) -> Result<()> {
@@ -106,7 +211,7 @@ impl LearningStore {
     }
 
     pub async fn add_rule_async(&self, rule: &crate::learning::LearnedRule) -> Result<()> {
-        let repo: Option<String> = None;
+        let repo = rule.repo_full_name.clone();
         db_execute!(
             &self.pool,
             "INSERT INTO learned_rules (id, detector, file_pattern, message_pattern, action, reason, repo_full_name)
@@ -139,11 +244,12 @@ impl LearningStore {
             action: String,
             reason: String,
             created_at: chrono::DateTime<chrono::Utc>,
+            repo_full_name: Option<String>,
         }
         let rows: Vec<Row> = db_fetch_all!(
             &self.pool,
             Row,
-            "SELECT id, detector, file_pattern, message_pattern, action, reason, created_at
+            "SELECT id, detector, file_pattern, message_pattern, action, reason, created_at, repo_full_name
              FROM learned_rules ORDER BY created_at DESC LIMIT 200"
         )?;
         Ok(rows
@@ -157,6 +263,7 @@ impl LearningStore {
                     .unwrap_or(crate::learning::RuleAction::Ignore),
                 reason: r.reason,
                 created_at: r.created_at,
+                repo_full_name: r.repo_full_name,
             })
             .collect())
     }
@@ -164,15 +271,6 @@ impl LearningStore {
     pub async fn delete_rule(&self, id: &str) -> Result<bool> {
         let n = db_execute!(&self.pool, "DELETE FROM learned_rules WHERE id = ?", id)?;
         Ok(n > 0)
-    }
-
-    pub async fn count_dismissals_for_detector(&self, detector: &str) -> Result<i64> {
-        Ok(db_scalar!(
-            &self.pool,
-            i64,
-            "SELECT COUNT(*) FROM dismissed_findings WHERE detector = ?",
-            detector
-        )?)
     }
 
     pub async fn count_dismissals_total(&self) -> Result<i64> {

@@ -4,7 +4,9 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::bot::{github_api_headers, next_github_link, GITHUB_CLIENT};
 use crate::db;
+use crate::retry::{is_reqwest_error_retryable, retry_async, RetryConfig};
 
 use super::errors::ApiError;
 use super::AppState;
@@ -51,7 +53,6 @@ async fn sync_repos(
     super::rbac::require_maintainer(&state, &headers).await?;
     use crate::db::config::get_config;
 
-    // Read GitHub credentials from DB config
     let app_id = get_config(&state.pool, "github_app_id")
         .await
         .ok()
@@ -66,25 +67,34 @@ async fn sync_repos(
         .or_else(crate::github_jwt::resolve_private_key_from_env)
         .ok_or_else(|| ApiError::bad_request("No GitHub App private key configured"))?;
 
-    let jwt = create_jwt(&app_id, &private_key)?;
+    let jwt = crate::github_jwt::create_app_jwt(&app_id, &private_key)
+        .map_err(|e| ApiError::internal(format!("JWT error: {e}")))?;
 
-    // List all installations
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| ApiError::internal(format!("HTTP client: {e}")))?;
+    let client = GITHUB_CLIENT
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("GitHub API client not available"))?;
+    let jwt_auth = format!("Bearer {jwt}");
+    let jwt_headers = github_api_headers(&jwt_auth)
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    let installations: Vec<serde_json::Value> = client
-        .get("https://api.github.com/app/installations")
-        .header("Authorization", format!("Bearer {jwt}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "codasaurus")
-        .send()
-        .await
-        .map_err(|e| ApiError::bad_request(format!("GitHub API: {e}")))?
-        .json()
-        .await
-        .map_err(|e| ApiError::bad_request(format!("Invalid response: {e}")))?;
+    let installations: Vec<serde_json::Value> = retry_async(
+        &RetryConfig::api_default(),
+        "sync_list_installations",
+        &is_reqwest_error_retryable,
+        || async {
+            client
+                .get("https://api.github.com/app/installations")
+                .headers(jwt_headers.clone())
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await
+                .map_err(Into::into)
+        },
+    )
+    .await
+    .map_err(|e| ApiError::bad_request(format!("GitHub API: {e}")))?;
 
     let mut total = 0usize;
 
@@ -94,27 +104,35 @@ async fn sync_repos(
             None => continue,
         };
 
-        // Get installation token
-        let token_resp: serde_json::Value = client
-            .post(format!(
-                "https://api.github.com/app/installations/{inst_id}/access_tokens"
-            ))
-            .header("Authorization", format!("Bearer {jwt}"))
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "codasaurus")
-            .send()
-            .await
-            .map_err(|e| ApiError::bad_request(format!("Token request: {e}")))?
-            .json()
-            .await
-            .map_err(|e| ApiError::bad_request(format!("Token response: {e}")))?;
+        let token_resp: serde_json::Value = retry_async(
+            &RetryConfig::api_default(),
+            "sync_installation_token",
+            &is_reqwest_error_retryable,
+            || async {
+                client
+                    .post(format!(
+                        "https://api.github.com/app/installations/{inst_id}/access_tokens"
+                    ))
+                    .headers(jwt_headers.clone())
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json()
+                    .await
+                    .map_err(Into::into)
+            },
+        )
+        .await
+        .map_err(|e| ApiError::bad_request(format!("Token request: {e}")))?;
 
         let token = match token_resp["token"].as_str() {
             Some(t) => t.to_string(),
             None => continue,
         };
+        let token_auth = format!("Bearer {token}");
+        let token_headers = github_api_headers(&token_auth)
+            .map_err(|e| ApiError::internal(e.to_string()))?;
 
-        // List repos for this installation — follow Link pagination.
         let mut all_repos: Vec<serde_json::Value> = Vec::new();
         let mut page_url: Option<String> =
             Some("https://api.github.com/installation/repositories?per_page=100".into());
@@ -122,14 +140,21 @@ async fn sync_repos(
 
         while let Some(url) = page_url.take() {
             pages += 1;
-            let resp = client
-                .get(&url)
-                .header("Authorization", format!("Bearer {token}"))
-                .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "codasaurus")
-                .send()
-                .await
-                .map_err(|e| ApiError::bad_request(format!("Repos request: {e}")))?;
+            let resp = retry_async(
+                &RetryConfig::api_default(),
+                "sync_list_repos",
+                &is_reqwest_error_retryable,
+                || async {
+                    client
+                        .get(&url)
+                        .headers(token_headers.clone())
+                        .send()
+                        .await
+                        .map_err(Into::into)
+                },
+            )
+            .await
+            .map_err(|e| ApiError::bad_request(format!("Repos request: {e}")))?;
 
             page_url = next_github_link(resp.headers());
 
@@ -142,7 +167,6 @@ async fn sync_repos(
                 all_repos.extend(repos.iter().cloned());
             }
 
-            // Guard: stop after 10 pages to prevent runaway loops
             if pages >= 10 || all_repos.len() >= 1000 {
                 break;
             }
@@ -183,39 +207,6 @@ async fn sync_repos(
     }
 
     Ok(Json(json!({ "status": "ok", "synced": total })))
-}
-
-fn create_jwt(app_id: &str, private_key_pem: &str) -> Result<String, ApiError> {
-    crate::github_jwt::create_app_jwt(app_id, private_key_pem)
-        .map_err(|e| ApiError::internal(format!("JWT error: {e}")))
-}
-
-/// Parse GitHub `Link: <url>; rel="next"` header.
-/// Only returns the URL when the host is exactly `api.github.com` (SSRF guard).
-fn next_github_link(headers: &axum::http::HeaderMap) -> Option<String> {
-    let link = headers.get(axum::http::header::LINK)?.to_str().ok()?;
-    for part in link.split(',') {
-        let part = part.trim();
-        if !(part.contains("rel=\"next\"") || part.contains("rel='next'")) {
-            continue;
-        }
-        let start = part.find('<')? + 1;
-        let end = part.find('>')?;
-        if start >= end {
-            continue;
-        }
-        let candidate = &part[start..end];
-        let Ok(url) = url::Url::parse(candidate) else {
-            continue;
-        };
-        let Some(host) = url.host_str() else {
-            continue;
-        };
-        if host.eq_ignore_ascii_case("api.github.com") {
-            return Some(candidate.to_string());
-        }
-    }
-    None
 }
 
 /// GET /api/repos/:id

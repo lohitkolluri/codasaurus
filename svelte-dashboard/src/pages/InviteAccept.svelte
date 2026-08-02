@@ -118,7 +118,7 @@
             type="password"
             bind:value={password}
             required
-            minlength="8"
+            minlength="10"
             autocomplete="new-password"
           />
         </div>
@@ -129,7 +129,7 @@
             type="password"
             bind:value={password2}
             required
-            minlength="8"
+            minlength="10"
             autocomplete="new-password"
           />
         </div>

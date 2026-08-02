@@ -1029,6 +1029,7 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
             comment: None,
             issue: None,
             reaction: None,
+            sender: None,
             repositories: None,
             repositories_added: None,
         };
@@ -1082,6 +1083,9 @@ async fn spawn_ignore_comment(ctx: WebhookContext, pr_number: i64, fingerprint: 
                         &ctx.repo_full_name,
                         "dismissed via comment",
                         Some(&ctx.repo_full_name),
+                        Some(pr_number),
+                        None,
+                        false,
                     )
                     .await?;
                 format!(

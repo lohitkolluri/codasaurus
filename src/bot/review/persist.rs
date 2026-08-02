@@ -76,8 +76,14 @@ pub(crate) async fn save_review_to_db(
             detector: f.detector.clone(),
             rule_id: None,
             message: crate::bot::markdown::redact_secrets(&f.message),
-            suggested_fix: f.suggestion.clone(),
-            code_snippet: f.codemod.clone(),
+            suggested_fix: f
+                .suggestion
+                .as_ref()
+                .map(|s| crate::bot::markdown::redact_secrets(s)),
+            code_snippet: f
+                .codemod
+                .as_ref()
+                .map(|s| crate::bot::markdown::redact_secrets(s)),
             context: None,
             category: None,
         })

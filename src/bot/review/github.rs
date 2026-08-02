@@ -225,3 +225,69 @@ pub(crate) async fn post_or_update_comment(
 
     Ok(comment_id)
 }
+
+/// Parse GitHub `Link: <url>; rel="next"` header (SSRF-safe: api.github.com only).
+pub(crate) fn next_github_link(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    let link = headers.get(reqwest::header::LINK)?.to_str().ok()?;
+    for part in link.split(',') {
+        let part = part.trim();
+        if !(part.contains("rel=\"next\"") || part.contains("rel='next'")) {
+            continue;
+        }
+        let start = part.find('<')? + 1;
+        let end = part.find('>')?;
+        if start >= end {
+            continue;
+        }
+        let candidate = &part[start..end];
+        let Ok(url) = url::Url::parse(candidate) else {
+            continue;
+        };
+        let Some(host) = url.host_str() else {
+            continue;
+        };
+        if host.eq_ignore_ascii_case("api.github.com") {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
+/// True when GitHub already has a pull-request review for `head_sha` (idempotent retry guard).
+pub(crate) async fn review_exists_for_commit(
+    client: &reqwest::Client,
+    auth_header: &str,
+    repo_name: &str,
+    pr_number: i64,
+    head_sha: &str,
+) -> Result<bool> {
+    if head_sha.is_empty() {
+        return Ok(false);
+    }
+    let url = format!(
+        "https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews?per_page=100"
+    );
+    let reviews: Vec<serde_json::Value> = retry_async(
+        &RetryConfig::quick(),
+        "list_pr_reviews",
+        &is_reqwest_error_retryable,
+        || async {
+            let headers = github_api_headers(auth_header)?;
+            client
+                .get(&url)
+                .headers(headers)
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await
+                .map_err(Into::into)
+        },
+    )
+    .await?;
+    Ok(reviews.iter().any(|r| {
+        r.get("commit_id")
+            .and_then(|v| v.as_str())
+            .is_some_and(|sha| sha == head_sha)
+    }))
+}

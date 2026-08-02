@@ -215,7 +215,7 @@ async fn email_from_verified_jwt(cfg: &OidcConfig, token: &str, jwks_uri: &str) 
     };
     let key = DecodingKey::from_jwk(jwk).context("DecodingKey from JWK")?;
 
-    let alg = header.alg;
+    let alg = jsonwebtoken::Algorithm::RS256;
     let mut validation = Validation::new(alg);
     validation.set_issuer(&[cfg.issuer.clone()]);
     validation.set_audience(&[cfg.client_id.clone()]);

@@ -24,6 +24,7 @@ coverage/
 
 # Research artifacts
 .omo/
+tmp/
 
 # SPA build artifacts
 svelte-dashboard/node_modules/

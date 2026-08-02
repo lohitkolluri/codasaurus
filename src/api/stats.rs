@@ -279,6 +279,28 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
         }
 
         let detector_total: i64 = findings_by_detector.iter().map(|d| d.count).sum();
+        let mut concern_counts: std::collections::BTreeMap<&'static str, i64> =
+            std::collections::BTreeMap::new();
+        for d in &findings_by_detector {
+            let concern = crate::bot::concern::concern_for_detector(&d.detector);
+            *concern_counts.entry(concern).or_default() += d.count;
+        }
+        let concerns: Vec<serde_json::Value> = concern_counts
+            .into_iter()
+            .map(|(concern, count)| {
+                let share = if detector_total == 0 {
+                    0.0
+                } else {
+                    (count as f64 / detector_total as f64) * 100.0
+                };
+                json!({
+                    "concern": concern,
+                    "count": count,
+                    "share_pct": share,
+                })
+            })
+            .collect();
+
         let detectors: Vec<serde_json::Value> = findings_by_detector
             .into_iter()
             .map(|d| {
@@ -289,6 +311,7 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
                 };
                 json!({
                     "detector": d.detector,
+                    "concern": crate::bot::concern::concern_for_detector(&d.detector),
                     "count": d.count,
                     "share_pct": share,
                 })
@@ -325,6 +348,7 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
             json!({
                 "reviews_by_day": series,
                 "findings_by_detector": detectors,
+                "findings_by_concern": concerns,
                 "findings_last_7_days": findings_last_7,
                 "findings_prev_7_days": findings_prev_7,
                 "reviews_prev_7_days": reviews_prev_7,

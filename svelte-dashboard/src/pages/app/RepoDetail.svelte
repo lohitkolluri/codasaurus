@@ -7,6 +7,7 @@
 
   import { params } from "svelte-spa-router";
   import { formatLabel } from "../../lib/utils.js";
+  import { isMaintainer, isOwner } from "../../stores/auth.js";
 
   let repo = $state(null);
   let loading = $state(true);
@@ -15,6 +16,8 @@
   let confirmDelete = $state(false);
   let error = $state("");
   let saveMsg = $state("");
+  let canManage = $derived($isMaintainer);
+  let canDelete = $derived($isOwner);
 
   let detectors = $state({});
   let llmEnabled = $state(true);
@@ -22,6 +25,7 @@
   let autoLabels = $state(true);
   let updatePrDescription = $state(false);
   let allowAutoFix = $state(false);
+  let autoApprove = $state(false);
   let prTitleFix = $state("off");
   let excludePatterns = $state("");
 
@@ -40,6 +44,7 @@
         api.get(`/api/repos/${id}`),
         api.get("/api/settings"),
       ]);
+      if ($params?.id !== id) return;
       repo = data;
       let cfg = {};
       try {
@@ -65,6 +70,7 @@
       autoLabels = cfg.auto_labels ?? true;
       updatePrDescription = cfg.update_pr_description ?? false;
       allowAutoFix = cfg.allow_auto_fix ?? false;
+      autoApprove = cfg.auto_approve ?? false;
       prTitleFix = ["off", "suggest", "auto"].includes(cfg.pr_title_fix)
         ? cfg.pr_title_fix
         : "off";
@@ -72,9 +78,10 @@
         ? cfg.exclude_patterns.join(", ")
         : (cfg.exclude_patterns ?? "");
     } catch (err) {
+      if ($params?.id !== id) return;
       error = err.message || "Failed to load repo";
     } finally {
-      loading = false;
+      if ($params?.id === id) loading = false;
     }
   }
 
@@ -94,7 +101,9 @@
           auto_labels: autoLabels,
           update_pr_description: updatePrDescription,
           allow_auto_fix: allowAutoFix,
+          auto_approve: autoApprove,
           pr_title_fix: prTitleFix,
+
           exclude_patterns: excludePatterns
             .split(/[,\n]/)
             .map((s) => s.trim())
@@ -154,9 +163,10 @@
             <span class="detector-label">{formatLabel(key)}</span>
             <label class="toggle">
               <div class="toggle-track" class:on={val ?? false} role="checkbox" aria-checked={val ?? false}
-                tabindex="0"
-                onclick={() => (detectors[key] = !(detectors[key] ?? false))}
-                onkeydown={(e) => { if (e.key === 'Enter') detectors[key] = !(detectors[key] ?? false); }}>
+                tabindex={canManage ? "0" : undefined}
+                aria-disabled={!canManage}
+                onclick={() => { if (canManage) detectors[key] = !(detectors[key] ?? false); }}
+                onkeydown={(e) => { if (!canManage) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); detectors[key] = !(detectors[key] ?? false); } }}>
                 <div class="toggle-knob"></div>
               </div>
             </label>
@@ -173,9 +183,10 @@
       <div class="llm-row">
         <label class="toggle">
           <div class="toggle-track" class:on={llmEnabled} role="checkbox" aria-checked={llmEnabled}
-            tabindex="0"
-            onclick={() => (llmEnabled = !llmEnabled)}
-            onkeydown={(e) => { if (e.key === 'Enter') llmEnabled = !llmEnabled; }}>
+            tabindex={canManage ? "0" : undefined}
+            aria-disabled={!canManage}
+            onclick={() => { if (canManage) llmEnabled = !llmEnabled; }}
+            onkeydown={(e) => { if (!canManage) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); llmEnabled = !llmEnabled; } }}>
             <div class="toggle-knob"></div>
           </div>
         </label>
@@ -191,8 +202,10 @@
       <div class="llm-row">
         <label class="toggle">
           <div class="toggle-track" class:on={autoReviewDiff} role="checkbox" aria-checked={autoReviewDiff}
-            tabindex="0" onclick={() => (autoReviewDiff = !autoReviewDiff)}
-            onkeydown={(e) => { if (e.key === 'Enter') autoReviewDiff = !autoReviewDiff; }}>
+            tabindex={canManage ? "0" : undefined}
+            aria-disabled={!canManage}
+            onclick={() => { if (canManage) autoReviewDiff = !autoReviewDiff; }}
+            onkeydown={(e) => { if (!canManage) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); autoReviewDiff = !autoReviewDiff; } }}>
             <div class="toggle-knob"></div>
           </div>
         </label>
@@ -201,8 +214,10 @@
       <div class="llm-row">
         <label class="toggle">
           <div class="toggle-track" class:on={autoLabels} role="checkbox" aria-checked={autoLabels}
-            tabindex="0" onclick={() => (autoLabels = !autoLabels)}
-            onkeydown={(e) => { if (e.key === 'Enter') autoLabels = !autoLabels; }}>
+            tabindex={canManage ? "0" : undefined}
+            aria-disabled={!canManage}
+            onclick={() => { if (canManage) autoLabels = !autoLabels; }}
+            onkeydown={(e) => { if (!canManage) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); autoLabels = !autoLabels; } }}>
             <div class="toggle-knob"></div>
           </div>
         </label>
@@ -211,8 +226,10 @@
       <div class="llm-row">
         <label class="toggle">
           <div class="toggle-track" class:on={updatePrDescription} role="checkbox" aria-checked={updatePrDescription}
-            tabindex="0" onclick={() => (updatePrDescription = !updatePrDescription)}
-            onkeydown={(e) => { if (e.key === 'Enter') updatePrDescription = !updatePrDescription; }}>
+            tabindex={canManage ? "0" : undefined}
+            aria-disabled={!canManage}
+            onclick={() => { if (canManage) updatePrDescription = !updatePrDescription; }}
+            onkeydown={(e) => { if (!canManage) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); updatePrDescription = !updatePrDescription; } }}>
             <div class="toggle-knob"></div>
           </div>
         </label>
@@ -221,12 +238,26 @@
       <div class="llm-row">
         <label class="toggle">
           <div class="toggle-track" class:on={allowAutoFix} role="checkbox" aria-checked={allowAutoFix}
-            tabindex="0" onclick={() => (allowAutoFix = !allowAutoFix)}
-            onkeydown={(e) => { if (e.key === 'Enter') allowAutoFix = !allowAutoFix; }}>
+            tabindex={canManage ? "0" : undefined}
+            aria-disabled={!canManage}
+            onclick={() => { if (canManage) allowAutoFix = !allowAutoFix; }}
+            onkeydown={(e) => { if (!canManage) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); allowAutoFix = !allowAutoFix; } }}>
             <div class="toggle-knob"></div>
           </div>
         </label>
         <span>Allow @codasaurus fix</span>
+      </div>
+      <div class="llm-row">
+        <label class="toggle">
+          <div class="toggle-track" class:on={autoApprove} role="checkbox" aria-checked={autoApprove}
+            tabindex={canManage ? "0" : undefined}
+            aria-disabled={!canManage}
+            onclick={() => { if (canManage) autoApprove = !autoApprove; }}
+            onkeydown={(e) => { if (!canManage) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); autoApprove = !autoApprove; } }}>
+            <div class="toggle-knob"></div>
+          </div>
+        </label>
+        <span>Auto-approve clean PRs (merge still needs a maintainer)</span>
       </div>
       <div class="form-group" style="margin-top:12px">
         <label for="repo-pr-title-fix">PR title fix</label>
@@ -241,14 +272,15 @@
       </div>
       <div class="form-group" style="margin-top:12px">
         <label for="repo-exclude">Exclude patterns</label>
-        <input id="repo-exclude" type="text" bind:value={excludePatterns} placeholder="vendor/,packages/legacy/" />
+        <input id="repo-exclude" type="text" bind:value={excludePatterns} placeholder="vendor/,packages/legacy/" disabled={!canManage} />
       </div>
     </div>
 
     <div class="actions">
-      <button class="primary" onclick={handleSave} disabled={saving || deleting}>
+      <button class="primary" onclick={handleSave} disabled={saving || deleting || !canManage}>
         {saving ? "Saving…" : "Save Changes"}
       </button>
+      {#if canDelete}
       {#if !confirmDelete}
         <button class="danger" type="button" onclick={() => (confirmDelete = true)} disabled={deleting}>
           Remove from Codasaurus
@@ -258,6 +290,7 @@
           {deleting ? "Removing…" : "Confirm remove"}
         </button>
         <button type="button" onclick={() => (confirmDelete = false)} disabled={deleting}>Cancel</button>
+      {/if}
       {/if}
       {#if saveMsg}
         <span class="toast" class:success={saveMsg === 'Saved'}>{saveMsg}</span>

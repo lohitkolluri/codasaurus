@@ -9,9 +9,11 @@ mod auth;
 pub(crate) mod blast;
 mod codeowners;
 mod commands;
+pub(crate) mod concern;
 pub(crate) mod dep_delta;
 mod github_extra;
 pub(crate) mod github_files;
+pub(crate) mod grounding;
 mod issue_assessment;
 pub(crate) mod maintenance;
 pub(crate) mod markdown;
@@ -25,6 +27,7 @@ mod reactions;
 pub(crate) mod related_prs;
 pub(crate) mod repo_context;
 mod review;
+pub(crate) use review::{github_api_headers, next_github_link, GITHUB_CLIENT};
 pub(crate) mod strictness;
 pub(crate) mod title_fix;
 mod verify;
@@ -201,6 +204,8 @@ pub(crate) struct WebhookPayload {
     issue: Option<serde_json::Value>,
     /// `reaction` webhook event payload
     reaction: Option<serde_json::Value>,
+    /// Actor who triggered the event (reactions, etc.)
+    sender: Option<serde_json::Value>,
     /// Sent in `installation.created` event
     repositories: Option<Vec<serde_json::Value>>,
     /// Sent in `installation_repositories.added` event
@@ -301,6 +306,64 @@ fn author_can_command(payload: &WebhookPayload) -> bool {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     commenter.eq_ignore_ascii_case(pr_author)
+}
+
+/// Who may dismiss findings via emoji reactions (same trust bar as slash commands).
+fn reactor_can_dismiss(payload: &WebhookPayload) -> bool {
+    let reaction_assoc = payload
+        .reaction
+        .as_ref()
+        .and_then(|r| r.get("author_association"))
+        .and_then(|a| a.as_str())
+        .unwrap_or("");
+    if matches!(
+        reaction_assoc,
+        "OWNER" | "MEMBER" | "COLLABORATOR" | "CONTRIBUTOR"
+    ) {
+        return true;
+    }
+
+    let reactor = payload
+        .reaction
+        .as_ref()
+        .and_then(|r| r.pointer("/user/login"))
+        .and_then(|v| v.as_str())
+        .or_else(|| {
+            payload
+                .sender
+                .as_ref()
+                .and_then(|s| s.get("login"))
+                .and_then(|v| v.as_str())
+        })
+        .unwrap_or("");
+    if reactor.is_empty() {
+        return false;
+    }
+
+    let repo_owner = payload
+        .repo
+        .as_ref()
+        .and_then(|r| r.pointer("/owner/login"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if reactor.eq_ignore_ascii_case(repo_owner) {
+        return true;
+    }
+
+    let pr_author = payload
+        .issue
+        .as_ref()
+        .and_then(|i| i.pointer("/user/login"))
+        .and_then(|v| v.as_str())
+        .or_else(|| {
+            payload
+                .pull_request
+                .as_ref()
+                .and_then(|pr| pr.pointer("/user/login"))
+                .and_then(|v| v.as_str())
+        })
+        .unwrap_or("");
+    reactor.eq_ignore_ascii_case(pr_author)
 }
 
 pub(crate) async fn handle_webhook(
@@ -532,6 +595,7 @@ pub(crate) async fn handle_webhook(
         if !content.is_empty() && !comment_body.is_empty() && !repo_full_name.is_empty() {
             let content = content.to_string();
             let comment_body = comment_body.to_string();
+            let allowed = reactor_can_dismiss(&payload);
             tokio::spawn(async move {
                 if let Some(pool) = bot_db_pool() {
                     if let Err(e) = reactions::handle_reaction_event(
@@ -540,6 +604,7 @@ pub(crate) async fn handle_webhook(
                         &content,
                         &comment_body,
                         &repo_full_name,
+                        allowed,
                     )
                     .await
                     {
@@ -788,6 +853,7 @@ mod author_acl_tests {
             pull_request: None,
             installation: None,
             reaction: None,
+            sender: None,
             repositories: None,
             repositories_added: None,
         }

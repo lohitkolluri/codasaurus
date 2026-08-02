@@ -167,7 +167,10 @@ CREATE TABLE IF NOT EXISTS dismissed_findings (
     file TEXT NOT NULL,
     line INTEGER NOT NULL,
     message TEXT NOT NULL,
-    dismissed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    dismissed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    pr_number BIGINT,
+    dismissed_by TEXT,
+    is_maintainer BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE TABLE IF NOT EXISTS learned_rules (
@@ -246,6 +249,42 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     migrate_v13_bootstrap_owner(pool).await?;
     migrate_v14_repo_scoped_learning(pool).await?;
     migrate_v15_invites_email_index(pool).await?;
+    migrate_v16_dismissal_provenance(pool).await?;
+    Ok(())
+}
+
+/// v16: track PR + actor on dismissals so auto-learn requires distinct PRs or a maintainer.
+async fn migrate_v16_dismissal_provenance(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
+    if current.unwrap_or(0) >= 16 {
+        return Ok(());
+    }
+
+    let _ = sqlx::query("ALTER TABLE dismissed_findings ADD COLUMN IF NOT EXISTS pr_number BIGINT")
+        .execute(pool)
+        .await;
+    let _ =
+        sqlx::query("ALTER TABLE dismissed_findings ADD COLUMN IF NOT EXISTS dismissed_by TEXT")
+            .execute(pool)
+            .await;
+    let _ = sqlx::query(
+        "ALTER TABLE dismissed_findings ADD COLUMN IF NOT EXISTS is_maintainer BOOLEAN NOT NULL DEFAULT FALSE",
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_dismissed_detector_pr ON dismissed_findings (detector, pr_number)",
+    )
+    .execute(pool)
+    .await;
+
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (16) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

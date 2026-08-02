@@ -17,7 +17,7 @@ const FALSE_POSITIVE_HINTS: &[&str] = &[
     "not an issue",
     "ignore this",
     "won't fix",
-    "wontfix",
+    "wont fix",
     "noise",
     "not relevant",
 ];
@@ -35,35 +35,73 @@ const PUSHBACK_HINTS: &[&str] = &[
 /// Patterns that suggest overall approval (used for telemetry / soft rules only).
 const LGTM_HINTS: &[&str] = &["lgtm", "looks good", "ship it", "approved"];
 
-/// After a dashboard/comment dismissal, promote repeated detector+file noise into a rule.
+/// Security-class detectors never auto-promote from non-maintainer signals alone.
+fn is_security_detector(detector: &str) -> bool {
+    matches!(
+        detector,
+        "secrets" | "vulnerabilities" | "iac" | "risky-patterns" | "risky_patterns"
+    )
+}
+
+/// After a dashboard/comment dismissal, promote repeated detector noise into a rule.
+///
+/// Poisoning guard:
+/// - Security detectors require at least one maintainer dismissal.
+/// - Other detectors require a maintainer dismissal, or dismissals across
+///   [`MIN_DISTINCT_PRS`] distinct PRs **within the same repo**.
+/// - Learned rules are always scoped to `repo_full_name` when provided.
 pub async fn promote_dismissal_to_rule(
     store: &LearningStore,
     detector: &str,
     file: &str,
     message: &str,
+    repo_full_name: Option<&str>,
 ) -> Result<()> {
-    if detector.is_empty() || detector == "manual" {
+    if detector.is_empty() || detector == "manual" || detector == "reaction" {
         return Ok(());
     }
-    let count = store.count_dismissals_for_detector(detector).await?;
-    // After 3 dismissals of the same detector, learn an ignore for that file path stem.
-    if count < 3 {
+    let maintainer_hit = store
+        .count_maintainer_dismissals_for_detector(detector, repo_full_name)
+        .await?;
+    let distinct_prs = store
+        .count_distinct_prs_for_detector(detector, repo_full_name)
+        .await?;
+
+    let allow = if is_security_detector(detector) {
+        maintainer_hit >= 1
+    } else {
+        maintainer_hit >= 1 || distinct_prs >= MIN_DISTINCT_PRS
+    };
+    if !allow {
         return Ok(());
     }
+
     let file_stem = file_pattern_from_path(file);
     let msg_pat = message_pattern_hint(message);
+    let reason = if maintainer_hit >= 1 {
+        format!("auto-learned after maintainer dismiss of `{detector}`")
+    } else {
+        format!("auto-learned after dismissals of `{detector}` across {distinct_prs} PRs")
+    };
     let rule = LearnedRule {
         id: format!("auto-{}", Uuid::new_v4()),
         detector: detector.to_string(),
         file_pattern: file_stem,
         message_pattern: msg_pat,
         action: RuleAction::Ignore,
-        reason: format!("auto-learned after {count} dismissals of `{detector}`"),
+        reason,
         created_at: chrono::Utc::now(),
+        repo_full_name: repo_full_name
+            .filter(|r| !r.is_empty())
+            .map(str::to_string),
     };
     store.add_rule_async(&rule).await?;
     Ok(())
 }
+
+/// Distinct PRs required before a non-maintainer dismissal stream can auto-learn
+/// (non-security detectors only, and always repo-scoped).
+pub const MIN_DISTINCT_PRS: i64 = 3;
 
 fn file_pattern_from_path(file: &str) -> Option<String> {
     if file.is_empty() || file == "unknown" {
@@ -134,16 +172,24 @@ pub async fn mine_pr_comment_feedback(
 
         if FALSE_POSITIVE_HINTS.iter().any(|h| lower.contains(h)) {
             if let Some(det) = detector {
-                let rule = LearnedRule {
-                    id: format!("fp-{}", Uuid::new_v4()),
-                    detector: det,
-                    file_pattern: None,
-                    message_pattern: None,
-                    action: RuleAction::Ignore,
-                    reason: format!("mined false-positive signal on PR #{pr_number}"),
-                    created_at: chrono::Utc::now(),
-                };
-                store.add_rule_async(&rule).await?;
+                // Record as a dismissal signal; promote only via the poisoning guard.
+                // Never auto-promote security detectors from mined (unauthenticated) comments.
+                if is_security_detector(&det) {
+                    continue;
+                }
+                let fp = format!("mined-fp:{pr_number}:{det}");
+                store
+                    .dismiss_fingerprint_for_repo(
+                        &fp,
+                        &det,
+                        "",
+                        "mined false-positive signal",
+                        Some(repo),
+                        Some(pr_number),
+                        None,
+                        false,
+                    )
+                    .await?;
                 learned += 1;
             }
         } else if PUSHBACK_HINTS.iter().any(|h| lower.contains(h)) {
@@ -156,6 +202,7 @@ pub async fn mine_pr_comment_feedback(
                     action: RuleAction::AlwaysWarn,
                     reason: format!("mined pushback signal on PR #{pr_number}"),
                     created_at: chrono::Utc::now(),
+                    repo_full_name: Some(repo.to_string()),
                 };
                 store.add_rule_async(&rule).await?;
                 learned += 1;
@@ -241,5 +288,12 @@ mod tests {
             extract_detector_mention("this secrets finding is a false positive"),
             Some("secrets".into())
         );
+    }
+
+    #[test]
+    fn security_detectors_flagged() {
+        assert!(is_security_detector("secrets"));
+        assert!(is_security_detector("vulnerabilities"));
+        assert!(!is_security_detector("boilerplate"));
     }
 }

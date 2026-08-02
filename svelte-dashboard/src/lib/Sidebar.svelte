@@ -5,15 +5,23 @@
   import BrandMark from "./BrandMark.svelte";
   import UserAvatar from "./UserAvatar.svelte";
 
-  const navItems = [
+  const allNavItems = [
     { path: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { path: "/app/stats", label: "Stats", icon: BarChart3 },
     { path: "/app/repos", label: "Repositories", icon: FolderGit2 },
     { path: "/app/reviews", label: "Reviews", icon: GitPullRequest },
     { path: "/app/team", label: "Team", icon: Users },
-    { path: "/app/settings", label: "Settings", icon: Settings },
-    { path: "/app/audit", label: "Audit log", icon: ClipboardList },
+    { path: "/app/settings", label: "Settings", icon: Settings, roles: ["owner", "admin", "maintainer"] },
+    { path: "/app/audit", label: "Audit log", icon: ClipboardList, roles: ["owner", "admin", "maintainer"] },
   ];
+
+  let navItems = $derived(
+    allNavItems.filter((item) => {
+      if (!item.roles) return true;
+      const role = $currentUser?.role;
+      return item.roles.includes(role);
+    }),
+  );
 
   /** Longest matching nav prefix wins (e.g. /app/repos/123 → Repositories). */
   function isActive(path) {

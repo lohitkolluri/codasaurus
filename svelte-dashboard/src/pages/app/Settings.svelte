@@ -49,6 +49,7 @@
   let customInstructions = $state("");
   let updatePrDescription = $state(false);
   let allowAutoFix = $state(false);
+  let autoApprove = $state(false);
   let prTitleFix = $state("off");
   let reviewSaving = $state(false);
   let reviewMsg = $state("");
@@ -401,6 +402,7 @@
         customInstructions = data.custom_instructions ?? "";
         updatePrDescription = data.update_pr_description === "true";
         allowAutoFix = data.allow_auto_fix === "true";
+        autoApprove = data.auto_approve === "true";
         prTitleFix = ["off", "suggest", "auto"].includes(data.pr_title_fix)
           ? data.pr_title_fix
           : "off";
@@ -509,6 +511,7 @@
         ["custom_instructions", customInstructions],
         ["update_pr_description", boolVal(updatePrDescription)],
         ["allow_auto_fix", boolVal(allowAutoFix)],
+        ["auto_approve", boolVal(autoApprove)],
         ["pr_title_fix", prTitleFix],
       ];
       const { failed } = await putMany(pairs);
@@ -833,7 +836,7 @@
           {#if llmProvider !== "disabled"}
             <div class="form-group">
               <label for="llm-key">API Key</label>
-              <input id="llm-key" type="password" bind:value={llmKey} placeholder="sk-..." disabled={!canEditSettings} />
+              <input id="llm-key" type="password" bind:value={llmKey} placeholder="sk-..." disabled={!canEditSettings} autocomplete="off" />
             </div>
             <div class="settings-llm-grid">
               <div class="form-group model-search">
@@ -1045,7 +1048,7 @@
                   <div class="toggle-track" class:on={autoLabels} role="checkbox" aria-checked={autoLabels}
                     tabindex="0"
                     onclick={() => toggleFlag((v) => (autoLabels = v), autoLabels)}
-                    onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (autoLabels = v), autoLabels); }}>
+                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFlag((v) => (autoLabels = v), autoLabels) } }}>
                     <div class="toggle-knob"></div>
                   </div>
                 </label>
@@ -1059,7 +1062,7 @@
                   <div class="toggle-track" class:on={requestReviewers} role="checkbox" aria-checked={requestReviewers}
                     tabindex="0"
                     onclick={() => toggleFlag((v) => (requestReviewers = v), requestReviewers)}
-                    onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (requestReviewers = v), requestReviewers); }}>
+                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFlag((v) => (requestReviewers = v), requestReviewers) } }}>
                     <div class="toggle-knob"></div>
                   </div>
                 </label>
@@ -1073,7 +1076,7 @@
                   <div class="toggle-track" class:on={createCheckRun} role="checkbox" aria-checked={createCheckRun}
                     tabindex="0"
                     onclick={() => toggleFlag((v) => (createCheckRun = v), createCheckRun)}
-                    onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (createCheckRun = v), createCheckRun); }}>
+                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFlag((v) => (createCheckRun = v), createCheckRun) } }}>
                     <div class="toggle-knob"></div>
                   </div>
                 </label>
@@ -1102,7 +1105,7 @@
                     <div class="toggle-track" class:on={updatePrDescription} role="checkbox" aria-checked={updatePrDescription}
                       tabindex="0"
                       onclick={() => toggleFlag((v) => (updatePrDescription = v), updatePrDescription)}
-                      onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (updatePrDescription = v), updatePrDescription); }}>
+                      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFlag((v) => (updatePrDescription = v), updatePrDescription) } }}>
                       <div class="toggle-knob"></div>
                     </div>
                   </label>
@@ -1116,7 +1119,21 @@
                     <div class="toggle-track" class:on={allowAutoFix} role="checkbox" aria-checked={allowAutoFix}
                       tabindex="0"
                       onclick={() => toggleFlag((v) => (allowAutoFix = v), allowAutoFix)}
-                      onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (allowAutoFix = v), allowAutoFix); }}>
+                      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFlag((v) => (allowAutoFix = v), allowAutoFix) } }}>
+                      <div class="toggle-knob"></div>
+                    </div>
+                  </label>
+                </div>
+                <div class="action-row">
+                  <div>
+                    <span class="action-label">Auto-approve clean PRs</span>
+                    <span class="action-blurb">Post GitHub APPROVE when Tier-1 is clear. Merge still needs a maintainer.</span>
+                  </div>
+                  <label class="toggle">
+                    <div class="toggle-track" class:on={autoApprove} role="checkbox" aria-checked={autoApprove}
+                      tabindex="0"
+                      onclick={() => toggleFlag((v) => (autoApprove = v), autoApprove)}
+                      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFlag((v) => (autoApprove = v), autoApprove) } }}>
                       <div class="toggle-knob"></div>
                     </div>
                   </label>
@@ -1236,7 +1253,7 @@
                     <div class="toggle-track" class:on={oidcAllowOpenJoin} role="checkbox" aria-checked={oidcAllowOpenJoin}
                       tabindex="0"
                       onclick={() => toggleFlag((v) => (oidcAllowOpenJoin = v), oidcAllowOpenJoin)}
-                      onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (oidcAllowOpenJoin = v), oidcAllowOpenJoin); }}>
+                      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFlag((v) => (oidcAllowOpenJoin = v), oidcAllowOpenJoin) } }}>
                       <div class="toggle-knob"></div>
                     </div>
                   </label>
@@ -1247,7 +1264,7 @@
                     <div class="toggle-track" class:on={oidcAllowUnverifiedEmail} role="checkbox" aria-checked={oidcAllowUnverifiedEmail}
                       tabindex="0"
                       onclick={() => toggleFlag((v) => (oidcAllowUnverifiedEmail = v), oidcAllowUnverifiedEmail)}
-                      onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (oidcAllowUnverifiedEmail = v), oidcAllowUnverifiedEmail); }}>
+                      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFlag((v) => (oidcAllowUnverifiedEmail = v), oidcAllowUnverifiedEmail) } }}>
                       <div class="toggle-knob"></div>
                     </div>
                   </label>
@@ -1258,7 +1275,7 @@
                     <div class="toggle-track" class:on={oidcAllowPublicClient} role="checkbox" aria-checked={oidcAllowPublicClient}
                       tabindex="0"
                       onclick={() => toggleFlag((v) => (oidcAllowPublicClient = v), oidcAllowPublicClient)}
-                      onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (oidcAllowPublicClient = v), oidcAllowPublicClient); }}>
+                      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFlag((v) => (oidcAllowPublicClient = v), oidcAllowPublicClient) } }}>
                       <div class="toggle-knob"></div>
                     </div>
                   </label>
@@ -1363,7 +1380,7 @@
               <div class="toggle-track" class:on={offlineMode} role="checkbox" aria-checked={offlineMode}
                 tabindex="0"
                 onclick={() => toggleFlag((v) => (offlineMode = v), offlineMode)}
-                onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (offlineMode = v), offlineMode); }}>
+                onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFlag((v) => (offlineMode = v), offlineMode) } }}>
                 <div class="toggle-knob"></div>
               </div>
             </label>
@@ -1438,7 +1455,7 @@
                   <div class="toggle-track" class:on={hsts} role="checkbox" aria-checked={hsts}
                     tabindex="0"
                     onclick={() => toggleFlag((v) => (hsts = v), hsts)}
-                    onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (hsts = v), hsts); }}>
+                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFlag((v) => (hsts = v), hsts) } }}>
                     <div class="toggle-knob"></div>
                   </div>
                 </label>
@@ -1449,7 +1466,7 @@
                   <div class="toggle-track" class:on={allowLocalLlm} role="checkbox" aria-checked={allowLocalLlm}
                     tabindex="0"
                     onclick={() => toggleFlag((v) => (allowLocalLlm = v), allowLocalLlm)}
-                    onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (allowLocalLlm = v), allowLocalLlm); }}>
+                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFlag((v) => (allowLocalLlm = v), allowLocalLlm) } }}>
                     <div class="toggle-knob"></div>
                   </div>
                 </label>
@@ -1460,7 +1477,7 @@
                   <div class="toggle-track" class:on={insecureCookies} role="checkbox" aria-checked={insecureCookies}
                     tabindex="0"
                     onclick={() => toggleFlag((v) => (insecureCookies = v), insecureCookies)}
-                    onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (insecureCookies = v), insecureCookies); }}>
+                    onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleFlag((v) => (insecureCookies = v), insecureCookies) } }}>
                     <div class="toggle-knob"></div>
                   </div>
                 </label>

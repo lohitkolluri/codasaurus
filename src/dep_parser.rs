@@ -73,6 +73,17 @@ pub fn extract_pyproject_deps(content: &str) -> Vec<String> {
     pkgs
 }
 
+/// Workspace crate name from `[package].name` in `Cargo.toml`.
+pub fn extract_cargo_package_name(content: &str) -> Option<String> {
+    let table = content.parse::<toml::Table>().ok()?;
+    table
+        .get("package")?
+        .as_table()?
+        .get("name")?
+        .as_str()
+        .map(str::to_string)
+}
+
 /// Extract dependencies from a `Cargo.toml`.
 /// Covers `[dependencies]`, `[dev-dependencies]`, and `[build-dependencies]`.
 pub fn extract_cargo_deps(content: &str) -> Vec<String> {
@@ -127,6 +138,15 @@ mod tests {
         let content = r#"{"dependencies": {"react": "^18.0.0", "lodash": "^4.0.0"}}"#;
         let deps = extract_npm_deps(content);
         assert_eq!(deps, vec!["lodash", "react"]);
+    }
+
+    #[test]
+    fn test_extract_cargo_package_name() {
+        let content = "[package]\nname = \"codasaurus\"\nversion = \"0.1.0\"\n";
+        assert_eq!(
+            extract_cargo_package_name(content).as_deref(),
+            Some("codasaurus")
+        );
     }
 
     #[test]

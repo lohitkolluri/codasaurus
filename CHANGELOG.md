@@ -20,6 +20,23 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 
 ## [Unreleased]
 
+### Security
+
+- Learned ignore rules are repo-scoped; security detectors require a maintainer dismissal before auto-promotion; mined false-positive comments no longer suppress `secrets`/`vulnerabilities`/`iac`.
+- Dismiss reactions on finding comments require the same ACL as `@codasaurus` commands (repo owner / PR author / association).
+- OIDC ID-token verification pins `RS256` instead of trusting the JWT header `alg`.
+- CSP drops `'unsafe-inline'`; setup wizard detail endpoints require owner auth after bootstrap; PR review POST checks for an existing review on the same SHA before retrying.
+
+### Fixed
+
+- Dashboard dismiss now sends `repo_full_name` so suppressions are not stored as global.
+- Global Settings `auto_approve` is honored by the review pipeline (in addition to per-repo config).
+- Failed GitHub PR review POSTs no longer claim the head SHA (allows retry).
+- Advisory drafts no longer show READY TO MERGE: YES.
+- Repo delete cascades run in a single DB transaction.
+- Dashboard: race-safe review/repo detail loads, role-gated RepoDetail/Sidebar, Space key on toggles, Stats mojibake, invite password `minlength` alignment.
+- Agent fix prompt is structured for coding agents (location, detector, issue, fix) and skips policy meta-rows and golden fixture paths; phantom-deps / hallucinated-imports skip `tests/` and golden harness files; `sync_repos` uses the shared GitHub client with retries.
+
 ### Added
 
 - CLI `codasaurus reset-password --email … --password …` for emergency local dashboard recovery (no email flow).
@@ -59,6 +76,7 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - Overview comments include a collapsed copy-paste prompt for an AI coding agent when there are findings.
 - Context blast radius uses shields badges (`BLAST RADIUS` / `SCORE`); low-noise blasts stay hidden.
 - LLM PR summary prompt tightened and hard-capped (~600 chars) so comments stay scannable.
+- Review maturity: advisory draft for soft findings, opt-in `auto_approve` on clean PRs (merge still needs a maintainer), concern labels (`security|quality|tests|docs`), LLM path/symbol grounding, learning promotion requires distinct PRs or a maintainer dismiss, and golden detector fixtures in CI.
 - Opt-in **PR title fix** (`pr_title_fix`: off / suggest / auto) can propose or auto-update titles from guidelines and commit subjects, polished to conventional best practices (imperative, lowercase, ~72 chars).
 - `.env.example` documents the full dashboard ↔ env mirror set (timeouts, cookies, model cheap, etc.).
 - Jira / Linear ticket context is taken from the PR **title and body**; Linear issues resolve via `issue(id:)` (supports bare `ENG-123` when Linear is configured).

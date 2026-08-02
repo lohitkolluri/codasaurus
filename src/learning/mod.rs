@@ -38,4 +38,6 @@ pub struct LearnedRule {
     pub action: RuleAction,
     pub reason: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// When set, the rule only applies to this repo. `None` = legacy/global.
+    pub repo_full_name: Option<String>,
 }

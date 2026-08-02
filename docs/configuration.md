@@ -171,6 +171,13 @@ Use this checklist when GitHub Enterprise is reachable but the public internet i
 
 Do **not** enable `allow_auto_fix` in air-gap until Contents Write is granted and you accept branch commits from the bot.
 
+### Review posture
+
+- **REQUEST_CHANGES** only when Tier-1 has blocking findings. Soft/slop-only findings post an **Advisory draft** overview and stay on `COMMENT`.
+- **`auto_approve`** (Settings / repo config, default off): on a clean Tier-1 PR, Codasaurus may post GitHub `APPROVE`. Merge still requires a human maintainer (use branch protection).
+- Overview checklist labels findings with concern tags: `security`, `quality`, `tests`, `docs`.
+- Auto-learned ignore rules require dismissals across **3 distinct PRs**, or a **maintainer** dismiss from the dashboard.
+
 ### PR title fix
 
 Dashboard **Settings → Review** (and per-repo Automation) exposes `pr_title_fix`:

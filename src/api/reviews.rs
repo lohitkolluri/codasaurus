@@ -37,6 +37,8 @@ pub struct DismissBody {
     pub detector: Option<String>,
     pub file: Option<String>,
     pub message: Option<String>,
+    pub pr_number: Option<i64>,
+    pub repo: Option<String>,
 }
 
 pub fn router() -> Router<AppState> {
@@ -239,6 +241,7 @@ async fn dismiss_finding(
     Json(body): Json<DismissBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     super::rbac::require_maintainer(&state, &headers).await?;
+    let user = super::rbac::current_user(&state.pool, &headers).await?;
     let fp = body.fingerprint.trim();
     if fp.len() < 8 {
         return Err(ApiError::bad_request("fingerprint too short"));
@@ -247,11 +250,15 @@ async fn dismiss_finding(
     let fp = fp.rsplit(':').next().unwrap_or(fp);
     let store = LearningStore::from_pool(&state.pool);
     store
-        .dismiss_fingerprint(
+        .dismiss_fingerprint_for_repo(
             fp,
             body.detector.as_deref().unwrap_or("manual"),
             body.file.as_deref().unwrap_or(""),
             body.message.as_deref().unwrap_or("dismissed via dashboard"),
+            body.repo.as_deref(),
+            body.pr_number,
+            Some(user.email.as_str()),
+            true, // dashboard dismiss requires maintainer
         )
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
