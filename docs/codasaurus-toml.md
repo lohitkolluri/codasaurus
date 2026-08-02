@@ -46,6 +46,16 @@ require_title_convention = false
 max_blocking = 0
 max_warnings = 20
 
+# Optional natural-language pre-merge checks. Each runs the LLM against the
+# PR diff. mode: off | warning | error (error + failed blocks merge).
+# scope: optional glob filter over changed paths (tests/** or *.rs).
+# Requires an LLM; disabled when offline_mode is on.
+# [[pre_merge.checks]]
+# name = "No secrets in tests"
+# mode = "error"
+# scope = "tests/**"
+# instructions = "Fail if any test file contains hardcoded credentials or API keys."
+
 [quality_gate]
 name = "codasaurus way"
 block_on_fail = true

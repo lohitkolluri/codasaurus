@@ -19,6 +19,7 @@ pub(crate) mod maintenance;
 pub(crate) mod markdown;
 pub(crate) mod offline;
 mod policy;
+pub(crate) mod premerge;
 pub(crate) mod provenance;
 mod quality;
 pub(crate) mod readiness;

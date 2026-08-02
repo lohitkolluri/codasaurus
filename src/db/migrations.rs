@@ -253,6 +253,34 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     migrate_v17_baseline_and_gates(pool).await?;
     migrate_v18_confidence(pool).await?;
     migrate_v19_symbol_index(pool).await?;
+    migrate_v20_pre_merge_checks(pool).await?;
+    Ok(())
+}
+
+/// v20: per-PR natural-language pre-merge check runs (Phase 5).
+async fn migrate_v20_pre_merge_checks(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
+    if current.unwrap_or(0) >= 20 {
+        return Ok(());
+    }
+    let _ = sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS pre_merge_check_runs (
+            repo_full_name TEXT NOT NULL,
+            pr_number INTEGER NOT NULL,
+            check_name TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            status TEXT NOT NULL,
+            reasoning TEXT,
+            evaluated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (repo_full_name, pr_number, check_name)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await;
     Ok(())
 }
 

@@ -144,6 +144,26 @@ pub struct PreMergeConfig {
     /// Maximum number of warnings allowed
     #[serde(default = "default_ten")]
     pub max_warnings: usize,
+    /// Natural-language pre-merge checks (LLM-judged), from `[[pre_merge_checks]]`.
+    #[serde(default)]
+    pub checks: Vec<PreMergeCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreMergeCheck {
+    /// Check name, shown in the PR comment (<=50 chars).
+    pub name: String,
+    /// `off` | `warning` | `error`. `error` + failed blocks merge.
+    #[serde(default = "default_premerge_mode")]
+    pub mode: String,
+    /// Optional glob filter; check only applies to matching changed files.
+    pub scope: Option<String>,
+    /// Natural-language instructions the LLM evaluates against the diff.
+    pub instructions: String,
+}
+
+fn default_premerge_mode() -> String {
+    "warning".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
