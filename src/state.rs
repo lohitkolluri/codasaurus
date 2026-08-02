@@ -5,7 +5,12 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use std::sync::OnceLock;
 
-const STALE_CLAIM_SECS: i64 = 600;
+/// Lease/stale window must exceed the review timeout or a second worker can
+/// reclaim a still-running review (duplicate APPROVE / check runs).
+fn stale_claim_secs() -> i64 {
+    let timeout = crate::bot_runtime::BotRuntimeConfig::default().review_timeout_secs as i64;
+    timeout.saturating_add(120).max(600)
+}
 
 fn lease_owner_id() -> &'static str {
     static OWNER: OnceLock<String> = OnceLock::new();
@@ -138,11 +143,33 @@ impl ReviewState {
         .bind(&key)
         .bind(sha)
         .bind(owner)
-        .bind(STALE_CLAIM_SECS)
+        .bind(stale_claim_secs())
         .execute(self.pool.as_pg())
         .await?
         .rows_affected();
 
+        Ok(result > 0)
+    }
+
+    /// Force-claim a SHA even when a completed review already exists (slash re-review).
+    pub async fn force_claim_sha(&self, repo: &str, pr_number: i64, sha: &str) -> Result<bool> {
+        let key = format!("{repo}/{pr_number}");
+        let owner = lease_owner_id();
+        let result = sqlx::query(
+            "INSERT INTO reviewed_commits (repo_pr, head_sha, status, lease_owner, created_at)
+             VALUES ($1, $2, 'in_progress', $3, NOW())
+             ON CONFLICT(repo_pr) DO UPDATE SET
+               head_sha = excluded.head_sha,
+               status = 'in_progress',
+               lease_owner = excluded.lease_owner,
+               created_at = NOW()",
+        )
+        .bind(&key)
+        .bind(sha)
+        .bind(owner)
+        .execute(self.pool.as_pg())
+        .await?
+        .rows_affected();
         Ok(result > 0)
     }
 
@@ -182,7 +209,7 @@ impl ReviewState {
         .bind(&key)
         .bind(sha)
         .bind(owner)
-        .bind(STALE_CLAIM_SECS)
+        .bind(stale_claim_secs())
         .execute(self.pool.as_pg())
         .await?;
         Ok(())
@@ -191,5 +218,5 @@ impl ReviewState {
 
 fn is_claim_stale(created_at: DateTime<Utc>) -> bool {
     let age = Utc::now().signed_duration_since(created_at);
-    age.num_seconds() >= STALE_CLAIM_SECS
+    age.num_seconds() >= stale_claim_secs()
 }

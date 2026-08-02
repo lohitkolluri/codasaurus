@@ -117,13 +117,12 @@ pub fn dep_delta_markdown(deltas: &[DepDelta], vuln_packages: &[String]) -> Stri
     if deltas.is_empty() {
         return String::new();
     }
-    let mut out = String::from("#### Dependency delta\n\n");
+    let mut out = String::from("**Dependency delta**\n\n");
     for d in deltas {
-        out.push_str(&format!("**`{}`**\n\n", d.path));
-        out.push_str("| Change | Package |\n| --- | --- |\n");
+        out.push_str(&format!("`{}`\n", d.path));
         for p in &d.added {
             let flag = if vuln_packages.iter().any(|v| p.contains(v)) {
-                " · `vuln`"
+                " · vuln"
             } else {
                 ""
             };
@@ -133,14 +132,14 @@ pub fn dep_delta_markdown(deltas: &[DepDelta], vuln_packages: &[String]) -> Stri
                 "added"
             };
             let name = p.replace(" (updated)", "");
-            out.push_str(&format!("| `{kind}` | `{name}`{flag} |\n"));
+            out.push_str(&format!("- {kind} `{name}`{flag}\n"));
         }
         for p in &d.removed {
-            out.push_str(&format!("| `removed` | `{p}` |\n"));
+            out.push_str(&format!("- removed `{p}`\n"));
         }
         out.push('\n');
     }
-    out.push_str("<sub>Mini-SBOM from manifest diffs — not a full CycloneDX export.</sub>\n\n");
+    out.push_str("<sub>From manifest diffs only.</sub>\n\n");
     out
 }
 
