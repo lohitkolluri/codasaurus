@@ -211,6 +211,29 @@ pub(crate) struct WebhookPayload {
     /// Sent in `installation_repositories.added` event
     #[serde(rename = "repositories_added")]
     repositories_added: Option<Vec<serde_json::Value>>,
+    /// Head commit SHA of a `push` event
+    after: Option<String>,
+    /// `push` event commits
+    commits: Option<Vec<serde_json::Value>>,
+}
+
+/// Paths added/modified across all commits of a `push` event payload.
+fn payload_commits_paths(payload: &WebhookPayload) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(commits) = payload.commits.as_ref() {
+        for commit in commits {
+            for key in ["added", "modified"] {
+                if let Some(list) = commit[key].as_array() {
+                    for p in list {
+                        if let Some(s) = p.as_str() {
+                            out.push(s.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Comment author association / identity from GitHub payload.
@@ -513,6 +536,78 @@ pub(crate) async fn handle_webhook(
                         timeout_secs,
                     )
                     .await;
+                }
+            });
+        }
+    } else if event == "push" {
+        // Incremental symbol-index: re-parse files touched by the push.
+        let repo_full_name = payload
+            .repo
+            .as_ref()
+            .and_then(|r| r["full_name"].as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let inst_id = payload.installation.as_ref().map(|i| i.id);
+        let after_sha = payload.after.clone().unwrap_or_default();
+        let deleted_branch = after_sha.is_empty() || after_sha.chars().all(|c| c == '0');
+        let cfg = config.clone();
+        let delivery = delivery_id.to_string();
+        let changed: Vec<String> = payload_commits_paths(&payload)
+            .into_iter()
+            .filter(|p| {
+                let lower = p.to_ascii_lowercase();
+                lower.ends_with(".rs")
+                    || lower.ends_with(".go")
+                    || lower.ends_with(".py")
+                    || lower.ends_with(".js")
+                    || lower.ends_with(".jsx")
+                    || lower.ends_with(".mjs")
+                    || lower.ends_with(".ts")
+                    || lower.ends_with(".tsx")
+            })
+            .collect();
+        if repo_full_name != "unknown" && !deleted_branch && !changed.is_empty() {
+            tokio::spawn(async move {
+                let span = tracing::info_span!(
+                    "index_push_webhook",
+                    delivery_id = %delivery,
+                    repo = %repo_full_name
+                );
+                let _enter = span.enter();
+                let Some(pool) = bot_db_pool() else {
+                    return;
+                };
+                let index_cfg = crate::config::Config::load_for_bot(Some(pool)).await.index;
+                if !index_cfg.enabled {
+                    return;
+                }
+                let Some(client) = crate::bot::review::github::GITHUB_CLIENT.as_ref() else {
+                    return;
+                };
+                let Ok(token) = crate::bot::auth::get_installation_token(&cfg, inst_id).await
+                else {
+                    tracing::warn!("index: no installation token");
+                    return;
+                };
+                let auth_header = format!("Bearer {token}");
+                let Ok(headers) = crate::bot::review::github::github_api_headers(&auth_header)
+                else {
+                    return;
+                };
+                for path in &changed {
+                    if let Err(e) = crate::index::reindex_file(
+                        pool,
+                        client,
+                        &headers,
+                        &repo_full_name,
+                        &after_sha,
+                        path,
+                        &index_cfg,
+                    )
+                    .await
+                    {
+                        tracing::warn!(error = %e, path, "incremental index failed");
+                    }
                 }
             });
         }
@@ -856,6 +951,8 @@ mod author_acl_tests {
             sender: None,
             repositories: None,
             repositories_added: None,
+            after: None,
+            commits: None,
         }
     }
 

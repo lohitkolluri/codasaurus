@@ -1037,6 +1037,8 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
             sender: None,
             repositories: None,
             repositories_added: None,
+            after: None,
+            commits: None,
         };
         review_pr_with_options(
             &token,
