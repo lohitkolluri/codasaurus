@@ -108,7 +108,7 @@ Also: `summarize`, `labels`, `changelog`, `add_docs`. React 👎 on a finding co
 
 ## vs the field
 
-|                      | Seat SaaS   | PR-Agent         | **Codasaurus**                    |
+|                      | Hosted SaaS | Typical OSS bots | **Codasaurus**                    |
 | -------------------- | ----------- | ---------------- | --------------------------------- |
 | Cost                 | Per seat    | OSS / commercial | **Self-host, free**               |
 | Deploy               | Their cloud | Your infra       | **One Docker binary**             |

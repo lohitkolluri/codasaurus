@@ -1,7 +1,7 @@
-//! Aesthetic, readable PR comment markdown (CodeRabbit / Greptile inspired).
+//! Aesthetic, readable PR comment markdown for GitHub review threads.
 //!
 //! Uses shields.io badge images (GitHub renders them inline) plus compact tables
-//! and `<details>` sections — same patterns as top AI review bots.
+//! and `<details>` sections for a scannable walkthrough.
 
 use crate::bot_runtime::BotRuntimeConfig;
 use crate::config::Config;
@@ -312,7 +312,7 @@ pub fn walkthrough_body_ext(
     }
     let _ = writeln!(body, "> **{verdict_detail}**\n");
 
-    // CodeRabbit-inspired walkthrough: effort → diagram → files → issues → findings.
+    // Walkthrough order: effort → diagram → files → issues → findings.
     let _ = writeln!(body, "<details open>");
     let _ = writeln!(
         body,
@@ -498,7 +498,7 @@ fn escape_md(s: &str) -> String {
     s.replace('|', "\\|").replace('\n', " ").replace('*', "\\*")
 }
 
-/// Heuristic 1–5 review effort (CodeRabbit-style estimate; no LLM).
+/// Heuristic 1–5 review effort estimate (no LLM).
 fn estimate_review_effort(files: usize, findings: usize, blocking: usize) -> u8 {
     let mut score = 1u8;
     if files > 3 {
@@ -526,7 +526,7 @@ fn effort_color(effort: u8) -> &'static str {
     }
 }
 
-/// Grouped changed-files summary (CodeRabbit “changed files summary” pattern).
+/// Grouped changed-files summary by top-level path area.
 fn write_changed_files_summary(body: &mut String, files: &[serde_json::Value]) {
     use std::collections::BTreeMap;
     let _ = writeln!(body, "#### Changed files\n");
