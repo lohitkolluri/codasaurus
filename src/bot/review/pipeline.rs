@@ -738,6 +738,16 @@ pub async fn review_pr_with_options(
     let blast_report =
         crate::bot::blast::estimate_blast_radius(&parsed_files_collected, &changed_paths);
     let blast_md = crate::bot::blast::blast_markdown(&blast_report);
+    let index_callers_md = if let Some(pool) = crate::bot::CONFIG_POOL.get() {
+        crate::index::callers_markdown(pool, repo_name, &changed_paths).await
+    } else {
+        String::new()
+    };
+    let blast_md = if index_callers_md.is_empty() {
+        blast_md
+    } else {
+        format!("{blast_md}\n{index_callers_md}")
+    };
     let vuln_pkgs: Vec<String> = findings
         .findings
         .iter()

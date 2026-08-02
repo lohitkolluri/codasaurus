@@ -96,6 +96,57 @@ pub async fn build_repo_index(
     Ok(files.len())
 }
 
+/// Whole-repo callers of symbols defined in `paths`, as compact markdown.
+/// Empty when the repo has no index rows (callers fall back to diff-only impact).
+pub async fn callers_markdown(
+    pool: &crate::db::DbPool,
+    repo_full_name: &str,
+    paths: &[String],
+) -> String {
+    let mut symbols: Vec<(String, String)> = Vec::new();
+    for path in paths {
+        if let Ok(rows) = store::symbols_in_file(pool, repo_full_name, path).await {
+            for (sym, kind, _) in rows {
+                if kind != extract::SYMBOL_IMPORT {
+                    symbols.push((sym, path.clone()));
+                }
+            }
+        }
+    }
+    if symbols.is_empty() {
+        return String::new();
+    }
+    let mut sections: Vec<String> = Vec::new();
+    for (sym, path) in symbols.iter().take(30) {
+        let Ok(edges) = store::callers_of(pool, repo_full_name, sym).await else {
+            continue;
+        };
+        let mut callers: Vec<String> = edges
+            .into_iter()
+            .filter(|(_, _, k)| k == extract::EDGE_CALLS || k == extract::EDGE_EXTENDS)
+            .map(|(f, _, _)| f)
+            .collect();
+        callers.sort();
+        callers.dedup();
+        if !callers.is_empty() {
+            let listed = callers
+                .iter()
+                .take(8)
+                .map(|c| format!("`{c}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            sections.push(format!("- `{sym}` ({path}) <- {listed}"));
+        }
+    }
+    if sections.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("**Indexed callers of changed symbols:**\n\n");
+    out.push_str(&sections.join("\n"));
+    out.push('\n');
+    out
+}
+
 /// Incremental: re-index one changed file.
 pub async fn reindex_file(
     pool: &crate::db::DbPool,
