@@ -242,6 +242,11 @@ async fn post_issue_comment(token: &str, repo: &str, pr: i64, body: &str) -> any
     Ok(())
 }
 
+/// Reply when a `@codasaurus` command is ignored for ACL reasons.
+pub(crate) async fn notify_command_denied(ctx: WebhookContext, pr_number: i64, body: String) {
+    spawn_simple_comment(ctx, pr_number, body).await;
+}
+
 async fn spawn_simple_comment(ctx: WebhookContext, pr_number: i64, body: String) {
     match get_installation_token(&ctx.cfg, ctx.inst_id).await {
         Ok(token) => {

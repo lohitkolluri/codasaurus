@@ -163,17 +163,45 @@ async fn get_review(
     .ok()
     .flatten();
 
+    let mut by_severity: std::collections::BTreeMap<String, i64> =
+        std::collections::BTreeMap::new();
+    let mut by_detector: std::collections::BTreeMap<String, i64> =
+        std::collections::BTreeMap::new();
+    let mut files: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for f in &findings {
+        files.insert(f.file_path.clone());
+        *by_severity.entry(f.severity.clone()).or_insert(0) += 1;
+        *by_detector.entry(f.detector.clone()).or_insert(0) += 1;
+    }
+
+    let duration_secs = match (review.started_at, review.completed_at) {
+        (Some(s), Some(c)) => Some((c - s).num_seconds().max(0)),
+        _ => None,
+    };
+
     let mut review_val = serde_json::to_value(&review).unwrap_or_default();
     if let Some(obj) = review_val.as_object_mut() {
         obj.insert(
             "repo_full_name".into(),
             json!(repo_full_name.clone().unwrap_or_default()),
         );
+        obj.insert("finding_count".into(), json!(findings.len()));
+        obj.insert("file_count".into(), json!(files.len()));
+        obj.insert("by_severity".into(), json!(by_severity));
+        obj.insert("by_detector".into(), json!(by_detector));
+        obj.insert("duration_secs".into(), json!(duration_secs));
     }
 
     Ok(Json(json!({
         "review": review_val,
         "findings": findings,
+        "summary": {
+            "finding_count": findings.len(),
+            "file_count": files.len(),
+            "by_severity": by_severity,
+            "by_detector": by_detector,
+            "duration_secs": duration_secs,
+        },
     })))
 }
 

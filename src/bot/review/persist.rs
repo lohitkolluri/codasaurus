@@ -65,7 +65,7 @@ pub(crate) async fn save_review_to_db(
             fingerprint: Some(format!("{}:{}", review.id, f.fingerprint())),
             file_path: f.file.clone(),
             line_start: if f.line > 0 {
-                Some(f.line as i64)
+                Some(f.line as i32)
             } else {
                 None
             },

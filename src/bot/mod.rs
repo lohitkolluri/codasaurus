@@ -214,15 +214,62 @@ pub(crate) struct WebhookPayload {
     repositories_added: Option<Vec<serde_json::Value>>,
 }
 
-/// Comment author association from GitHub payload.
-fn author_can_command(payload: &WebhookPayload) -> bool {
-    let association = payload
+/// Comment author association / identity from GitHub payload.
+fn comment_author_login(payload: &WebhookPayload) -> &str {
+    payload
+        .comment
+        .as_ref()
+        .and_then(|c| c.pointer("/user/login"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+}
+
+fn comment_author_association(payload: &WebhookPayload) -> &str {
+    payload
         .comment
         .as_ref()
         .and_then(|c| c.get("author_association"))
         .and_then(|a| a.as_str())
+        .unwrap_or("")
+}
+
+/// Who may run `@codasaurus …` commands on a PR.
+///
+/// GitHub associations vary (personal repos vs orgs vs forks). Allow owners,
+/// org members, collaborators, prior contributors, and the PR author / repo owner
+/// by login — not only OWNER|MEMBER|COLLABORATOR.
+fn author_can_command(payload: &WebhookPayload) -> bool {
+    let association = comment_author_association(payload);
+    if matches!(
+        association,
+        "OWNER" | "MEMBER" | "COLLABORATOR" | "CONTRIBUTOR"
+    ) {
+        return true;
+    }
+
+    let commenter = comment_author_login(payload);
+    if commenter.is_empty() {
+        return false;
+    }
+
+    let repo_owner = payload
+        .repo
+        .as_ref()
+        .and_then(|r| r.pointer("/owner/login"))
+        .and_then(|v| v.as_str())
         .unwrap_or("");
-    matches!(association, "OWNER" | "MEMBER" | "COLLABORATOR")
+    if commenter.eq_ignore_ascii_case(repo_owner) {
+        return true;
+    }
+
+    // Issue (PR) author may command on their own PR.
+    let pr_author = payload
+        .issue
+        .as_ref()
+        .and_then(|i| i.pointer("/user/login"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    commenter.eq_ignore_ascii_case(pr_author)
 }
 
 pub(crate) async fn handle_webhook(
@@ -384,26 +431,45 @@ pub(crate) async fn handle_webhook(
         let cmd = commands::parse_bot_command(comment_body);
 
         if let Some(cmd) = cmd {
+            let is_pr = payload
+                .issue
+                .as_ref()
+                .and_then(|i| i.get("pull_request"))
+                .is_some();
+            let pr_number = payload
+                .issue
+                .as_ref()
+                .and_then(|i| i["number"].as_i64())
+                .unwrap_or(0);
             if !author_can_command(&payload) {
-                tracing::info!("ignoring command from unauthorized commenter");
-            } else {
-                let is_pr = payload
-                    .issue
-                    .as_ref()
-                    .and_then(|i| i.get("pull_request"))
-                    .is_some();
-                if is_pr {
-                    let pr_number = payload
-                        .issue
-                        .as_ref()
-                        .and_then(|i| i["number"].as_i64())
-                        .unwrap_or(0);
+                let association = comment_author_association(&payload).to_string();
+                let commenter = comment_author_login(&payload).to_string();
+                tracing::info!(
+                    %association,
+                    %commenter,
+                    pr = pr_number,
+                    "ignoring command from unauthorized commenter"
+                );
+                if is_pr && pr_number > 0 {
                     let ctx = WebhookContext::from_payload(config.clone(), &payload);
-                    let timeout_secs = runtime.review_timeout_secs;
+                    let notice = format!(
+                        "### Codasaurus\n\n\
+                         Commands are limited to the **repo owner**, org **members**, \
+                         **collaborators**, prior **contributors**, and the **PR author**.\n\n\
+                         Commenter `{commenter}` has association `{association}`.\n\n\
+                         <sub>If you own this repo, check that you commented from the same \
+                         GitHub account that owns it.</sub>"
+                    );
                     tokio::spawn(async move {
-                        commands::handle_bot_command(ctx, pr_number, cmd, timeout_secs).await;
+                        commands::notify_command_denied(ctx, pr_number, notice).await;
                     });
                 }
+            } else if is_pr && pr_number > 0 {
+                let ctx = WebhookContext::from_payload(config.clone(), &payload);
+                let timeout_secs = runtime.review_timeout_secs;
+                tokio::spawn(async move {
+                    commands::handle_bot_command(ctx, pr_number, cmd, timeout_secs).await;
+                });
             }
         }
     } else if event == "reaction" && payload.action == "created" {
@@ -657,5 +723,64 @@ async fn ensure_repo_exists(
     .await
     {
         tracing::error!(repo = full_name, error = %e, "failed to auto-register repo");
+    }
+}
+
+#[cfg(test)]
+mod author_acl_tests {
+    use super::*;
+
+    fn payload(assoc: &str, commenter: &str, repo_owner: &str, pr_author: &str) -> WebhookPayload {
+        WebhookPayload {
+            action: "created".into(),
+            comment: Some(serde_json::json!({
+                "author_association": assoc,
+                "user": { "login": commenter },
+                "body": "@codasaurus help"
+            })),
+            repo: Some(serde_json::json!({
+                "full_name": format!("{repo_owner}/demo"),
+                "owner": { "login": repo_owner }
+            })),
+            issue: Some(serde_json::json!({
+                "number": 1,
+                "user": { "login": pr_author },
+                "pull_request": {}
+            })),
+            pull_request: None,
+            installation: None,
+            reaction: None,
+            repositories: None,
+            repositories_added: None,
+        }
+    }
+
+    #[test]
+    fn allows_owner_association() {
+        assert!(author_can_command(&payload(
+            "OWNER", "alice", "alice", "bob"
+        )));
+    }
+
+    #[test]
+    fn allows_repo_owner_login_even_if_association_none() {
+        assert!(author_can_command(&payload(
+            "NONE", "alice", "alice", "carol"
+        )));
+    }
+
+    #[test]
+    fn allows_pr_author() {
+        assert!(author_can_command(&payload(
+            "FIRST_TIME_CONTRIBUTOR",
+            "bob",
+            "org",
+            "bob"
+        )));
+    }
+
+    #[test]
+    fn rejects_unrelated_none() {
+        assert!(!author_can_command(&payload("NONE", "eve", "alice", "bob")));
     }
 }

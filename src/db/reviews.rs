@@ -180,10 +180,10 @@ pub async fn create_findings_batch(
     let mut review_ids = Vec::with_capacity(findings.len());
     let mut fingerprints: Vec<Option<String>> = Vec::with_capacity(findings.len());
     let mut file_paths = Vec::with_capacity(findings.len());
-    let mut line_starts: Vec<Option<i64>> = Vec::with_capacity(findings.len());
-    let mut line_ends: Vec<Option<i64>> = Vec::with_capacity(findings.len());
-    let mut column_starts: Vec<Option<i64>> = Vec::with_capacity(findings.len());
-    let mut column_ends: Vec<Option<i64>> = Vec::with_capacity(findings.len());
+    let mut line_starts: Vec<Option<i32>> = Vec::with_capacity(findings.len());
+    let mut line_ends: Vec<Option<i32>> = Vec::with_capacity(findings.len());
+    let mut column_starts: Vec<Option<i32>> = Vec::with_capacity(findings.len());
+    let mut column_ends: Vec<Option<i32>> = Vec::with_capacity(findings.len());
     let mut severities = Vec::with_capacity(findings.len());
     let mut detectors = Vec::with_capacity(findings.len());
     let mut rule_ids: Vec<Option<String>> = Vec::with_capacity(findings.len());
@@ -218,8 +218,8 @@ pub async fn create_findings_batch(
             message, suggested_fix, code_snippet, context, category
          )
          SELECT * FROM UNNEST(
-            $1::bigint[], $2::text[], $3::text[], $4::bigint[], $5::bigint[],
-            $6::bigint[], $7::bigint[], $8::text[], $9::text[], $10::text[],
+            $1::bigint[], $2::text[], $3::text[], $4::int4[], $5::int4[],
+            $6::int4[], $7::int4[], $8::text[], $9::text[], $10::text[],
             $11::text[], $12::text[], $13::text[], $14::text[], $15::text[]
          )",
     )
