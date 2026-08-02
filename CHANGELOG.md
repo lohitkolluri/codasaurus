@@ -25,6 +25,8 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - Settings → Connections: **Test connection** for GitHub App, OIDC discovery, Jira, and Linear; **Clear** for SSO and ticket credentials.
 - GitHub App manifest now requests `installation` and `installation_repositories` events so installs sync without a manual Sync.
 - PR review comments use shields.io verdict / severity badges (CodeRabbit / Greptile–style walkthrough).
+- Walkthrough sections aligned with CodeRabbit: estimated effort, Mermaid change map, grouped file summary, linked-issue assessment, pre-merge checks.
+- `GET /branding/logo.png` serves the bundled App mark for post-wizard badge upload.
 
 ### Changed
 
@@ -33,6 +35,8 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - Automatic reviews no longer post a duplicate “describe” comment (walkthrough stays on the review).
 - Reviews list layout: title + status on one row, cleaner filters alignment.
 - Bot commands accept plain `codasaurus …` / `/codasaurus …` (GitHub Apps are not @-mentionable).
+- Mermaid change map always included in review walkthroughs (not gated on LLM).
+- GitHub App manifest includes a description; wizard documents manual icon upload (manifest cannot set logos).
 
 ### Deprecated
 

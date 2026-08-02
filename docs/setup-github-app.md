@@ -24,14 +24,22 @@ Codasaurus reviews PRs as a **GitHub App**. Prefer the dashboard [onboarding wiz
 Webhook URL: `https://<your-host>/webhook` (trailing slash is also accepted).
 Generate a secret: `openssl rand -hex 32`.
 
-Logo (optional): upload [`assets/logo.png`](../assets/logo.png).
+### App icon / badge
+
+GitHub’s [create-from-manifest](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) API **does not accept a logo**. There is also **no REST endpoint** to set the App badge after conversion — you upload it in the UI:
+
+1. Open **GitHub → Settings → Developer settings → GitHub Apps → [your app] → Display information**.
+2. Upload the logo (PNG/JPG/GIF, &lt; 1 MB). Use our bundled mark: [`assets/logo.png`](../assets/logo.png) or download from your deploy at `https://<host>/branding/logo.png`.
+
+The bot identity in PR threads uses that badge; until you upload one, GitHub shows the default identicon.
 
 ## Manifest flow (wizard)
 
 1. In the wizard, click **Create GitHub App**.
-2. GitHub opens a pre-filled form (`POST` manifest from `/api/setup/github/manifest-page`).
+2. GitHub opens a pre-filled form (`POST` manifest from `/api/setup/github/manifest-page`) with permissions, events, webhook URL, description, and callbacks.
 3. Confirm → GitHub redirects to `/api/setup/github/callback` with a one-time `code`.
 4. Codasaurus exchanges the code, stores App ID / PEM / webhook secret / slug, and returns you to the wizard.
+5. (Optional) Upload the App icon as above — the wizard surfaces `/branding/logo.png`.
 
 `PUBLIC_URL` (or the request Host) must match the URL GitHub can reach for webhooks and callbacks. The manifest sets the callback to `/api/setup/github/callback` (App creation), not a user OAuth login endpoint.
 

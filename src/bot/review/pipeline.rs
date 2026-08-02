@@ -803,8 +803,9 @@ pub async fn review_pr_with_options(
         &reviewers,
         &config,
         &runtime,
-        false,
-        repo_llm_enabled,
+        true,
+        // Mermaid is rendered by GitHub client-side — no LLM required.
+        true,
         walkthrough_extras,
     );
 
@@ -973,7 +974,7 @@ pub async fn review_pr_with_options(
             &config,
             &runtime,
             true,
-            repo_llm_enabled,
+            true,
             crate::bot::markdown::WalkthroughExtras {
                 related_prs: &related_prs,
                 issue_assessment_md: &issue_assessment_md,

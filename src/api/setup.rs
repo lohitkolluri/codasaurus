@@ -484,9 +484,13 @@ fn build_manifest(public_url: &str) -> serde_json::Value {
     let suffix: String = uuid::Uuid::new_v4().to_string().chars().take(4).collect();
     // Events must match handlers in `bot::handle_webhook`. Installation events keep
     // the dashboard repo list in sync without a manual Sync after install.
+    // Note: GitHub App manifests do not support logo/avatar — upload
+    // manually after creation (see docs/setup-github-app.md). Logo is served
+    // at `{public_url}/branding/logo.png` for easy download.
     json!({
         "name": format!("codasaurus-{}", suffix),
         "url": public_url,
+        "description": "Self-hosted PR review agent — Tier-1 static detectors, optional BYOK LLM, fail-closed offline mode.",
         "hook_attributes": {
             "url": format!("{}/webhook/", public_url),
             "active": true

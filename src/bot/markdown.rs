@@ -312,6 +312,7 @@ pub fn walkthrough_body_ext(
     }
     let _ = writeln!(body, "> **{verdict_detail}**\n");
 
+    // CodeRabbit-inspired walkthrough: effort → diagram → files → issues → findings.
     let _ = writeln!(body, "<details open>");
     let _ = writeln!(
         body,
@@ -319,8 +320,20 @@ pub fn walkthrough_body_ext(
         escape_md(pr_title)
     );
 
+    let effort = estimate_review_effort(files.len(), total, blocking);
+    let effort_badge = shield("effort", &format!("{effort}/5"), effort_color(effort));
+    let _ = writeln!(body, "#### Estimated review effort\n");
+    let _ = writeln!(
+        body,
+        "{effort_badge} · **{}** file{} · **{total}** finding{}\n",
+        files.len(),
+        if files.len() == 1 { "" } else { "s" },
+        if total == 1 { "" } else { "s" },
+    );
+
     if include_mermaid {
         if let Some(diagram) = mermaid_change_flow(files) {
+            let _ = writeln!(body, "#### Change map\n");
             let _ = writeln!(body, "```mermaid\n{diagram}\n```\n");
         }
     }
@@ -348,18 +361,7 @@ pub fn walkthrough_body_ext(
         let _ = writeln!(body);
     }
 
-    let _ = writeln!(body, "#### Changed files\n");
-    let _ = writeln!(body, "| File | Status |");
-    let _ = writeln!(body, "| --- | --- |");
-    for file in files.iter().take(40) {
-        let name = file["filename"].as_str().unwrap_or("?");
-        let status = file["status"].as_str().unwrap_or("modified");
-        let _ = writeln!(body, "| `{name}` | `{status}` |");
-    }
-    if files.len() > 40 {
-        let _ = writeln!(body, "| _…_ | _{} more_ |", files.len() - 40);
-    }
-    let _ = writeln!(body);
+    write_changed_files_summary(&mut body, files);
 
     if !findings.is_empty() {
         let _ = writeln!(body, "#### Findings\n");
@@ -403,9 +405,10 @@ pub fn walkthrough_body_ext(
     let _ = writeln!(body);
 
     if !reviewers.is_empty() {
+        let _ = writeln!(body, "#### Suggested reviewers\n");
         let _ = writeln!(
             body,
-            "**Suggested reviewers:** {}",
+            "{}",
             reviewers
                 .iter()
                 .map(|r| format!("@{r}"))
@@ -495,7 +498,93 @@ fn escape_md(s: &str) -> String {
     s.replace('|', "\\|").replace('\n', " ").replace('*', "\\*")
 }
 
-/// Compact mermaid flowchart of top path prefixes (shown when LLM is on).
+/// Heuristic 1–5 review effort (CodeRabbit-style estimate; no LLM).
+fn estimate_review_effort(files: usize, findings: usize, blocking: usize) -> u8 {
+    let mut score = 1u8;
+    if files > 3 {
+        score += 1;
+    }
+    if files > 12 {
+        score += 1;
+    }
+    if findings > 0 {
+        score += 1;
+    }
+    if blocking > 0 || findings > 8 {
+        score += 1;
+    }
+    score.min(5)
+}
+
+fn effort_color(effort: u8) -> &'static str {
+    match effort {
+        1 => "22c55e",
+        2 => "84cc16",
+        3 => "f59e0b",
+        4 => "f97316",
+        _ => "e11d48",
+    }
+}
+
+/// Grouped changed-files summary (CodeRabbit “changed files summary” pattern).
+fn write_changed_files_summary(body: &mut String, files: &[serde_json::Value]) {
+    use std::collections::BTreeMap;
+    let _ = writeln!(body, "#### Changed files\n");
+    if files.is_empty() {
+        let _ = writeln!(body, "_No files in diff._\n");
+        return;
+    }
+
+    let mut by_area: BTreeMap<String, Vec<(&str, &str)>> = BTreeMap::new();
+    for file in files {
+        let name = file["filename"].as_str().unwrap_or("?");
+        let status = file["status"].as_str().unwrap_or("modified");
+        let area = name
+            .split('/')
+            .next()
+            .filter(|p| !p.is_empty() && *p != name)
+            .unwrap_or("(root)")
+            .to_string();
+        by_area.entry(area).or_default().push((name, status));
+    }
+
+    let _ = writeln!(body, "| Area | Files | Status mix |");
+    let _ = writeln!(body, "| --- | ---: | --- |");
+    for (area, entries) in by_area.iter().take(12) {
+        let mut added = 0usize;
+        let mut modified = 0usize;
+        let mut removed = 0usize;
+        for (_, st) in entries {
+            match *st {
+                "added" => added += 1,
+                "removed" => removed += 1,
+                _ => modified += 1,
+            }
+        }
+        let mix = format!("+{added} ~{modified} -{removed}");
+        let _ = writeln!(body, "| `{area}` | {} | `{mix}` |", entries.len());
+    }
+    if by_area.len() > 12 {
+        let _ = writeln!(body, "| _…_ | _{} areas_ | |", by_area.len() - 12);
+    }
+    let _ = writeln!(body);
+
+    // Compact path list (capped) for reviewers who want the full set.
+    let _ = writeln!(body, "<details>\n<summary>File list</summary>\n");
+    let _ = writeln!(body, "| File | Status |");
+    let _ = writeln!(body, "| --- | --- |");
+    for file in files.iter().take(40) {
+        let name = file["filename"].as_str().unwrap_or("?");
+        let status = file["status"].as_str().unwrap_or("modified");
+        let _ = writeln!(body, "| `{name}` | `{status}` |");
+    }
+    if files.len() > 40 {
+        let _ = writeln!(body, "| _…_ | _{} more_ |", files.len() - 40);
+    }
+    let _ = writeln!(body, "\n</details>\n");
+}
+
+/// Mermaid change-map of top path prefixes (GitHub renders natively; no LLM).
 fn mermaid_change_flow(files: &[serde_json::Value]) -> Option<String> {
     use std::collections::BTreeMap;
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
@@ -522,12 +611,13 @@ fn mermaid_change_flow(files: &[serde_json::Value]) -> Option<String> {
     }
     let mut nodes: Vec<(String, usize)> = counts.into_iter().collect();
     nodes.sort_by(|a, b| b.1.cmp(&a.1));
-    nodes.truncate(6);
+    nodes.truncate(8);
 
-    let mut out = String::from("flowchart LR\n  Author --> Review[Codasaurus]\n");
+    // Top-down map reads better in the walkthrough than a left-to-right chain.
+    let mut out = String::from("flowchart TB\n  PR[Pull request] --> Review[Codasaurus]\n");
     for (i, (name, n)) in nodes.iter().enumerate() {
         let id = format!("N{i}");
-        let _ = writeln!(out, "  Review --> {id}[{name} ×{n}]");
+        let _ = writeln!(out, "  Review --> {id}[{name} x{n}]");
     }
     Some(out)
 }
@@ -593,5 +683,24 @@ mod tests {
     fn help_lists_impact() {
         assert!(help_body().contains("impact"));
         assert!(commands_details().contains("`@codasaurus impact`"));
+    }
+
+    #[test]
+    fn mermaid_change_map_from_files() {
+        let files = vec![
+            serde_json::json!({"filename": "src/bot/mod.rs", "status": "modified"}),
+            serde_json::json!({"filename": "src/api/setup.rs", "status": "modified"}),
+            serde_json::json!({"filename": "docs/setup.md", "status": "added"}),
+        ];
+        let diagram = mermaid_change_flow(&files).expect("diagram");
+        assert!(diagram.contains("flowchart TB"));
+        assert!(diagram.contains("src"));
+        assert!(diagram.contains("docs"));
+    }
+
+    #[test]
+    fn effort_scales_with_size() {
+        assert_eq!(estimate_review_effort(1, 0, 0), 1);
+        assert!(estimate_review_effort(20, 10, 2) >= 4);
     }
 }

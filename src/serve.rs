@@ -152,6 +152,8 @@ fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> 
         .merge(api)
         .route("/health", get(health_handler))
         .route("/health/ready", get(ready_handler))
+        // Bundled logo for post-wizard GitHub App badge upload (manifest cannot set icons).
+        .route("/branding/logo.png", get(branding_logo_png))
         .route("/webhook", webhook_handler.clone())
         .route("/webhook/", webhook_handler);
 
@@ -428,6 +430,18 @@ async fn metrics_handler(headers: axum::http::HeaderMap) -> impl IntoResponse {
         body,
     )
         .into_response()
+}
+
+/// PNG logo for operators to upload as the GitHub App badge after the wizard.
+async fn branding_logo_png() -> impl IntoResponse {
+    const PNG: &[u8] = include_bytes!("../assets/logo.png");
+    (
+        [
+            (header::CONTENT_TYPE, "image/png"),
+            (header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        PNG,
+    )
 }
 
 async fn shutdown_signal() {
