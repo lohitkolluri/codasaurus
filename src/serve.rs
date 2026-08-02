@@ -79,16 +79,47 @@ pub async fn serve(
     }
 
     // Apply offline mode before accepting traffic so slash commands honor the DB flag.
+    // Prefer the raw DB row for the log source — `apply_db_to_env` may already have
+    // mirrored `offline_mode=true` into process env, which would otherwise look like
+    // a Render `CODASAURUS_OFFLINE` setting the operator never added.
     {
         let db_off = crate::db::config::get_config(&pool, "offline_mode")
             .await
             .ok()
             .flatten();
-        let offline = crate::bot::offline::offline_mode_from_env_and_db(db_off.as_deref());
+        let db_on = db_off
+            .as_deref()
+            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .unwrap_or(false);
+        let render_env_on = std::env::var_os("CODASAURUS_OFFLINE").is_some_and(|v| {
+            matches!(
+                v.to_string_lossy().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        });
+        // Resolve before we rewrite env from DB for a clearer operator message.
+        let offline = db_on || render_env_on;
+        let source = if render_env_on && !db_on {
+            "env"
+        } else if db_on {
+            "db"
+        } else {
+            "off"
+        };
         crate::registry::set_offline_mode(offline);
         if offline {
-            tracing::info!("offline_mode enabled at boot — registry/OSV fail-closed");
-            println!("  Offline mode: enabled (fail-closed)");
+            tracing::info!(
+                %source,
+                db_value = db_off.as_deref().unwrap_or(""),
+                "offline_mode enabled at boot — registry/OSV fail-closed (LLM disabled)"
+            );
+            println!("  Offline mode: enabled via {source} (fail-closed — LLM off until cleared)");
+            if source == "db" {
+                println!(
+                    "  Tip: Settings → System → turn off Offline / air-gap mode, then Save \
+                     (or DELETE FROM app_config WHERE key = 'offline_mode')"
+                );
+            }
         }
     }
 
