@@ -37,8 +37,10 @@ Agents ship volume. Models invent packages, paste last year's APIs, and leave se
 
 | It catches               | How                           |
 | ------------------------ | ----------------------------- |
-| Hallucinated imports     | npm / PyPI / crates.io HEAD   |
+| Hallucinated imports     | npm / PyPI / crates.io / Go HEAD |
 | Phantom deps             | Import vs manifest            |
+| Lockfile drift           | Manifest vs lockfile          |
+| License drift            | Copyleft-style dep licenses |
 | Secrets and vulns        | Pattern + OSV                 |
 | IaC footguns             | Open CIDR, privileged pods    |
 | Agent-shaped PRs         | Tier-1 first, LLM nits capped |

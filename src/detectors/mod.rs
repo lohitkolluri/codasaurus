@@ -10,6 +10,8 @@ pub mod graph;
 pub mod guidelines;
 pub mod hallucinated_imports;
 pub mod iac;
+pub mod license_drift;
+pub mod lockfile_drift;
 pub mod phantom_deps;
 pub mod risky_patterns;
 pub mod security;
@@ -110,6 +112,14 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config, repo: Option<&str>)
 
         if config.checks.phantom_deps {
             handles.push(s.spawn(|| phantom_deps::detect(parsed_files)));
+        }
+
+        if config.checks.lockfile_drift {
+            handles.push(s.spawn(|| lockfile_drift::detect(parsed_files)));
+        }
+
+        if config.checks.license_drift {
+            handles.push(s.spawn(|| license_drift::detect(parsed_files)));
         }
 
         if config.checks.secrets {

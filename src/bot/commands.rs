@@ -29,6 +29,7 @@ pub(crate) enum BotCommand {
     Digest,
     Ask(String),
     Ignore(Option<String>),
+    Retry,
     Help,
 }
 
@@ -88,6 +89,9 @@ pub(crate) fn parse_bot_command(body: &str) -> Option<BotCommand> {
     }
     if lower.contains("review") {
         return Some(BotCommand::Review);
+    }
+    if lower.contains("retry") || lower.contains("re-run") || lower.contains("rerun") {
+        return Some(BotCommand::Retry);
     }
     None
 }
@@ -218,6 +222,7 @@ pub(crate) async fn handle_bot_command(
         BotCommand::Fix(fp) => spawn_fix(ctx, pr_number, fp, timeout_secs).await,
         BotCommand::Impact => spawn_impact(ctx, pr_number, timeout_secs).await,
         BotCommand::Digest => spawn_digest(ctx, pr_number).await,
+        BotCommand::Retry => spawn_review(ctx, pr_number, timeout_secs).await,
     }
 }
 

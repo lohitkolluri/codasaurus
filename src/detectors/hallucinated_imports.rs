@@ -16,6 +16,7 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
             "javascript" | "typescript" | "tsx" | "jsx" => "npm",
             "python" => "pypi",
             "rust" => "crates.io",
+            "go" => "go",
             _ => continue, // unsupported language for now
         };
 
@@ -34,7 +35,9 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
             if is_builtin(&package, registry_name) {
                 continue;
             }
-
+            if registry_name == "go" && is_go_stdlib(&package) {
+                continue;
+            }
             match registry::check_package(registry_name, &package) {
                 Ok(Some(true)) => {} // package exists
                 Ok(Some(false)) => {
@@ -87,6 +90,7 @@ fn package_registry_url(registry: &str, package: &str) -> String {
         "npm" => format!("https://www.npmjs.com/package/{package}"),
         "pypi" => format!("https://pypi.org/project/{package}/"),
         "crates.io" => format!("https://crates.io/crates/{package}"),
+        "go" => format!("https://pkg.go.dev/{package}"),
         other => format!("https://{other}/{package}"),
     }
 }
@@ -96,6 +100,7 @@ fn package_manual_check(registry: &str, package: &str) -> String {
         "npm" => format!("npm view {package}"),
         "pypi" => format!("pip index versions {package}"),
         "crates.io" => format!("cargo search {package} --limit 1"),
+        "go" => format!("go list -m {package}"),
         _ => format!("look up {package} on {registry}"),
     }
 }
@@ -176,6 +181,57 @@ static NPM_BUILTINS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
 
 static RUST_BUILTINS: LazyLock<HashSet<&'static str>> =
     LazyLock::new(|| HashSet::from(["std", "core", "alloc", "proc_macro"]));
+
+fn is_go_stdlib(path: &str) -> bool {
+    let std_roots = [
+        "archive",
+        "bufio",
+        "bytes",
+        "cmp",
+        "compress",
+        "container",
+        "context",
+        "crypto",
+        "database",
+        "debug",
+        "embed",
+        "encoding",
+        "errors",
+        "expvar",
+        "flag",
+        "fmt",
+        "go",
+        "hash",
+        "html",
+        "image",
+        "index",
+        "io",
+        "log",
+        "maps",
+        "math",
+        "mime",
+        "net",
+        "os",
+        "path",
+        "plugin",
+        "reflect",
+        "regexp",
+        "runtime",
+        "sort",
+        "strconv",
+        "strings",
+        "sync",
+        "syscall",
+        "testing",
+        "text",
+        "time",
+        "unicode",
+        "unsafe",
+        "internal",
+    ];
+    let root = path.split('/').next().unwrap_or(path);
+    std_roots.contains(&root)
+}
 
 pub(crate) fn is_builtin(package: &str, registry: &str) -> bool {
     match registry {
