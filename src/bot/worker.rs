@@ -129,15 +129,11 @@ async fn process_queued_review(
     let _guard = lock.lock().await;
     let started = std::time::Instant::now();
 
-    // Walkthrough is an issue comment updated in place. Skip APPROVE spam on
-    // synchronize; keep APPROVE for open/reopen/ready_for_review.
-    let post_approve = matches!(_action, "opened" | "reopened" | "ready_for_review" | "");
     let opts = ReviewOptions {
         auto_describe: false,
         auto_review_diff: true,
         force_draft: false,
         force_rereview: false,
-        post_approve_event: post_approve,
     };
 
     let result = timeout(Duration::from_secs(timeout_secs), async {
@@ -208,16 +204,11 @@ pub(crate) async fn run_webhook_review_inline(
     let lock = pr_lock(&repo_full_name, pr_number).await;
     let _guard = lock.lock().await;
     let started = std::time::Instant::now();
-    let post_approve = matches!(
-        _action.as_str(),
-        "opened" | "reopened" | "ready_for_review" | ""
-    );
     let opts = ReviewOptions {
         auto_describe: false,
         auto_review_diff: true,
         force_draft: false,
         force_rereview: false,
-        post_approve_event: post_approve,
     };
     let repo_for_claim = repo_full_name.clone();
     let sha_for_claim = head_sha.clone();

@@ -1,19 +1,27 @@
-//! Aesthetic, readable PR comment markdown for GitHub review threads.
+//! Readable PR comment markdown for GitHub review threads.
 //!
-//! Uses shields.io badge images (GitHub renders them inline) plus compact tables
-//! and `<details>` sections for a scannable walkthrough.
+//! Prefer native GFM (headings, lists, details). Hosted images/badges are
+//! secondary; keep the above-the-fold walkthrough short.
 
 use crate::bot_runtime::BotRuntimeConfig;
 use crate::config::Config;
 use crate::detectors::{Finding, Findings};
 use std::fmt::Write;
 
-/// shields.io badge (flat-square) — safe for GitHub PR markdown.
+/// Codasaurus theme colors (dashboard tokens) for shields.io badges.
+const LABEL_COLOR: &str = "1a1a1a";
+const COLOR_SHIP: &str = "16a34a";
+const COLOR_HOLD: &str = "dc2626";
+const COLOR_REVIEW: &str = "d97706";
+const COLOR_INFO: &str = "9a9a9a";
+const COLOR_ACCENT: &str = "ff6659";
+
+/// shields.io badge (flat-square) with dark label — safe for GitHub PR markdown.
 fn shield(label: &str, message: &str, color: &str) -> String {
-    let label = urlencoding_lite(label);
-    let message = urlencoding_lite(message);
+    let label_e = urlencoding_lite(label);
+    let message_e = urlencoding_lite(message);
     format!(
-        "<img src=\"https://img.shields.io/badge/{label}-{message}-{color}?style=flat-square\" alt=\"{label}: {message}\" />"
+        "<img src=\"https://img.shields.io/badge/{label_e}-{message_e}-{color}?style=flat-square&labelColor={LABEL_COLOR}\" alt=\"{label}: {message}\" />"
     )
 }
 
@@ -34,20 +42,17 @@ fn urlencoding_lite(s: &str) -> String {
         .collect()
 }
 
-/// Severity badge — shields for the summary table; monospace in tight lists.
+/// Severity badge — text label + themed shield (not color-only).
 pub fn severity_badge(severity: &str) -> String {
     match severity {
-        "blocking" => shield("sev", "blocking", "e11d48"),
-        "warning" => shield("sev", "warning", "f59e0b"),
-        _ => shield("sev", "info", "64748b"),
+        "blocking" => format!("`BLOCKER` {}", shield("sev", "blocking", COLOR_HOLD)),
+        "warning" => format!("`HIGH` {}", shield("sev", "warning", COLOR_REVIEW)),
+        _ => format!("`ADVISORY` {}", shield("sev", "info", COLOR_INFO)),
     }
 }
 
 pub fn ask_header() -> String {
-    format!(
-        "### {} Codasaurus ask\n",
-        shield("codasaurus", "ask", "0ea5e9")
-    )
+    format!("### {} ask\n", shield("codasaurus", "ask", COLOR_ACCENT))
 }
 
 /// Short fingerprint for display (first 12 hex chars).
@@ -66,7 +71,7 @@ pub fn commands_details() -> String {
         .into()
 }
 
-/// Inline finding comment — scannable, actionable, dismissable.
+/// Inline finding comment — location is the thread; body = impact + action.
 pub fn inline_finding_comment(f: &Finding) -> String {
     let badge = severity_badge(f.severity);
     let title = finding_title(f);
@@ -82,9 +87,9 @@ pub fn inline_finding_comment(f: &Finding) -> String {
     };
     let mut body = format!(
         "{badge} **{title}**\n\n\
-         {why}\n\n\
-         **Fix:** {action}\n\n\
-         <details>\n<summary>Provenance</summary>\n\n{provenance}\n\n</details>\n\n\
+         **Impact:** {why}\n\n\
+         **Action:** {action}\n\n\
+         <details>\n<summary>Evidence</summary>\n\n{provenance}\n\n</details>\n\n\
          ---\n\
          <sub><code>fingerprint: {fp}</code> · <code>@codasaurus ignore {fp}</code>{fix_cta} · 👎 to dismiss</sub>"
     );
@@ -197,6 +202,37 @@ pub struct WalkthroughExtras<'a> {
     pub agent_badge: Option<&'a str>,
     pub blast_md: &'a str,
     pub dep_delta_md: &'a str,
+    /// Canonical public origin (`https://host`) for `/branding/review-banner.svg`.
+    pub public_base_url: Option<&'a str>,
+}
+
+/// Overview header: optional hosted banner + themed verdict badges.
+fn write_review_header(
+    body: &mut String,
+    public_base_url: Option<&str>,
+    verdict_label: &str,
+    verdict_color: &str,
+    verdict_detail: &str,
+    counts_badge: &str,
+) {
+    // Stable slot marker for idempotent updates / tooling.
+    let _ = writeln!(body, "<!-- codasaurus:overview:v1 -->\n");
+    if let Some(base) = public_base_url.map(str::trim).filter(|s| !s.is_empty()) {
+        let base = base.trim_end_matches('/');
+        let _ = writeln!(
+            body,
+            "<img src=\"{base}/branding/review-banner.svg\" alt=\"Codasaurus\" width=\"720\" />\n"
+        );
+    } else {
+        let _ = writeln!(
+            body,
+            "## {} Codasaurus\n",
+            shield("codasaurus", "review", LABEL_COLOR)
+        );
+    }
+    let verdict_badge = shield("verdict", verdict_label, verdict_color);
+    let _ = writeln!(body, "{verdict_badge} {counts_badge}\n");
+    let _ = writeln!(body, "**{verdict_detail}**\n");
 }
 
 /// Build the main walkthrough / summary comment body.
@@ -252,41 +288,44 @@ pub fn walkthrough_body_ext(
     let total = findings.findings.len();
 
     let (verdict_label, verdict_color, verdict_detail) = if findings.is_empty() {
-        ("ship", "22c55e", "No findings — ready to merge.")
+        ("ship", COLOR_SHIP, "No findings — ready to merge.")
     } else if has_blocking {
         (
             "hold",
-            "e11d48",
+            COLOR_HOLD,
             "Blocking findings must be fixed or dismissed.",
         )
     } else {
         (
             "review",
-            "f59e0b",
+            COLOR_REVIEW,
             "Non-blocking findings remain — see inline comments.",
         )
     };
 
     let mut body = String::with_capacity(2048);
 
-    let brand = shield("codasaurus", "review", "111827");
-    let verdict_badge = shield("verdict", verdict_label, verdict_color);
     let counts_msg = format!("{blocking}b/{warning}w/{info}i");
     let counts_badge = shield(
         "findings",
         &counts_msg,
         if blocking > 0 {
-            "e11d48"
+            COLOR_HOLD
         } else if warning > 0 {
-            "f59e0b"
+            COLOR_REVIEW
         } else {
-            "22c55e"
+            COLOR_SHIP
         },
     );
 
-    let _ = writeln!(body, "## {brand} Codasaurus Review\n");
-    let _ = writeln!(body, "{verdict_badge} {counts_badge}\n");
-    let _ = writeln!(body, "**{verdict_detail}**\n");
+    write_review_header(
+        &mut body,
+        extras.public_base_url,
+        verdict_label,
+        verdict_color,
+        verdict_detail,
+        &counts_badge,
+    );
     if let Some(badge) = extras.agent_badge {
         let _ = writeln!(body, "{badge}\n");
     }
@@ -311,9 +350,13 @@ pub fn walkthrough_body_ext(
         if files.len() == 1 { "" } else { "s" },
     );
     if total > 0 {
-        let _ = writeln!(body, "**Inline comments:** {total} on the diff\n");
+        let _ = writeln!(
+            body,
+            "**Actionable inline comments:** {total} (high-signal only)\n"
+        );
     }
 
+    // Mermaid only when it adds structure (2+ areas).
     if include_mermaid {
         if let Some(diagram) = mermaid_change_flow(files) {
             let _ = writeln!(body, "<details>\n<summary>Change map</summary>\n");
@@ -473,21 +516,22 @@ fn walkthrough_prose(
     s
 }
 
-/// Clean APPROVE body with optional novelty sections (agent / blast / dep-delta).
+/// Clean / ship walkthrough when there are no findings (no APPROVE review event).
 pub fn clean_approve_body_ext(
     agent_badge: Option<&str>,
     blast_md: &str,
     dep_delta_md: &str,
+    public_base_url: Option<&str>,
 ) -> String {
     let mut body = String::new();
-    let brand = shield("codasaurus", "review", "111827");
-    let verdict = shield("verdict", "ship", "22c55e");
-    let findings = shield("findings", "0b/0w/0i", "22c55e");
-    let _ = writeln!(body, "## {brand} Codasaurus Review\n");
-    let _ = writeln!(body, "{verdict} {findings}\n");
-    let _ = writeln!(
-        body,
-        "**No findings — ready to merge.** Tier-1 detectors found nothing to block.\n"
+    let findings = shield("findings", "0b/0w/0i", COLOR_SHIP);
+    write_review_header(
+        &mut body,
+        public_base_url,
+        "ship",
+        COLOR_SHIP,
+        "No findings — ready to merge. Detectors found nothing to block.",
+        &findings,
     );
     if let Some(badge) = agent_badge.filter(|s| !s.is_empty()) {
         body.push_str(badge);
@@ -514,7 +558,7 @@ pub fn clean_approve_body_ext(
 }
 
 pub fn help_body() -> String {
-    let brand = shield("codasaurus", "commands", "8b5cf6");
+    let brand = shield("codasaurus", "commands", COLOR_ACCENT);
     format!(
         "### {brand} Codasaurus commands\n\n\
          GitHub Apps **cannot be @-mentioned** like a user. Type the text literally:\n\n\
@@ -666,7 +710,7 @@ fn area_change_summary(area: &str, entries: &[(&str, &str)]) -> String {
     }
 }
 
-/// Mermaid change-map of top path prefixes (GitHub renders natively; no LLM).
+/// Mermaid change-map when 2+ top-level areas (skip trivial single-area PRs).
 fn mermaid_change_flow(files: &[serde_json::Value]) -> Option<String> {
     use std::collections::BTreeMap;
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
@@ -688,14 +732,13 @@ fn mermaid_change_flow(files: &[serde_json::Value]) -> Option<String> {
         }
         *counts.entry(top).or_default() += 1;
     }
-    if counts.is_empty() {
+    if counts.len() < 2 {
         return None;
     }
     let mut nodes: Vec<(String, usize)> = counts.into_iter().collect();
     nodes.sort_by(|a, b| b.1.cmp(&a.1));
     nodes.truncate(8);
 
-    // Top-down map reads better in the walkthrough than a left-to-right chain.
     let mut out = String::from("flowchart TB\n  PR[Pull request] --> Review[Codasaurus]\n");
     for (i, (name, n)) in nodes.iter().enumerate() {
         let id = format!("N{i}");
@@ -757,7 +800,9 @@ mod tests {
         };
         let body = inline_finding_comment(&f);
         assert!(body.contains("<details>"));
-        assert!(body.contains("Provenance"));
+        assert!(body.contains("Evidence"));
+        assert!(body.contains("**Impact:**"));
+        assert!(body.contains("**Action:**"));
         assert!(body.contains("@codasaurus ignore"));
     }
 
@@ -803,13 +848,42 @@ mod tests {
         assert!(body.contains("## Walkthrough"));
         assert!(body.contains("## Changes"));
         assert!(body.contains("## Review effort"));
-        assert!(body.contains("Inline comments:"));
+        assert!(body.contains("Actionable inline comments:"));
+        assert!(body.contains("<!-- codasaurus:overview:v1 -->"));
         assert!(body.contains("<summary>Pre-merge checks"));
         // Findings belong on inline comments — not listed in the walkthrough.
         assert!(!body.contains("**Findings**"));
         assert!(!body.contains("| Sev |"));
         assert!(!body.contains("| Area |"));
         assert!(body.contains("0b%2F1w%2F0i") || body.contains("1w"));
+        // Banner when PUBLIC_URL / extras.public_base_url is set.
+        let with_banner = walkthrough_body_ext(
+            &findings,
+            false,
+            "Stop stacking comments",
+            &files,
+            &[],
+            &config,
+            &runtime,
+            false,
+            true,
+            WalkthroughExtras {
+                public_base_url: Some("https://codasaurus.example"),
+                ..Default::default()
+            },
+        );
+        assert!(with_banner.contains(
+            "https://codasaurus.example/branding/review-banner.svg"
+        ));
+    }
+
+    #[test]
+    fn mermaid_skips_single_area() {
+        let files = vec![
+            serde_json::json!({"filename": "src/a.rs"}),
+            serde_json::json!({"filename": "src/b.rs"}),
+        ];
+        assert!(mermaid_change_flow(&files).is_none());
     }
 
     #[test]

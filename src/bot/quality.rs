@@ -13,9 +13,10 @@ pub struct SignalBudget {
 impl Default for SignalBudget {
     fn default() -> Self {
         Self {
-            max_blocking: 20,
-            max_warning: 8,
-            max_info: 3,
+            max_blocking: 12,
+            max_warning: 5,
+            // Advisory/info stays out of inline threads (walkthrough counts only).
+            max_info: 0,
         }
     }
 }

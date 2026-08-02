@@ -24,8 +24,6 @@ pub struct ReviewOptions {
     pub force_draft: bool,
     /// Bypass completed same-SHA claim (slash `@codasaurus review`).
     pub force_rereview: bool,
-    /// POST a GitHub APPROVE review event (skip on synchronize to avoid APPROVE spam).
-    pub post_approve_event: bool,
 }
 
 impl Default for ReviewOptions {
@@ -35,9 +33,28 @@ impl Default for ReviewOptions {
             auto_review_diff: true,
             force_draft: false,
             force_rereview: false,
-            post_approve_event: true,
         }
     }
+}
+
+/// Public origin for hosted walkthrough assets (`/branding/review-banner.svg`).
+async fn public_base_url(pool: Option<&crate::db::DbPool>) -> Option<String> {
+    if let Some(pool) = pool {
+        if let Ok(Some(url)) = crate::db::config::get_config(pool, "public_url").await {
+            let t = url.trim();
+            if !t.is_empty() {
+                return Some(t.trim_end_matches('/').to_string());
+            }
+        }
+    }
+    std::env::var("PUBLIC_URL").ok().and_then(|u| {
+        let t = u.trim();
+        if t.is_empty() {
+            None
+        } else {
+            Some(t.trim_end_matches('/').to_string())
+        }
+    })
 }
 
 pub async fn review_pr_with_options(
@@ -740,12 +757,14 @@ pub async fn review_pr_with_options(
         review_comments.push(comment);
     }
 
-    // Only approve when there are genuinely no findings.
+    // Only ship walkthrough when there are genuinely no findings (no APPROVE).
     if findings.is_empty() {
+        let public_base = public_base_url(pool).await;
         let body = crate::bot::markdown::clean_approve_body_ext(
             agent_badge_owned.as_deref(),
             &blast_md,
             &dep_delta_md,
+            public_base.as_deref(),
         );
         // Canonical summary is an issue comment we update in place on each push.
         post_or_update_comment(
@@ -758,42 +777,6 @@ pub async fn review_pr_with_options(
             "walkthrough",
         )
         .await?;
-        // Avoid stacking APPROVE reviews on every synchronize — only on open/reopen
-        // (or slash force). Walkthrough update above is the durable signal.
-        if options.post_approve_event {
-            let sha_short = head_sha.get(..7).unwrap_or(head_sha);
-            let review = serde_json::json!({
-                "body": format!(
-                    "### Codasaurus\n\nLooks good on `{sha_short}` — summary comment updated."
-                ),
-                "event": "APPROVE"
-            });
-            let approve_url =
-                format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews");
-            let _: serde_json::Value = retry_async(
-                &RetryConfig::api_default(),
-                "approve_review",
-                &is_reqwest_error_retryable,
-                || async {
-                    client
-                        .post(&approve_url)
-                        .header("Authorization", &auth_header)
-                        .header("Accept", "application/vnd.github+json")
-                        .header(
-                            "User-Agent",
-                            concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
-                        )
-                        .json(&review)
-                        .send()
-                        .await?
-                        .error_for_status()?
-                        .json()
-                        .await
-                        .map_err(Into::into)
-                },
-            )
-            .await?;
-        }
         if !head_sha.is_empty() {
             if let Some(ref s) = state {
                 if let Err(e) = s
@@ -849,12 +832,14 @@ pub async fn review_pr_with_options(
         return Ok(());
     }
 
+    let public_base = public_base_url(pool).await;
     let walkthrough_extras = crate::bot::markdown::WalkthroughExtras {
         related_prs: &related_prs,
         issue_assessment_md: &issue_assessment_md,
         agent_badge: agent_badge_owned.as_deref(),
         blast_md: &blast_md,
         dep_delta_md: &dep_delta_md,
+        public_base_url: public_base.as_deref(),
     };
 
     let body = crate::bot::markdown::walkthrough_body_ext(

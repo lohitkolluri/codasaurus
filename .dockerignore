@@ -22,10 +22,11 @@ Makefile
 # Docs (not needed at build time)
 *.md
 docs/
-# Keep bundled brand mark for include_bytes! (`/branding/logo.png`); skip source SVGs only.
+# Keep bundled brand assets for include_bytes! (`/branding/*`); skip design sources.
 assets/sources/
 assets/ATTRIBUTION.md
 assets/*.svg
+!assets/review-banner.svg
 
 # Secrets
 .env

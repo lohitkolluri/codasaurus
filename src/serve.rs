@@ -182,8 +182,9 @@ fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> 
         .merge(api)
         .route("/health", get(health_handler))
         .route("/health/ready", get(ready_handler))
-        // Bundled logo for post-wizard GitHub App badge upload (manifest cannot set icons).
+        // Bundled branding assets for App badge upload and PR walkthrough banner.
         .route("/branding/logo.png", get(branding_logo_png))
+        .route("/branding/review-banner.svg", get(branding_review_banner_svg))
         .route("/webhook", webhook_handler.clone())
         .route("/webhook/", webhook_handler);
 
@@ -460,6 +461,18 @@ async fn branding_logo_png() -> impl IntoResponse {
             (header::CACHE_CONTROL, "public, max-age=86400"),
         ],
         PNG,
+    )
+}
+
+/// Walkthrough banner (hotlinked from PR comments when `PUBLIC_URL` is set).
+async fn branding_review_banner_svg() -> impl IntoResponse {
+    const SVG: &[u8] = include_bytes!("../assets/review-banner.svg");
+    (
+        [
+            (header::CONTENT_TYPE, "image/svg+xml; charset=utf-8"),
+            (header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        SVG,
     )
 }
 
