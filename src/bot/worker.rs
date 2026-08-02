@@ -39,7 +39,10 @@ pub fn start_review_worker(pool: crate::db::DbPool) {
             tracing::info!(worker_id, "review queue worker started");
             let mut idle_ticks: u64 = 0;
             loop {
-                match queue::claim_next(&pool, 600).await {
+                let timeout_secs = BotRuntimeConfig::default().review_timeout_secs;
+                // Must exceed review timeout or a second worker reclaims mid-run.
+                let stale_secs = (timeout_secs as i64).saturating_add(120).max(600);
+                match queue::claim_next(&pool, stale_secs).await {
                     Ok(Some(job)) => {
                         idle_ticks = 0;
                         let Some(cfg) = current_bot_config() else {
@@ -70,7 +73,6 @@ pub fn start_review_worker(pool: crate::db::DbPool) {
                             tokio::time::sleep(Duration::from_secs(10)).await;
                             continue;
                         }
-                        let timeout_secs = BotRuntimeConfig::default().review_timeout_secs;
                         process_queued_review(
                             &cfg,
                             job.id,
@@ -127,12 +129,15 @@ async fn process_queued_review(
     let _guard = lock.lock().await;
     let started = std::time::Instant::now();
 
-    // Walkthrough already lives in the PR review body — a second nearly-identical
-    // "describe" comment made it look like Codasaurus posted two reviews.
+    // Walkthrough is an issue comment updated in place. Skip APPROVE spam on
+    // synchronize; keep APPROVE for open/reopen/ready_for_review.
+    let post_approve = matches!(_action, "opened" | "reopened" | "ready_for_review" | "");
     let opts = ReviewOptions {
         auto_describe: false,
         auto_review_diff: true,
         force_draft: false,
+        force_rereview: false,
+        post_approve_event: post_approve,
     };
 
     let result = timeout(Duration::from_secs(timeout_secs), async {
@@ -203,10 +208,16 @@ pub(crate) async fn run_webhook_review_inline(
     let lock = pr_lock(&repo_full_name, pr_number).await;
     let _guard = lock.lock().await;
     let started = std::time::Instant::now();
+    let post_approve = matches!(
+        _action.as_str(),
+        "opened" | "reopened" | "ready_for_review" | ""
+    );
     let opts = ReviewOptions {
         auto_describe: false,
         auto_review_diff: true,
         force_draft: false,
+        force_rereview: false,
+        post_approve_event: post_approve,
     };
     let repo_for_claim = repo_full_name.clone();
     let sha_for_claim = head_sha.clone();

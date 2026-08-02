@@ -14,14 +14,30 @@ use super::persist::save_review_to_db;
 use super::reviewers::{suggest_reviewers, MAX_REVIEWER_FILES};
 
 /// Options for a single review invocation (webhook vs slash-command).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ReviewOptions {
-    /// Post a describe-style comment (typically on opened / reopened).
+    /// Legacy: second describe comment (kept off — walkthrough covers open).
     pub auto_describe: bool,
     /// Run LLM `review_diff` when PR size is under budget.
     pub auto_review_diff: bool,
     /// Review draft PRs (slash `/review` and similar).
     pub force_draft: bool,
+    /// Bypass completed same-SHA claim (slash `@codasaurus review`).
+    pub force_rereview: bool,
+    /// POST a GitHub APPROVE review event (skip on synchronize to avoid APPROVE spam).
+    pub post_approve_event: bool,
+}
+
+impl Default for ReviewOptions {
+    fn default() -> Self {
+        Self {
+            auto_describe: false,
+            auto_review_diff: true,
+            force_draft: false,
+            force_rereview: false,
+            post_approve_event: true,
+        }
+    }
 }
 
 pub async fn review_pr_with_options(
@@ -70,7 +86,12 @@ pub async fn review_pr_with_options(
     // Claim SHA at start to close TOCTOU race between concurrent workers
     if !head_sha.is_empty() {
         if let Some(ref s) = state {
-            match s.try_claim_sha(repo_name, pr_number, head_sha).await {
+            let claimed = if options.force_rereview {
+                s.force_claim_sha(repo_name, pr_number, head_sha).await
+            } else {
+                s.try_claim_sha(repo_name, pr_number, head_sha).await
+            };
+            match claimed {
                 Ok(false) => {
                     tracing::info!(
                         repo = repo_name,
@@ -78,6 +99,26 @@ pub async fn review_pr_with_options(
                         sha = head_sha,
                         "skipping already-claimed SHA"
                     );
+                    let sha_short = head_sha.get(..7).unwrap_or(head_sha);
+                    let notice = format!(
+                        "### Codasaurus\n\n\
+                         Already reviewed `{sha_short}` — skipping duplicate work.\n\n\
+                         Push a new commit, or comment `@codasaurus review` to force a re-run."
+                    );
+                    let auth_header = format!("Bearer {token}");
+                    let client = GITHUB_CLIENT.as_ref().ok_or_else(|| {
+                        anyhow::anyhow!("GitHub API client not available (failed to initialize)")
+                    })?;
+                    let _ = post_or_update_comment(
+                        client,
+                        &auth_header,
+                        repo_name,
+                        pr_number,
+                        &notice,
+                        &state,
+                        "status",
+                    )
+                    .await;
                     return Ok(());
                 }
                 Ok(true) => {}
@@ -234,7 +275,7 @@ pub async fn review_pr_with_options(
             let parsed = match crate::parser::parse_unified_diff(filename, patch) {
                 Ok(p) => Some(p),
                 Err(e) => {
-                    eprintln!("Warning: failed to parse file {filename}: {e}");
+                    tracing::warn!(file = %filename, error = %e, "failed to parse file");
                     None
                 }
             };
@@ -717,45 +758,49 @@ pub async fn review_pr_with_options(
             "walkthrough",
         )
         .await?;
-        let sha_short = head_sha.get(..7).unwrap_or(head_sha);
-        let review = serde_json::json!({
-            "body": format!(
-                "### Codasaurus\n\nLooks good on `{sha_short}` — summary comment updated."
-            ),
-            "event": "APPROVE"
-        });
-        let approve_url =
-            format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews");
-        let _: serde_json::Value = retry_async(
-            &RetryConfig::api_default(),
-            "approve_review",
-            &is_reqwest_error_retryable,
-            || async {
-                client
-                    .post(&approve_url)
-                    .header("Authorization", &auth_header)
-                    .header("Accept", "application/vnd.github+json")
-                    .header(
-                        "User-Agent",
-                        concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
-                    )
-                    .json(&review)
-                    .send()
-                    .await?
-                    .error_for_status()?
-                    .json()
-                    .await
-                    .map_err(Into::into)
-            },
-        )
-        .await?;
+        // Avoid stacking APPROVE reviews on every synchronize — only on open/reopen
+        // (or slash force). Walkthrough update above is the durable signal.
+        if options.post_approve_event {
+            let sha_short = head_sha.get(..7).unwrap_or(head_sha);
+            let review = serde_json::json!({
+                "body": format!(
+                    "### Codasaurus\n\nLooks good on `{sha_short}` — summary comment updated."
+                ),
+                "event": "APPROVE"
+            });
+            let approve_url =
+                format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews");
+            let _: serde_json::Value = retry_async(
+                &RetryConfig::api_default(),
+                "approve_review",
+                &is_reqwest_error_retryable,
+                || async {
+                    client
+                        .post(&approve_url)
+                        .header("Authorization", &auth_header)
+                        .header("Accept", "application/vnd.github+json")
+                        .header(
+                            "User-Agent",
+                            concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+                        )
+                        .json(&review)
+                        .send()
+                        .await?
+                        .error_for_status()?
+                        .json()
+                        .await
+                        .map_err(Into::into)
+                },
+            )
+            .await?;
+        }
         if !head_sha.is_empty() {
             if let Some(ref s) = state {
                 if let Err(e) = s
                     .set_reviewed_sha_async(repo_name, pr_number, head_sha)
                     .await
                 {
-                    eprintln!("Warning: failed to store reviewed SHA: {e}");
+                    tracing::warn!(error = %e, "failed to store reviewed SHA");
                 };
             }
         }
@@ -902,7 +947,7 @@ pub async fn review_pr_with_options(
                 .set_reviewed_sha_async(repo_name, pr_number, head_sha)
                 .await
             {
-                eprintln!("Warning: failed to store reviewed SHA: {e}");
+                tracing::warn!(error = %e, "failed to store reviewed SHA");
             };
         }
     }
@@ -1005,43 +1050,8 @@ pub async fn review_pr_with_options(
         }
     }
 
-    // Phase 1: auto-describe on opened/reopened (separate comment slot).
-    if options.auto_describe {
-        let describe = crate::bot::markdown::walkthrough_body_ext(
-            &findings,
-            has_blocking,
-            &pr_title,
-            &files,
-            &reviewers,
-            &config,
-            &runtime,
-            true,
-            true,
-            crate::bot::markdown::WalkthroughExtras {
-                related_prs: &related_prs,
-                issue_assessment_md: &issue_assessment_md,
-                agent_badge: agent_badge_owned.as_deref(),
-                blast_md: &blast_md,
-                dep_delta_md: &dep_delta_md,
-            },
-        );
-        let describe_body = describe
-            .replacen("Codasaurus Review", "Codasaurus Describe", 1)
-            .replacen("### Codasaurus review", "### Codasaurus describe", 1);
-        if let Err(e) = post_or_update_comment(
-            client,
-            &auth_header,
-            repo_name,
-            pr_number,
-            &describe_body,
-            &state,
-            "describe",
-        )
-        .await
-        {
-            tracing::warn!(error = %e, "auto-describe comment failed");
-        }
-    }
+    // auto_describe intentionally unused: the walkthrough issue-comment slot already
+    // covers open/synchronize. `@codasaurus describe` posts a short LLM summary instead.
 
     Ok(())
 }

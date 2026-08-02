@@ -136,45 +136,58 @@ pub(crate) async fn post_or_update_comment(
     let headers = github_api_headers(auth_header)?;
 
     if let Some(ref s) = state {
-        if let Ok(Some(comment_id)) = s.get_comment_id_async(repo_name, pr_number, kind).await {
-            let update_url =
-                format!("https://api.github.com/repos/{repo_name}/issues/comments/{comment_id}");
-            match retry_async(
-                &RetryConfig::api_default(),
-                "update_comment",
-                &is_reqwest_error_retryable,
-                || async {
-                    client
-                        .patch(&update_url)
-                        .headers(headers.clone())
-                        .json(&serde_json::json!({"body": body}))
-                        .send()
-                        .await
-                        .map_err(Into::into)
-                },
-            )
-            .await
-            {
-                Ok(resp) if resp.status().is_success() => {
-                    tracing::info!(%kind, comment_id, "updated existing PR comment in place");
-                    return Ok(comment_id);
+        match s.get_comment_id_async(repo_name, pr_number, kind).await {
+            Ok(Some(comment_id)) => {
+                let update_url = format!(
+                    "https://api.github.com/repos/{repo_name}/issues/comments/{comment_id}"
+                );
+                match retry_async(
+                    &RetryConfig::api_default(),
+                    "update_comment",
+                    &is_reqwest_error_retryable,
+                    || async {
+                        client
+                            .patch(&update_url)
+                            .headers(headers.clone())
+                            .json(&serde_json::json!({"body": body}))
+                            .send()
+                            .await
+                            .map_err(Into::into)
+                    },
+                )
+                .await
+                {
+                    Ok(resp) if resp.status().is_success() => {
+                        tracing::info!(%kind, comment_id, "updated existing PR comment in place");
+                        return Ok(comment_id);
+                    }
+                    Ok(resp) => {
+                        tracing::warn!(
+                            %kind,
+                            comment_id,
+                            status = %resp.status(),
+                            "failed to update comment — posting a new one"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            %kind,
+                            comment_id,
+                            error = %e,
+                            "failed to update comment — posting a new one"
+                        );
+                    }
                 }
-                Ok(resp) => {
-                    tracing::warn!(
-                        %kind,
-                        comment_id,
-                        status = %resp.status(),
-                        "failed to update comment — posting a new one"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        %kind,
-                        comment_id,
-                        error = %e,
-                        "failed to update comment — posting a new one"
-                    );
-                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                // Do not treat DB failure as "no slot" silently — log so operators notice
+                // duplicate comments when persistence is down.
+                tracing::warn!(
+                    %kind,
+                    error = %e,
+                    "failed to load comment slot; posting a new comment"
+                );
             }
         }
     }
@@ -205,7 +218,7 @@ pub(crate) async fn post_or_update_comment(
                 .set_comment_id_async(repo_name, pr_number, kind, comment_id)
                 .await
             {
-                eprintln!("Warning: failed to store comment ID: {e}");
+                tracing::warn!(%kind, comment_id, error = %e, "failed to store comment ID");
             }
         }
     }

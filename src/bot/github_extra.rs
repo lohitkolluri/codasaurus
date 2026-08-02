@@ -139,23 +139,64 @@ pub async fn create_findings_check_run(
         summary.push_str(&extra);
     }
 
+    let title = if blocking > 0 {
+        format!("{blocking} blocking issue(s)")
+    } else if warning > 0 {
+        format!("{warning} warning(s)")
+    } else {
+        "No blocking issues".into()
+    };
+    let output = serde_json::json!({
+        "title": title,
+        "summary": summary,
+        "annotations": annotations,
+    });
+
+    // Prefer updating an existing Codasaurus check on this SHA (force re-review /
+    // duplicate deliveries) instead of stacking another completed run.
+    if let Some(check_run_id) = find_codasaurus_check_run_id(client, headers, repo, head_sha).await
+    {
+        let update_url = format!("https://api.github.com/repos/{repo}/check-runs/{check_run_id}");
+        let update_body = serde_json::json!({
+            "status": "completed",
+            "conclusion": conclusion,
+            "output": output,
+        });
+        let resp = retry_async(
+            &RetryConfig::api_default(),
+            "update_check_run",
+            &is_reqwest_error_retryable,
+            || async {
+                client
+                    .patch(&update_url)
+                    .headers(headers.clone())
+                    .header("User-Agent", USER_AGENT)
+                    .header("Accept", "application/vnd.github+json")
+                    .json(&update_body)
+                    .send()
+                    .await
+                    .map_err(Into::into)
+            },
+        )
+        .await?;
+        if resp.status().is_success() {
+            tracing::info!(check_run_id, "updated existing Codasaurus check run");
+            return Ok(());
+        }
+        tracing::warn!(
+            check_run_id,
+            status = %resp.status(),
+            "failed to update check run — creating a new one"
+        );
+    }
+
     let url = format!("https://api.github.com/repos/{repo}/check-runs");
     let body = serde_json::json!({
         "name": "Codasaurus",
         "head_sha": head_sha,
         "status": "completed",
         "conclusion": conclusion,
-        "output": {
-            "title": if blocking > 0 {
-                format!("{blocking} blocking issue(s)")
-            } else if warning > 0 {
-                format!("{warning} warning(s)")
-            } else {
-                "No blocking issues".into()
-            },
-            "summary": summary,
-            "annotations": annotations,
-        },
+        "output": output,
     });
 
     let resp = retry_async(
@@ -182,6 +223,42 @@ pub async fn create_findings_check_run(
         tracing::warn!(%status, body = %text.chars().take(240).collect::<String>(), "create_check_run failed (need Checks: write?)");
     }
     Ok(())
+}
+
+async fn find_codasaurus_check_run_id(
+    client: &reqwest::Client,
+    headers: &HeaderMap,
+    repo: &str,
+    head_sha: &str,
+) -> Option<i64> {
+    let url =
+        format!("https://api.github.com/repos/{repo}/commits/{head_sha}/check-runs?per_page=20");
+    let resp = retry_async(
+        &RetryConfig::api_default(),
+        "list_check_runs",
+        &is_reqwest_error_retryable,
+        || async {
+            client
+                .get(&url)
+                .headers(headers.clone())
+                .header("User-Agent", USER_AGENT)
+                .header("Accept", "application/vnd.github+json")
+                .send()
+                .await
+                .map_err(Into::into)
+        },
+    )
+    .await
+    .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let v: serde_json::Value = resp.json().await.ok()?;
+    v["check_runs"]
+        .as_array()?
+        .iter()
+        .find(|c| c["name"].as_str() == Some("Codasaurus"))
+        .and_then(|c| c["id"].as_i64())
 }
 
 /// Apply suggested labels to a PR (issues API). Creates missing labels when possible.

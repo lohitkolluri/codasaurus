@@ -34,6 +34,10 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 ### Changed
 
 - Related / similar PRs: sample high-signal source paths (skip changelog/docs/lockfile noise), rank by overlap strength instead of GitHub file-list order.
+- Durable `@codasaurus` command replies (describe, summarize, improve, ask, …) update their issue-comment slots in place instead of stacking new posts.
+- Clean-PR `APPROVE` reviews only on open/reopen/ready (not every synchronize); Check Runs update in place on the same SHA.
+- `@codasaurus review` force-reclaims the head SHA so same-commit re-runs are not silently skipped.
+- Repo settings: removed no-op “Auto-describe on open” (walkthrough already covers open/push).
 - Settings → System clarifies that Offline mode is a kill-switch (not tied to LLM keys) and shows when `CODASAURUS_OFFLINE` env forces it.
 - Settings tabs sync to the URL (`/app/settings/llm|review|…`) so deep links stay accurate.
 - Agent-authored PR badge reasons are generic (no vendor product names in walkthrough copy).
@@ -57,6 +61,8 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 ### Fixed
 
 - Walkthrough summary is always updated in place on new commits (issue-comment slot); PR Reviews only carry short bodies + inlines — no longer a full duplicate walkthrough per push.
+- Queue / SHA stale reclaim window tracks review timeout (+120s) so a second worker cannot steal a still-running job.
+- Same-SHA skip now posts a short status comment explaining how to force a re-run.
 - Docker image build failed: `.dockerignore` excluded `assets/logo.png` required by `include_bytes!` for `/branding/logo.png`.
 - Runtime GitHub App auth now accepts raw `GITHUB_APP_PRIVATE_KEY` everywhere (not only `*_B64`).
 - Hallucinated-import suggestions link to real registry URLs (npmjs / PyPI / crates.io).

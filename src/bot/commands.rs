@@ -222,6 +222,31 @@ pub(crate) async fn handle_bot_command(
 }
 
 async fn post_issue_comment(token: &str, repo: &str, pr: i64, body: &str) -> anyhow::Result<()> {
+    post_issue_comment_kind(token, repo, pr, body, None).await
+}
+
+/// When `kind` is set, update the existing slot in place (same policy as walkthrough).
+async fn post_issue_comment_kind(
+    token: &str,
+    repo: &str,
+    pr: i64,
+    body: &str,
+    kind: Option<&str>,
+) -> anyhow::Result<()> {
+    if let Some(kind) = kind {
+        if let Some(pool) = bot_db_pool() {
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()?;
+            let state = Some(crate::state::ReviewState::from_pool(pool));
+            let auth = format!("Bearer {token}");
+            crate::bot::review::post_or_update_comment(
+                &client, &auth, repo, pr, body, &state, kind,
+            )
+            .await?;
+            return Ok(());
+        }
+    }
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()?;
@@ -292,7 +317,14 @@ async fn spawn_describe(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) 
                 crate::bot::markdown::commands_details()
             )
         };
-        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await?;
+        post_issue_comment_kind(
+            &token,
+            &ctx.repo_full_name,
+            pr_number,
+            &text,
+            Some("describe"),
+        )
+        .await?;
 
         let mut update_body = false;
         if let Some(pool) = pool {
@@ -401,11 +433,12 @@ async fn spawn_improve(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
             }
         }
         if diff.is_empty() {
-            post_issue_comment(
+            post_issue_comment_kind(
                 &token,
                 &ctx.repo_full_name,
                 pr_number,
                 "### Codasaurus improve\n\nNo textual diffs available to improve.",
+                Some("improve"),
             )
             .await?;
             return Ok::<_, anyhow::Error>(());
@@ -481,7 +514,14 @@ async fn spawn_improve(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
         }
         text.push('\n');
         text.push_str(&crate::bot::markdown::commands_details());
-        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await?;
+        post_issue_comment_kind(
+            &token,
+            &ctx.repo_full_name,
+            pr_number,
+            &text,
+            Some("improve"),
+        )
+        .await?;
         Ok(())
     })
     .await;
@@ -523,7 +563,8 @@ async fn spawn_ask(ctx: WebhookContext, pr_number: i64, question: String, timeou
             crate::bot::markdown::ask_header(),
             crate::bot::markdown::commands_details()
         );
-        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
+        // Last ask updates in place; each new question replaces the prior answer.
+        post_issue_comment_kind(&token, &ctx.repo_full_name, pr_number, &text, Some("ask")).await
     })
     .await;
 }
@@ -594,7 +635,7 @@ async fn spawn_summarize(ctx: WebhookContext, pr_number: i64, timeout_secs: u64)
                 body.chars().take(600).collect::<String>()
             )
         };
-        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
+        post_issue_comment_kind(&token, &ctx.repo_full_name, pr_number, &text, Some("llm_summary")).await
     })
     .await;
 }
@@ -652,7 +693,14 @@ async fn spawn_labels(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
                     .join("\n")
             }
         );
-        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
+        post_issue_comment_kind(
+            &token,
+            &ctx.repo_full_name,
+            pr_number,
+            &text,
+            Some("labels"),
+        )
+        .await
     })
     .await;
 }
@@ -733,7 +781,14 @@ async fn spawn_changelog(ctx: WebhookContext, pr_number: i64, timeout_secs: u64)
         let text = format!(
             "### Codasaurus changelog\n\n{sections}\n\n<details>\n<summary><strong>Files</strong></summary>\n\n{file_list}\n\n</details>\n\n<sub>Draft only — paste into CHANGELOG.md as needed.</sub>"
         );
-        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
+        post_issue_comment_kind(
+            &token,
+            &ctx.repo_full_name,
+            pr_number,
+            &text,
+            Some("changelog"),
+        )
+        .await
     })
     .await;
 }
@@ -815,7 +870,14 @@ async fn spawn_add_docs(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) 
                  > Configure an LLM key for drafted README/docs stubs.\n"
             )
         };
-        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
+        post_issue_comment_kind(
+            &token,
+            &ctx.repo_full_name,
+            pr_number,
+            &text,
+            Some("add_docs"),
+        )
+        .await
     })
     .await;
 }
@@ -921,7 +983,14 @@ async fn spawn_security(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) 
         }
         text.push_str("\n---\n");
         text.push_str(&crate::bot::markdown::commands_details());
-        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
+        post_issue_comment_kind(
+            &token,
+            &ctx.repo_full_name,
+            pr_number,
+            &text,
+            Some("security"),
+        )
+        .await
     })
     .await;
 }
@@ -965,6 +1034,8 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
                 auto_describe: false,
                 auto_review_diff: true,
                 force_draft: true,
+                force_rereview: true,
+                post_approve_event: true,
             },
         )
         .await
@@ -1082,7 +1153,14 @@ async fn spawn_digest(ctx: WebhookContext, pr_number: i64) {
         } else {
             "### Codasaurus digest\n\n> Database unavailable.".into()
         };
-        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &body).await?;
+        post_issue_comment_kind(
+            &token,
+            &ctx.repo_full_name,
+            pr_number,
+            &body,
+            Some("digest"),
+        )
+        .await?;
         Ok::<_, anyhow::Error>(())
     })
     .await
@@ -1169,7 +1247,14 @@ async fn spawn_impact(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
         }
         text.push_str("\n---\n");
         text.push_str(&crate::bot::markdown::commands_details());
-        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await?;
+        post_issue_comment_kind(
+            &token,
+            &ctx.repo_full_name,
+            pr_number,
+            &text,
+            Some("impact"),
+        )
+        .await?;
         Ok::<_, anyhow::Error>(())
     })
     .await
@@ -1228,7 +1313,14 @@ async fn spawn_similar(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
             );
             body
         };
-        post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
+        post_issue_comment_kind(
+            &token,
+            &ctx.repo_full_name,
+            pr_number,
+            &text,
+            Some("similar"),
+        )
+        .await
     })
     .await;
 }

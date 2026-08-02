@@ -18,7 +18,6 @@
 
   let detectors = $state({});
   let llmEnabled = $state(true);
-  let autoDescribe = $state(true);
   let autoReviewDiff = $state(false);
   let autoLabels = $state(true);
   let updatePrDescription = $state(false);
@@ -61,7 +60,6 @@
         detectors = defaults;
       }
       llmEnabled = cfg.llm_enabled ?? true;
-      autoDescribe = cfg.auto_describe ?? true;
       autoReviewDiff = cfg.auto_review_diff ?? false;
       autoLabels = cfg.auto_labels ?? true;
       updatePrDescription = cfg.update_pr_description ?? false;
@@ -86,7 +84,8 @@
         config_json: JSON.stringify({
           detectors,
           llm_enabled: llmEnabled,
-          auto_describe: autoDescribe,
+          // auto_describe removed: walkthrough issue-comment covers open/push.
+          auto_describe: false,
           auto_review_diff: autoReviewDiff,
           auto_labels: autoLabels,
           update_pr_description: updatePrDescription,
@@ -181,16 +180,9 @@
 
     <div class="card static">
       <h3>Automation</h3>
-      <div class="llm-row">
-        <label class="toggle">
-          <div class="toggle-track" class:on={autoDescribe} role="checkbox" aria-checked={autoDescribe}
-            tabindex="0" onclick={() => (autoDescribe = !autoDescribe)}
-            onkeydown={(e) => { if (e.key === 'Enter') autoDescribe = !autoDescribe; }}>
-            <div class="toggle-knob"></div>
-          </div>
-        </label>
-        <span>Auto-describe on open</span>
-      </div>
+      <p class="muted" style="margin: 0 0 0.75rem; font-size: 0.9rem;">
+        Walkthrough updates in place on each push. Use <code>@codasaurus describe</code> for an on-demand LLM summary.
+      </p>
       <div class="llm-row">
         <label class="toggle">
           <div class="toggle-track" class:on={autoReviewDiff} role="checkbox" aria-checked={autoReviewDiff}
