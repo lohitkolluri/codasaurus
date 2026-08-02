@@ -92,26 +92,32 @@ pub fn blast_markdown(report: &BlastReport) -> String {
         60..=84 => "high",
         _ => "critical",
     };
-    let mut out = String::from("#### Blast radius\n\n");
-    out.push_str(&format!(
-        "| Score | Level |\n| ---: | --- |\n| **{}** / 100 | `{level}` |\n\n",
-        report.score
-    ));
-    if !report.high_risk_paths.is_empty() {
-        out.push_str("**High-sensitivity paths touched**\n\n");
-        for p in &report.high_risk_paths {
-            out.push_str(&format!("- `{p}`\n"));
+    let mut out = format!("**Blast radius:** `{level}` ({}/100)", report.score);
+    if let Some(path) = report.high_risk_paths.first() {
+        out.push_str(&format!(" · sensitive: `{path}`"));
+        if report.high_risk_paths.len() > 1 {
+            out.push_str(&format!(" (+{})", report.high_risk_paths.len() - 1));
         }
-        out.push('\n');
     }
-    if !report.fan_in.is_empty() {
-        out.push_str("| Import / module | Importers in this PR |\n| --- | ---: |\n");
-        for (name, n) in report.fan_in.iter().take(8) {
-            out.push_str(&format!("| `{name}` | {n} |\n"));
+    out.push_str("\n\n");
+    if !report.fan_in.is_empty() || report.high_risk_paths.len() > 1 {
+        out.push_str("<details>\n<summary>Blast details</summary>\n\n");
+        if report.high_risk_paths.len() > 1 {
+            out.push_str("High-sensitivity paths:\n\n");
+            for p in &report.high_risk_paths {
+                out.push_str(&format!("- `{p}`\n"));
+            }
+            out.push('\n');
         }
-        out.push('\n');
+        if !report.fan_in.is_empty() {
+            out.push_str("| Import / module | Importers in this PR |\n| --- | ---: |\n");
+            for (name, n) in report.fan_in.iter().take(6) {
+                out.push_str(&format!("| `{name}` | {n} |\n"));
+            }
+            out.push('\n');
+        }
+        out.push_str("<sub>Bounded estimate from PR imports only.</sub>\n\n</details>\n\n");
     }
-    out.push_str("<sub>Bounded estimate from PR imports only — not a full-repo index.</sub>\n\n");
     out
 }
 

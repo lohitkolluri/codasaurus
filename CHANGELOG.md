@@ -33,6 +33,7 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 
 ### Changed
 
+- Review walkthrough is summary-first and collapsed by default (CodeRabbit-style): compact badges, nested Context/diagram, shorter commands footer.
 - Related / similar PRs: sample high-signal source paths (skip changelog/docs/lockfile noise), rank by overlap strength instead of GitHub file-list order.
 - Durable `@codasaurus` command replies (describe, summarize, improve, ask, …) update their issue-comment slots in place instead of stacking new posts.
 - Clean-PR `APPROVE` reviews only on open/reopen/ready (not every synchronize); Check Runs update in place on the same SHA.
