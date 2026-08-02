@@ -748,8 +748,9 @@ pub async fn review_pr_with_options(
 
     // Load prior findings before save_review_to_db so same-SHA re-reviews can delta.
     let progress = load_finding_progress(repo_name, pr_number, &findings).await;
+    let advisory_draft = crate::bot::concern::is_advisory_draft(&findings.findings, has_blocking);
 
-    // Only ship walkthrough when there are genuinely no findings (no APPROVE).
+    // Clean PR: overview only; optional APPROVE (merge still needs a human maintainer).
     if findings.is_empty() {
         let sequence = maybe_sequence_diagram(
             repo_llm_enabled && !low_signal_only,
@@ -779,8 +780,46 @@ pub async fn review_pr_with_options(
             &dep_delta_md,
             sequence.as_deref(),
             progress.as_ref(),
+            false,
         )
         .await?;
+        if repo_flags.auto_approve {
+            let sha_short = head_sha.get(..7).unwrap_or(head_sha);
+            let review_body = serde_json::json!({
+                "body": format!(
+                    "### Codasaurus\n\nCommit `{sha_short}` looks clear on Tier-1 checks. \
+                     A maintainer still needs to merge."
+                ),
+                "event": "APPROVE",
+            });
+            let review_url =
+                format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews");
+            match retry_async(
+                &RetryConfig::api_default(),
+                "post_pr_approve",
+                &is_reqwest_error_retryable,
+                || async {
+                    client
+                        .post(&review_url)
+                        .header("Authorization", &auth_header)
+                        .header("Accept", "application/vnd.github+json")
+                        .header(
+                            "User-Agent",
+                            concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+                        )
+                        .json(&review_body)
+                        .send()
+                        .await
+                        .map_err(Into::into)
+                },
+            )
+            .await
+            {
+                Ok(resp) if resp.status().is_success() => {}
+                Ok(resp) => tracing::warn!(status = %resp.status(), "auto APPROVE failed"),
+                Err(e) => tracing::warn!(error = %e, "auto APPROVE failed"),
+            }
+        }
         if !head_sha.is_empty() {
             if let Some(ref s) = state {
                 if let Err(e) = s
@@ -864,23 +903,28 @@ pub async fn review_pr_with_options(
         &dep_delta_md,
         sequence.as_deref(),
         progress.as_ref(),
+        advisory_draft,
     )
     .await?;
 
     // Inline findings / merge-blocking still need a Pull Request Review; keep
     // that body short so we do not spam a second full walkthrough per commit.
     // Skip the review entirely when there is nothing to attach and no block.
+    // REQUEST_CHANGES only when Tier-1 blocking; LLM/soft findings stay COMMENT.
     if !review_comments.is_empty() || has_blocking {
         let sha_short = head_sha.get(..7).unwrap_or(head_sha);
-        let review_event = if has_blocking {
-            "REQUEST_CHANGES"
-        } else {
-            "COMMENT"
-        };
+        let review_event = crate::bot::concern::review_event(has_blocking, false, false);
         let summary = if has_blocking {
             format!(
                 "Commit `{sha_short}`: please fix the items in **What to do next**, \
                  then check the {} inline comment{}.",
+                review_comments.len(),
+                if review_comments.len() == 1 { "" } else { "s" }
+            )
+        } else if advisory_draft {
+            format!(
+                "Commit `{sha_short}`: advisory notes only (soft findings). \
+                 Codasaurus is not requesting changes — {} inline comment{}.",
                 review_comments.len(),
                 if review_comments.len() == 1 { "" } else { "s" }
             )
@@ -1143,6 +1187,7 @@ async fn post_split_review_comments(
     dep_delta_md: &str,
     sequence_mermaid: Option<&str>,
     progress: Option<&crate::bot::markdown::FindingProgress>,
+    advisory_draft: bool,
 ) -> Result<()> {
     let overview = crate::bot::markdown::overview_comment_body(
         findings,
@@ -1152,6 +1197,7 @@ async fn post_split_review_comments(
         runtime,
         agent_badge,
         progress,
+        advisory_draft,
     );
     post_or_update_comment(
         client,

@@ -22,6 +22,7 @@
   let autoLabels = $state(true);
   let updatePrDescription = $state(false);
   let allowAutoFix = $state(false);
+  let autoApprove = $state(false);
   let excludePatterns = $state("");
 
   // Reactively load when params change (fixes $params being undefined at mount)
@@ -64,6 +65,7 @@
       autoLabels = cfg.auto_labels ?? true;
       updatePrDescription = cfg.update_pr_description ?? false;
       allowAutoFix = cfg.allow_auto_fix ?? false;
+      autoApprove = cfg.auto_approve ?? false;
       excludePatterns = Array.isArray(cfg.exclude_patterns)
         ? cfg.exclude_patterns.join(", ")
         : (cfg.exclude_patterns ?? "");
@@ -90,6 +92,7 @@
           auto_labels: autoLabels,
           update_pr_description: updatePrDescription,
           allow_auto_fix: allowAutoFix,
+          auto_approve: autoApprove,
           exclude_patterns: excludePatterns
             .split(/[,\n]/)
             .map((s) => s.trim())
@@ -222,6 +225,16 @@
           </div>
         </label>
         <span>Allow @codasaurus fix</span>
+      </div>
+      <div class="llm-row">
+        <label class="toggle">
+          <div class="toggle-track" class:on={autoApprove} role="checkbox" aria-checked={autoApprove}
+            tabindex="0" onclick={() => (autoApprove = !autoApprove)}
+            onkeydown={(e) => { if (e.key === 'Enter') autoApprove = !autoApprove; }}>
+            <div class="toggle-knob"></div>
+          </div>
+        </label>
+        <span>Auto-approve clean PRs (merge still needs a maintainer)</span>
       </div>
       <div class="form-group" style="margin-top:12px">
         <label for="repo-exclude">Exclude patterns</label>

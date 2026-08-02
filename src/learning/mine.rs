@@ -35,35 +35,48 @@ const PUSHBACK_HINTS: &[&str] = &[
 /// Patterns that suggest overall approval (used for telemetry / soft rules only).
 const LGTM_HINTS: &[&str] = &["lgtm", "looks good", "ship it", "approved"];
 
-/// After a dashboard/comment dismissal, promote repeated detector+file noise into a rule.
+/// After a dashboard/comment dismissal, promote repeated detector noise into a rule.
+///
+/// Poisoning guard: require either a maintainer dismiss, or dismissals across
+/// at least [`MIN_DISTINCT_PRS`] distinct PRs for the same detector.
 pub async fn promote_dismissal_to_rule(
     store: &LearningStore,
     detector: &str,
     file: &str,
     message: &str,
 ) -> Result<()> {
-    if detector.is_empty() || detector == "manual" {
+    if detector.is_empty() || detector == "manual" || detector == "reaction" {
         return Ok(());
     }
-    let count = store.count_dismissals_for_detector(detector).await?;
-    // After 3 dismissals of the same detector, learn an ignore for that file path stem.
-    if count < 3 {
+    let maintainer_hit = store
+        .count_maintainer_dismissals_for_detector(detector)
+        .await?;
+    let distinct_prs = store.count_distinct_prs_for_detector(detector).await?;
+    if maintainer_hit < 1 && distinct_prs < MIN_DISTINCT_PRS {
         return Ok(());
     }
     let file_stem = file_pattern_from_path(file);
     let msg_pat = message_pattern_hint(message);
+    let reason = if maintainer_hit >= 1 {
+        format!("auto-learned after maintainer dismiss of `{detector}`")
+    } else {
+        format!("auto-learned after dismissals of `{detector}` across {distinct_prs} PRs")
+    };
     let rule = LearnedRule {
         id: format!("auto-{}", Uuid::new_v4()),
         detector: detector.to_string(),
         file_pattern: file_stem,
         message_pattern: msg_pat,
         action: RuleAction::Ignore,
-        reason: format!("auto-learned after {count} dismissals of `{detector}`"),
+        reason,
         created_at: chrono::Utc::now(),
     };
     store.add_rule_async(&rule).await?;
     Ok(())
 }
+
+/// Distinct PRs required before a non-maintainer dismissal stream can auto-learn.
+pub const MIN_DISTINCT_PRS: i64 = 3;
 
 fn file_pattern_from_path(file: &str) -> Option<String> {
     if file.is_empty() || file == "unknown" {
@@ -134,16 +147,20 @@ pub async fn mine_pr_comment_feedback(
 
         if FALSE_POSITIVE_HINTS.iter().any(|h| lower.contains(h)) {
             if let Some(det) = detector {
-                let rule = LearnedRule {
-                    id: format!("fp-{}", Uuid::new_v4()),
-                    detector: det,
-                    file_pattern: None,
-                    message_pattern: None,
-                    action: RuleAction::Ignore,
-                    reason: format!("mined false-positive signal on PR #{pr_number}"),
-                    created_at: chrono::Utc::now(),
-                };
-                store.add_rule_async(&rule).await?;
+                // Record as a dismissal signal; promote only via the poisoning guard.
+                let fp = format!("mined-fp:{pr_number}:{det}");
+                store
+                    .dismiss_fingerprint_for_repo(
+                        &fp,
+                        &det,
+                        "",
+                        "mined false-positive signal",
+                        Some(repo),
+                        Some(pr_number),
+                        None,
+                        false,
+                    )
+                    .await?;
                 learned += 1;
             }
         } else if PUSHBACK_HINTS.iter().any(|h| lower.contains(h)) {

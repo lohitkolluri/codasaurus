@@ -84,6 +84,9 @@ pub async fn handle_reaction_event(
                 repo_full_name,
                 &format!("dismissed via {reaction_content} reaction"),
                 Some(repo_full_name),
+                None,
+                None,
+                false,
             )
             .await?;
         tracing::info!(

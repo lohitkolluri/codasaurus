@@ -59,6 +59,7 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - Overview comments include a collapsed copy-paste prompt for an AI coding agent when there are findings.
 - Context blast radius uses shields badges (`BLAST RADIUS` / `SCORE`); low-noise blasts stay hidden.
 - LLM PR summary prompt tightened and hard-capped (~600 chars) so comments stay scannable.
+- Review maturity: advisory draft for soft findings, opt-in `auto_approve` on clean PRs (merge still needs a maintainer), concern labels (`security|quality|tests|docs`), LLM path/symbol grounding, learning promotion requires distinct PRs or a maintainer dismiss, and golden detector fixtures in CI.
 - `.env.example` documents the full dashboard ↔ env mirror set (timeouts, cookies, model cheap, etc.).
 - Jira / Linear ticket context is taken from the PR **title and body**; Linear issues resolve via `issue(id:)` (supports bare `ENG-123` when Linear is configured).
 - Jira Cloud ADF descriptions are flattened into text for review context.

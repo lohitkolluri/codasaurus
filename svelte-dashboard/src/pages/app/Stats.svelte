@@ -79,6 +79,7 @@
 
   let series = $derived(stats?.analytics?.reviews_by_day ?? []);
   let detectors = $derived(stats?.analytics?.findings_by_detector ?? []);
+  let concerns = $derived(stats?.analytics?.findings_by_concern ?? []);
   let outcomes = $derived(stats?.analytics?.outcomes_7d ?? { passed: 0, failed: 0, other: 0 });
 
   let reviewSpark = $derived(series.map((r) => r.reviews || 0));
@@ -249,8 +250,8 @@
             stats.analytics?.weekly_digest?.dismissals ?? 0,
             stats.analytics?.dismissals_prev_7_days,
           )}
-          deltaLabel="dismissals Œî"
-          hint="Dismissals √∑ (dismissals + findings)"
+          deltaLabel="dismissals ?"
+          hint="Dismissals ˜ (dismissals + findings)"
         />
       </div>
     </section>
@@ -264,13 +265,13 @@
         <StatsCard
           label="Accept rate"
           value={fmtRate(stats.trust?.accept_rate)}
-          hint="Not dismissed ¬∑ 30d"
+          hint="Not dismissed ∑ 30d"
           tone={acceptTone(stats.trust?.accept_rate)}
         />
         <StatsCard
           label="FP proxy"
           value={fmtRatio(stats.trust?.fp_proxy_ratio ?? 0)}
-          hint="Dismissals √∑ Tier-1"
+          hint="Dismissals ˜ Tier-1"
           tone={fpTone(stats.trust?.fp_proxy_ratio)}
         />
         <StatsCard label="Tier-1 findings" value={stats.trust?.tier1_findings ?? 0} tone="info" />
@@ -280,8 +281,8 @@
             stats.llm?.spend_usd_last_day ?? stats.llm?.spend_usd_estimate ?? 0,
           )}
           hint={stats.llm?.daily_budget_usd > 0
-            ? `last day ¬∑ budget $${Number(stats.llm.daily_budget_usd).toFixed(2)}`
-            : `${stats.llm?.requests ?? 0} requests ¬∑ last day`}
+            ? `last day ∑ budget $${Number(stats.llm.daily_budget_usd).toFixed(2)}`
+            : `${stats.llm?.requests ?? 0} requests ∑ last day`}
         />
       </div>
     </section>
@@ -324,6 +325,31 @@
         </div>
       </section>
 
+      {#if concerns.length > 0}
+        <section class="section-block">
+          <h2 class="stats-section-title">Findings by concern (30d)</h2>
+          <div class="analytics-panel chart-card">
+            <ul class="analytics-detectors">
+              {#each concerns as c, i}
+                <li>
+                  <span class="analytics-det-name">{c.concern}</span>
+                  <div class="analytics-det-track">
+                    <div
+                      class={`analytics-det-fill tone-${i % 8}`}
+                      style={`width: ${Math.min(100, Math.max(4, Math.round(c.share_pct ?? 0)))}%`}
+                    ></div>
+                  </div>
+                  <span class="analytics-det-count">
+                    {c.count}
+                    <span class="muted">{c.share_pct != null ? `${Math.round(c.share_pct)}%` : ""}</span>
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          </div>
+        </section>
+      {/if}
+
       {#if detectors.length > 0}
         <section class="section-block">
           <h2 class="stats-section-title">Findings by detector (30d)</h2>
@@ -348,7 +374,7 @@
             {#if detectors.length > DETECTOR_PAGE}
               <div class="detector-page-meta">
                 <span>
-                  {detectors.length} detectors ∑ page {detectorPageSafe} of {detectorPages}
+                  {detectors.length} detectors ù page {detectorPageSafe} of {detectorPages}
                 </span>
                 <Pagination
                   page={detectorPageSafe}

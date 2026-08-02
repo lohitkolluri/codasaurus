@@ -49,6 +49,7 @@
   let customInstructions = $state("");
   let updatePrDescription = $state(false);
   let allowAutoFix = $state(false);
+  let autoApprove = $state(false);
   let reviewSaving = $state(false);
   let reviewMsg = $state("");
 
@@ -400,6 +401,7 @@
         customInstructions = data.custom_instructions ?? "";
         updatePrDescription = data.update_pr_description === "true";
         allowAutoFix = data.allow_auto_fix === "true";
+        autoApprove = data.auto_approve === "true";
         offlineMode = truthy(data.offline_mode_effective ?? data.offline_mode);
         offlineModeSource = data.offline_mode_source ?? (offlineMode ? "db" : "off");
         publicUrl = data.public_url ?? "";
@@ -505,6 +507,7 @@
         ["custom_instructions", customInstructions],
         ["update_pr_description", boolVal(updatePrDescription)],
         ["allow_auto_fix", boolVal(allowAutoFix)],
+        ["auto_approve", boolVal(autoApprove)],
       ];
       const { failed } = await putMany(pairs);
       reviewMsg = failed === 0 ? "Saved" : `Save failed (${failed} errors)`;
@@ -1112,6 +1115,20 @@
                       tabindex="0"
                       onclick={() => toggleFlag((v) => (allowAutoFix = v), allowAutoFix)}
                       onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (allowAutoFix = v), allowAutoFix); }}>
+                      <div class="toggle-knob"></div>
+                    </div>
+                  </label>
+                </div>
+                <div class="action-row">
+                  <div>
+                    <span class="action-label">Auto-approve clean PRs</span>
+                    <span class="action-blurb">Post GitHub APPROVE when Tier-1 is clear. Merge still needs a maintainer.</span>
+                  </div>
+                  <label class="toggle">
+                    <div class="toggle-track" class:on={autoApprove} role="checkbox" aria-checked={autoApprove}
+                      tabindex="0"
+                      onclick={() => toggleFlag((v) => (autoApprove = v), autoApprove)}
+                      onkeydown={(e) => { if (e.key === 'Enter') toggleFlag((v) => (autoApprove = v), autoApprove); }}>
                       <div class="toggle-knob"></div>
                     </div>
                   </label>

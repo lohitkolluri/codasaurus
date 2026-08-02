@@ -391,6 +391,7 @@ fn status_badge_strip(blocking: usize, warning: usize, info: usize, ready: bool)
 }
 
 /// Message 1: status badges + prose + what-to-do checklist + progress + Changes.
+#[allow(clippy::too_many_arguments)]
 pub fn overview_comment_body(
     findings: &Findings,
     has_blocking: bool,
@@ -399,6 +400,7 @@ pub fn overview_comment_body(
     runtime: &BotRuntimeConfig,
     agent_badge: Option<&str>,
     progress: Option<&FindingProgress>,
+    advisory_draft: bool,
 ) -> String {
     let counts = findings.count_by_severity();
     let blocking = *counts.get("blocking").unwrap_or(&0);
@@ -411,6 +413,12 @@ pub fn overview_comment_body(
     write_slot_header(&mut body, "codasaurus:overview:v1", "Codasaurus");
     body.push_str(&status_badge_strip(blocking, warning, info, ready));
     body.push('\n');
+    if advisory_draft {
+        let _ = writeln!(
+            body,
+            "> **Advisory draft** — soft findings only. Codasaurus will not request changes; a maintainer still decides merge.\n"
+        );
+    }
     if let Some(badge) = agent_badge.filter(|s| !s.is_empty()) {
         let _ = writeln!(body, "{badge}\n");
     }
@@ -447,7 +455,13 @@ fn write_next_actions(body: &mut String, findings: &[Finding]) {
             "warning" => "Please check",
             _ => "Worth a look",
         };
-        let _ = writeln!(body, "{}. **{cue}:** {}", i + 1, guide_label(f));
+        let concern = crate::bot::concern::concern_for_finding(&f.detector, &f.file);
+        let _ = writeln!(
+            body,
+            "{}. **{cue}** [`{concern}`]: {}",
+            i + 1,
+            guide_label(f)
+        );
     }
     if ordered.len() > 5 {
         let _ = writeln!(
@@ -1134,9 +1148,11 @@ mod tests {
             &runtime,
             None,
             None,
+            false,
         );
         assert!(body.contains("<!-- codasaurus:overview:v1 -->"));
         assert!(body.contains("## What to do next"));
+        assert!(body.contains("[`quality`]"));
         assert!(body.contains("src/bot/commands.rs"));
         assert!(body.contains("## Changes"));
         assert!(body.contains("| Path | What changed |"));
@@ -1186,6 +1202,7 @@ mod tests {
             &runtime,
             None,
             None,
+            false,
         );
         assert!(!clean_overview.contains("Copy this into your AI coding agent"));
         assert!(!clean_overview.contains("Findings to fix:"));
@@ -1209,10 +1226,23 @@ mod tests {
             &runtime,
             None,
             Some(&progress),
+            false,
         );
         assert!(with_progress.contains("## Since last review"));
         assert!(with_progress.contains("**Resolved**"));
         assert!(with_progress.contains("**Still open**"));
+
+        let advisory = overview_comment_body(
+            &findings,
+            false,
+            "Soft stuff",
+            &files,
+            &runtime,
+            None,
+            None,
+            true,
+        );
+        assert!(advisory.contains("Advisory draft"));
 
         let ctx = context_comment_body(
             &WalkthroughExtras {

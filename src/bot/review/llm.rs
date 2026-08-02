@@ -40,7 +40,29 @@ pub(crate) async fn maybe_post_auto_improve(
         return Ok(());
     }
 
-    let output = crate::llm::review_diff(&diff, llm_cfg, Some(review_ctx)).await?;
+    let mut grounded_ctx = review_ctx.clone();
+    let patches: Vec<(String, String)> = llm_files
+        .iter()
+        .filter_map(|f| {
+            let name = f["filename"].as_str()?.to_string();
+            let patch = f["patch"].as_str().unwrap_or("").to_string();
+            if patch.is_empty() {
+                None
+            } else {
+                Some((name, patch))
+            }
+        })
+        .collect();
+    let paths: Vec<String> = patches.iter().map(|(p, _)| p.clone()).collect();
+    let grounding = crate::bot::grounding::build_grounding_block(&paths, &patches);
+    if !grounding.is_empty() {
+        grounded_ctx.repo_context = Some(match grounded_ctx.repo_context.take() {
+            Some(existing) if !existing.trim().is_empty() => format!("{existing}\n\n{grounding}"),
+            _ => grounding,
+        });
+    }
+
+    let output = crate::llm::review_diff(&diff, llm_cfg, Some(&grounded_ctx)).await?;
     let known_paths: Vec<String> = files
         .iter()
         .filter_map(|f| f["filename"].as_str().map(str::to_string))

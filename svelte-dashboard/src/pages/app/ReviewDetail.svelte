@@ -158,6 +158,8 @@
         detector: finding.detector,
         file: finding.file_path ?? finding.file,
         message: finding.message,
+        pr_number: review?.pr_number ?? null,
+        repo: review?.repo_name ?? review?.repo ?? null,
       });
       allFindings = allFindings.filter((f) => f.id !== finding.id);
       if (summary) {

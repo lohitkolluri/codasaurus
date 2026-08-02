@@ -249,6 +249,8 @@ pub struct RepoBotFlags {
     pub auto_labels: bool,
     pub update_pr_description: bool,
     pub allow_auto_fix: bool,
+    /// Opt-in: post GitHub APPROVE on clean high-confidence PRs (merge still needs a human).
+    pub auto_approve: bool,
 }
 
 impl Default for RepoBotFlags {
@@ -261,6 +263,7 @@ impl Default for RepoBotFlags {
             auto_labels: true,
             update_pr_description: false,
             allow_auto_fix: false,
+            auto_approve: false,
         }
     }
 }
@@ -291,7 +294,7 @@ impl Config {
     /// Overlay per-repo `config_json` from the dashboard.
     /// Shape: `{ "detectors": {...}, "llm_enabled": bool, "auto_describe": bool,
     /// "auto_review_diff": bool, "auto_labels": bool, "update_pr_description": bool,
-    /// "allow_auto_fix": bool, "exclude_patterns": ["vendor/"] }`.
+    /// "allow_auto_fix": bool, "auto_approve": bool, "exclude_patterns": ["vendor/"] }`.
     pub fn overlay_repo_config_json(&mut self, config_json: &str) -> RepoBotFlags {
         let mut flags = RepoBotFlags::default();
         let Ok(value) = serde_json::from_str::<serde_json::Value>(config_json) else {
@@ -336,6 +339,9 @@ impl Config {
         }
         if let Some(v) = value.get("allow_auto_fix").and_then(|v| v.as_bool()) {
             flags.allow_auto_fix = v;
+        }
+        if let Some(v) = value.get("auto_approve").and_then(|v| v.as_bool()) {
+            flags.auto_approve = v;
         }
         flags
     }
