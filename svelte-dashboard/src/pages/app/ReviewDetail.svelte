@@ -1,36 +1,63 @@
 <script>
-  import { onMount } from "svelte";
+  import { link, push, params } from "svelte-spa-router";
   import { api } from "../../stores/api.js";
   import { isMaintainer } from "../../stores/auth.js";
   import AppShell from "../../lib/AppShell.svelte";
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
   import SeverityBadge from "../../lib/SeverityBadge.svelte";
   import ErrorState from "../../lib/ErrorState.svelte";
-
-  import { params } from "svelte-spa-router";
+  import EmptyState from "../../lib/EmptyState.svelte";
 
   let review = $state(null);
+  let summary = $state(null);
   let allFindings = $state([]);
   let loading = $state(true);
   let error = $state("");
   let canDismiss = $derived($isMaintainer);
 
   let selectedFile = $state(null);
+  let severityFilter = $state("all");
+  let detectorFilter = $state("all");
 
   let files = $derived.by(() => {
-    const seen = new Set();
-    return allFindings.filter((f) => {
+    const map = new Map();
+    for (const f of allFindings) {
       const path = f.file_path ?? f.file;
-      if (!path || seen.has(path)) return false;
-      seen.add(path);
-      return true;
-    });
+      if (!path) continue;
+      if (!map.has(path)) map.set(path, { path, blocking: 0, warning: 0, info: 0, total: 0 });
+      const row = map.get(path);
+      row.total += 1;
+      if (f.severity === "blocking") row.blocking += 1;
+      else if (f.severity === "warning") row.warning += 1;
+      else row.info += 1;
+    }
+    return [...map.values()].sort((a, b) => b.blocking - a.blocking || b.total - a.total || a.path.localeCompare(b.path));
+  });
+
+  let detectors = $derived.by(() => {
+    const set = new Set(allFindings.map((f) => f.detector).filter(Boolean));
+    return [...set].sort();
   });
 
   let fileFindings = $derived.by(() => {
-    if (!selectedFile || !allFindings.length) return [];
-    return allFindings.filter((f) => f.file_path === selectedFile || f.file === selectedFile);
+    let list = allFindings;
+    if (selectedFile) {
+      list = list.filter((f) => (f.file_path ?? f.file) === selectedFile);
+    }
+    if (severityFilter !== "all") {
+      list = list.filter((f) => f.severity === severityFilter);
+    }
+    if (detectorFilter !== "all") {
+      list = list.filter((f) => f.detector === detectorFilter);
+    }
+    return list;
   });
+
+  let blocking = $derived(Number(summary?.by_severity?.blocking ?? review?.by_severity?.blocking ?? 0));
+  let warning = $derived(Number(summary?.by_severity?.warning ?? review?.by_severity?.warning ?? 0));
+  let info = $derived(Number(summary?.by_severity?.info ?? review?.by_severity?.info ?? 0));
+  let findingCount = $derived(Number(summary?.finding_count ?? review?.finding_count ?? allFindings.length));
+  let fileCount = $derived(Number(summary?.file_count ?? review?.file_count ?? files.length));
 
   $effect(() => {
     const id = $params?.id;
@@ -42,14 +69,18 @@
     loading = true;
     error = "";
     selectedFile = null;
+    severityFilter = "all";
+    detectorFilter = "all";
     try {
       const data = await api.get(`/api/reviews/${id}`);
       review = data.review ?? null;
+      summary = data.summary ?? null;
       allFindings = data.findings ?? [];
-      // Open the first changed file so findings aren't behind an extra click.
       if (allFindings.length > 0) {
-        const first = allFindings.find((f) => f.file_path || f.file);
-        if (first) selectedFile = first.file_path ?? first.file;
+        const first = files[0] ?? null;
+        // files derived may lag one tick — pick from findings directly
+        const path = allFindings[0]?.file_path ?? allFindings[0]?.file;
+        if (path) selectedFile = path;
       }
     } catch (err) {
       error = err.message || "Failed to load review";
@@ -59,15 +90,35 @@
   }
 
   function selectFile(path) {
-    selectedFile = path;
+    selectedFile = path === selectedFile ? null : path;
   }
 
-  function countSeverity(findings, severity) {
-    return findings.filter((f) => f.severity === severity).length;
+  function shortFp(finding) {
+    const raw = finding.fingerprint ?? "";
+    const fp = raw.includes(":") ? raw.split(":").pop() : raw;
+    return fp.slice(0, 12);
   }
 
-  function getFindingsForFile(filePath) {
-    return allFindings.filter((f) => f.file_path === filePath || f.file === filePath);
+  function formatWhen(iso) {
+    if (!iso) return "—";
+    try {
+      return new Date(iso).toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "—";
+    }
+  }
+
+  function formatDuration(secs) {
+    if (secs == null || secs < 0) return "—";
+    if (secs < 60) return `${secs}s`;
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}m ${s}s`;
   }
 
   async function dismissFinding(finding) {
@@ -85,106 +136,448 @@
         message: finding.message,
       });
       allFindings = allFindings.filter((f) => f.id !== finding.id);
+      if (summary) {
+        summary = {
+          ...summary,
+          finding_count: Math.max(0, (summary.finding_count ?? 1) - 1),
+          by_severity: {
+            ...(summary.by_severity || {}),
+            [finding.severity]: Math.max(0, Number(summary.by_severity?.[finding.severity] ?? 1) - 1),
+          },
+        };
+      }
     } catch (err) {
       error = err.message || "Dismiss failed";
     }
   }
+
+  const detectorEntries = $derived.by(() => {
+    const map = summary?.by_detector ?? review?.by_detector ?? {};
+    return Object.entries(map).sort((a, b) => Number(b[1]) - Number(a[1]));
+  });
 </script>
 
 <AppShell title="Review">
   <LoadingSpinner loading={loading} />
 
   {#if error}
-    <div style="padding:32px">
+    <div class="rd-pad">
       <ErrorState message={error} />
     </div>
+  {:else if loading}
   {:else if review}
-    <div style="padding:0 0 24px;border-bottom:1px solid var(--border);margin-bottom:0">
-      <h2 style="font-size:20px;font-weight:700;margin-bottom:8px">{review.pr_title ?? `PR #${review.pr_number}`}</h2>
-      <div style="display:flex;gap:12px;font-size:13px;color:var(--text-muted);align-items:center;flex-wrap:wrap">
-        <span>{review.repo_full_name ?? ""}</span>
-        <span class="status-badge {review.status}">{review.status}</span>
-        {#if review.pr_head_sha}
-          <span style="font-family:var(--font-code);font-size:12px">{review.pr_head_sha.slice(0, 7)}</span>
-        {/if}
-        {#if review.repo_full_name && review.pr_number}
-          <a
-            href={`https://github.com/${review.repo_full_name}/pull/${review.pr_number}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style="color:var(--text-primary);text-decoration:underline"
-          >View on GitHub</a>
-        {/if}
-      </div>
-    </div>
+    <div class="rd-page">
+      <header class="rd-hero">
+        <div class="rd-hero-top">
+          <a class="rd-back" href="#/app/reviews" use:link>← Reviews</a>
+          {#if review.repo_full_name && review.pr_number}
+            <a
+              class="btn sm"
+              href={`https://github.com/${review.repo_full_name}/pull/${review.pr_number}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >Open on GitHub ↗</a>
+          {/if}
+        </div>
+        <h1 class="page-title">{review.pr_title ?? `PR #${review.pr_number}`}</h1>
+        <div class="rd-meta">
+          <span class="rd-mono">{review.repo_full_name ?? ""}</span>
+          <span class="status-badge {review.status}">{review.status}</span>
+          {#if review.pr_number}
+            <span>PR #{review.pr_number}</span>
+          {/if}
+          {#if review.pr_author}
+            <span>@{review.pr_author}</span>
+          {/if}
+          {#if review.pr_head_sha}
+            <span class="rd-mono">{review.pr_head_sha.slice(0, 7)}</span>
+          {/if}
+        </div>
+        <div class="rd-branches">
+          {#if review.pr_base_branch || review.pr_head_branch}
+            <span class="rd-mono">{review.pr_head_branch ?? "?"}</span>
+            <span aria-hidden="true">→</span>
+            <span class="rd-mono">{review.pr_base_branch ?? "?"}</span>
+          {/if}
+          <span class="rd-muted">Started {formatWhen(review.started_at ?? review.created_at)}</span>
+          {#if review.completed_at}
+            <span class="rd-muted">· Done {formatWhen(review.completed_at)}</span>
+          {/if}
+          {#if summary?.duration_secs != null || review.duration_secs != null}
+            <span class="rd-muted">· {formatDuration(summary?.duration_secs ?? review.duration_secs)}</span>
+          {/if}
+        </div>
+      </header>
 
-    <div class="page-with-sidebar" style="height:auto;min-height:calc(100vh - var(--header-height) - 120px)">
-      <div class="file-tree">
-        {#each files as f}
-          <div
-            class="file-tree-item"
-            class:active={selectedFile === (f.file_path ?? f.file)}
-            onclick={() => selectFile(f.file_path ?? f.file)}
-            role="button"
-            tabindex="0"
-            onkeydown={(e) => { if (e.key === 'Enter') selectFile(f.file_path ?? f.file); }}>
-            <span>{f.file_path?.split("/").pop() ?? f.file}</span>
-            <div class="severity-counts">
-              {#if countSeverity(getFindingsForFile(f.file_path ?? f.file), "blocking") > 0}
-                <span style="color:var(--error)">{countSeverity(getFindingsForFile(f.file_path ?? f.file), "blocking")}</span>
-              {/if}
-              {#if countSeverity(getFindingsForFile(f.file_path ?? f.file), "warning") > 0}
-                <span style="color:var(--text-primary)">{countSeverity(getFindingsForFile(f.file_path ?? f.file), "warning")}</span>
-              {/if}
-            </div>
+      <section class="rd-kpis" aria-label="Finding summary">
+        <div class="rd-kpi">
+          <span class="rd-kpi-label">Findings</span>
+          <span class="rd-kpi-value">{findingCount}</span>
+        </div>
+        <div class="rd-kpi">
+          <span class="rd-kpi-label">Blocking</span>
+          <span class="rd-kpi-value tone-error">{blocking}</span>
+        </div>
+        <div class="rd-kpi">
+          <span class="rd-kpi-label">Warning</span>
+          <span class="rd-kpi-value tone-warn">{warning}</span>
+        </div>
+        <div class="rd-kpi">
+          <span class="rd-kpi-label">Info</span>
+          <span class="rd-kpi-value">{info}</span>
+        </div>
+        <div class="rd-kpi">
+          <span class="rd-kpi-label">Files</span>
+          <span class="rd-kpi-value">{fileCount}</span>
+        </div>
+      </section>
+
+      {#if detectorEntries.length > 0}
+        <section class="rd-detectors" aria-label="Detectors">
+          <h2 class="rd-section-title">Detectors</h2>
+          <div class="rd-chip-row">
+            {#each detectorEntries as [name, count]}
+              <button
+                type="button"
+                class="rd-chip"
+                class:active={detectorFilter === name}
+                onclick={() => (detectorFilter = detectorFilter === name ? "all" : name)}
+              >{name} <strong>{count}</strong></button>
+            {/each}
           </div>
-        {/each}
-        {#if files.length === 0}
-          <div style="padding:16px;font-size:13px;color:var(--text-muted)">No files changed</div>
-        {/if}
-      </div>
+        </section>
+      {/if}
 
-      <div class="content-area" style="padding:24px 0 24px 32px">
-        {#if fileFindings.length === 0 && selectedFile}
-          <p style="color:var(--text-muted)">No findings for this file</p>
-        {:else if !selectedFile}
-          <p style="color:var(--text-muted)">Select a file to view findings</p>
-        {:else}
-          {#each fileFindings as finding}
-            <div class="finding-item">
-              <div class="finding-location">
-                {finding.file_path ?? finding.file}
-                {#if finding.line_start}
-                  <span>:{finding.line_start}</span>
-                {/if}
-                <SeverityBadge severity={finding.severity ?? "info"} />
-                {#if finding.fingerprint}
-                  <span style="font-family:var(--font-code);font-size:11px;color:var(--text-muted)">
-                    {finding.fingerprint.includes(":") ? finding.fingerprint.split(":").pop().slice(0,12) : finding.fingerprint.slice(0,12)}
-                  </span>
-                {/if}
-                {#if canDismiss}
-                <button
-                  style="margin-left:auto;font-size:12px"
-                  onclick={() => dismissFinding(finding)}
-                >Dismiss</button>
-                {/if}
-              </div>
-              <div class="finding-message">{finding.message}</div>
-              {#if finding.code_snippet}
-                <div class="code-snippet">{finding.code_snippet}</div>
-                {#if review.repo_full_name && review.pr_number && finding.fingerprint}
-                  <p style="font-size:12px;color:var(--text-muted);margin-top:8px">
-                    Apply on the PR:
-                    <code>@codasaurus fix {(finding.fingerprint.includes(":") ? finding.fingerprint.split(":").pop() : finding.fingerprint).slice(0,12)}</code>
-                    (or use GitHub’s Apply suggestion). Requires allow_auto_fix.
-                  </p>
-                {/if}
-              {/if}
+      {#if allFindings.length === 0}
+        <div class="rd-clean">
+          <EmptyState
+            message="No findings on this review — clean pass."
+            actionLabel="Back to reviews"
+            onAction={() => push("/app/reviews")}
+          />
+        </div>
+      {:else}
+        <div class="rd-toolbar">
+          <div class="filter-bar rd-filters">
+            <div class="form-group">
+              <label for="sev-filter">Severity</label>
+              <select id="sev-filter" bind:value={severityFilter}>
+                <option value="all">All</option>
+                <option value="blocking">Blocking</option>
+                <option value="warning">Warning</option>
+                <option value="info">Info</option>
+              </select>
             </div>
-          {/each}
-        {/if}
-      </div>
+            <div class="form-group">
+              <label for="det-filter">Detector</label>
+              <select id="det-filter" bind:value={detectorFilter}>
+                <option value="all">All</option>
+                {#each detectors as d}
+                  <option value={d}>{d}</option>
+                {/each}
+              </select>
+            </div>
+            <p class="rd-muted rd-filter-count">{fileFindings.length} shown</p>
+          </div>
+        </div>
+
+        <div class="page-with-sidebar rd-split">
+          <aside class="file-tree rd-files">
+            <button
+              type="button"
+              class="file-tree-item"
+              class:active={selectedFile == null}
+              onclick={() => (selectedFile = null)}
+            >
+              <span>All files</span>
+              <span class="rd-file-count">{allFindings.length}</span>
+            </button>
+            {#each files as f}
+              <button
+                type="button"
+                class="file-tree-item"
+                class:active={selectedFile === f.path}
+                onclick={() => selectFile(f.path)}
+                title={f.path}
+              >
+                <span class="rd-file-name">{f.path}</span>
+                <div class="severity-counts">
+                  {#if f.blocking > 0}<span style="color:var(--error)">{f.blocking}</span>{/if}
+                  {#if f.warning > 0}<span style="color:var(--text-primary)">{f.warning}</span>{/if}
+                  {#if f.info > 0}<span class="rd-muted">{f.info}</span>{/if}
+                </div>
+              </button>
+            {/each}
+          </aside>
+
+          <div class="content-area rd-findings">
+            {#if fileFindings.length === 0}
+              <p class="rd-muted">No findings match these filters.</p>
+            {:else}
+              {#each fileFindings as finding}
+                <article class="finding-item rd-finding">
+                  <div class="finding-location">
+                    <span class="rd-finding-path">{finding.file_path ?? finding.file}{#if finding.line_start}:{finding.line_start}{/if}</span>
+                    <SeverityBadge severity={finding.severity ?? "info"} />
+                    <span class="rd-chip quiet">{finding.detector}</span>
+                    {#if finding.fingerprint}
+                      <span class="rd-mono rd-fp">{shortFp(finding)}</span>
+                    {/if}
+                    {#if canDismiss}
+                      <button type="button" class="rd-dismiss" onclick={() => dismissFinding(finding)}>Dismiss</button>
+                    {/if}
+                  </div>
+                  <div class="finding-message">{finding.message}</div>
+                  {#if finding.suggested_fix}
+                    <div class="rd-suggestion">
+                      <strong>Suggestion</strong>
+                      <p>{finding.suggested_fix}</p>
+                    </div>
+                  {/if}
+                  {#if finding.code_snippet}
+                    <div class="code-snippet">{finding.code_snippet}</div>
+                    {#if review.repo_full_name && review.pr_number && finding.fingerprint}
+                      <p class="rd-fix-hint">
+                        On the PR: <code>@codasaurus fix {shortFp(finding)}</code>
+                        (needs allow_auto_fix + Contents Write).
+                      </p>
+                    {/if}
+                  {/if}
+                </article>
+              {/each}
+            {/if}
+          </div>
+        </div>
+      {/if}
     </div>
   {/if}
 </AppShell>
+
+<style>
+  .rd-page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+    padding-bottom: var(--space-8);
+  }
+
+  .rd-pad {
+    padding: var(--space-6);
+  }
+
+  .rd-hero-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
+  }
+
+  .rd-back {
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+
+  .rd-back:hover {
+    color: var(--text-primary);
+  }
+
+  .rd-meta,
+  .rd-branches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+    align-items: center;
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    margin-top: var(--space-2);
+  }
+
+  .rd-mono {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 12px;
+  }
+
+  .rd-muted {
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+  }
+
+  .rd-kpis {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+
+  .rd-kpi {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-primary);
+  }
+
+  .rd-kpi-label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+
+  .rd-kpi-value {
+    font-size: 1.5rem;
+    font-weight: var(--weight-semibold);
+    letter-spacing: -0.02em;
+  }
+
+  .tone-error {
+    color: var(--error);
+  }
+
+  .tone-warn {
+    color: color-mix(in srgb, #f59e0b 85%, var(--text-primary));
+  }
+
+  .rd-section-title {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-semibold);
+    margin: 0 0 var(--space-2);
+  }
+
+  .rd-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .rd-chip {
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-pill);
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    color: var(--text-secondary);
+  }
+
+  .rd-chip.active,
+  .rd-chip:hover {
+    border-color: color-mix(in srgb, var(--accent-soft) 50%, var(--border));
+    color: var(--text-primary);
+  }
+
+  .rd-chip.quiet {
+    cursor: default;
+    background: transparent;
+  }
+
+  .rd-filters {
+    margin: 0;
+    align-items: end;
+  }
+
+  .rd-filter-count {
+    margin: 0 0 8px;
+  }
+
+  .rd-split {
+    min-height: 480px;
+    height: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  .rd-files {
+    max-height: none;
+  }
+
+  .rd-files .file-tree-item {
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    cursor: pointer;
+  }
+
+  .rd-file-name {
+    font-size: 12px;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .rd-file-count {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .rd-findings {
+    padding: var(--space-4) var(--space-5);
+  }
+
+  .rd-finding {
+    margin-bottom: var(--space-4);
+  }
+
+  .rd-finding-path {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 12px;
+  }
+
+  .rd-fp {
+    color: var(--text-muted);
+  }
+
+  .rd-dismiss {
+    margin-left: auto;
+    font-size: 12px;
+  }
+
+  .rd-suggestion {
+    margin-top: var(--space-2);
+    padding: var(--space-3);
+    border-left: 2px solid var(--accent-soft);
+    background: color-mix(in srgb, var(--accent-soft) 6%, var(--bg-primary));
+    font-size: var(--text-sm);
+  }
+
+  .rd-suggestion p {
+    margin: 4px 0 0;
+  }
+
+  .rd-fix-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 8px;
+  }
+
+  .rd-clean {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-6);
+  }
+
+  @media (max-width: 900px) {
+    .rd-kpis {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .rd-split {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .rd-files {
+      max-height: 220px;
+      overflow: auto;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+  }
+</style>

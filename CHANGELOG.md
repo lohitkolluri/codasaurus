@@ -27,6 +27,7 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - PR review comments use shields.io verdict / severity badges and a structured walkthrough.
 - Walkthrough sections: estimated effort, Mermaid change map, grouped file summary, linked-issue assessment, pre-merge checks.
 - `GET /branding/logo.png` serves the bundled App mark for post-wizard badge upload.
+- Review detail page: KPI strip, detector chips, severity filters, full file paths, suggestions, and richer metadata.
 
 ### Changed
 
@@ -53,6 +54,8 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - Dashboard / Stats pass-rate queries failed on Postgres (`NUMERIC` vs `FLOAT8`) — cast `AVG` to `float8`.
 - Dashboard LLM keys now mirror into process env so `@codasaurus ask` sees Settings → LLM without a restart.
 - Same-SHA review jobs no longer re-queue after success (duplicate webhook deliveries).
+- Review detail API crashed decoding `findings.line_start` (`INT4` vs `INT8`) — Rust types and UNNEST casts aligned to `INTEGER`.
+- `@codasaurus` commands also allow prior **contributors**, the **PR author**, and the **repo owner** by login; denied commands get an explanatory PR reply.
 
 ### Security
 
