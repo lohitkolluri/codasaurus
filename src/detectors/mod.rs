@@ -61,6 +61,11 @@ pub struct Finding {
     /// Judge rationale when an LLM judge scored this finding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub judge_rationale: Option<String>,
+
+    /// OSV reachability: "reachable" (imported in changed code),
+    /// "imported" (in repo source), or "manifest_only" (lockfile only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reachability: Option<String>,
 }
 
 impl Finding {
@@ -147,7 +152,8 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config, repo: Option<&str>)
         }
 
         if config.checks.vulnerabilities {
-            handles.push(s.spawn(|| vulnerabilities::detect(parsed_files)));
+            let reachability = config.reachability.enabled;
+            handles.push(s.spawn(move || vulnerabilities::detect(parsed_files, reachability)));
         }
 
         if config.checks.stale_api {

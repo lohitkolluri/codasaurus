@@ -28,6 +28,9 @@ pub struct Config {
 
     #[serde(default)]
     pub index: IndexConfig,
+
+    #[serde(default)]
+    pub reachability: ReachabilityConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -209,6 +212,18 @@ fn default_index_max_files() -> usize {
     50_000
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReachabilityConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for ReachabilityConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 fn default_false() -> bool {
     false
 }
@@ -308,6 +323,7 @@ impl Default for Config {
             quality_gate: QualityGateConfig::default(),
             confidence: ConfidenceConfig::default(),
             index: IndexConfig::default(),
+            reachability: ReachabilityConfig::default(),
         }
     }
 }

@@ -198,6 +198,7 @@ mod tests {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         };
         let line = provenance_line(&f);
         assert!(line.contains("secrets"));

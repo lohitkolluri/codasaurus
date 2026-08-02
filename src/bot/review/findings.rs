@@ -105,6 +105,7 @@ pub(crate) fn merge_vulnerability_findings(
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
             evidence: None,
         });
     }
@@ -160,6 +161,7 @@ mod tests {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         }
     }
 

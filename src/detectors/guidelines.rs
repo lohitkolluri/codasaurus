@@ -63,6 +63,7 @@ pub fn detect_remote(
                         codemod: None,
                         confidence: None,
                         judge_rationale: None,
+                        reachability: None,
                     });
                 }
                 ExtractedRule::FileRequired { path } => {
@@ -91,6 +92,7 @@ pub fn detect_remote(
                             codemod: None,
                             confidence: None,
                             judge_rationale: None,
+                            reachability: None,
                         });
                     }
                 }
@@ -151,6 +153,7 @@ fn check_branch_pattern_remote(
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         });
     }
 }
@@ -188,6 +191,7 @@ fn check_sign_off_remote(
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         });
     }
 }
@@ -216,6 +220,7 @@ fn check_conventional_remote(
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         });
     }
 
@@ -246,6 +251,7 @@ fn check_conventional_remote(
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         });
     }
 }

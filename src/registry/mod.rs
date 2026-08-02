@@ -414,6 +414,12 @@ fn extract_osv_vuln(v: &serde_json::Value) -> Option<OsvVulnerability> {
 }
 
 #[cfg(test)]
+pub(crate) fn seed_osv_cache(ecosystem: &str, package: &str, vulns: Vec<OsvVulnerability>) {
+    let mut cache = OSV_CACHE.write().unwrap_or_else(|e| e.into_inner());
+    cache.insert(format!("{ecosystem}:{package}"), (vulns, Instant::now()));
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

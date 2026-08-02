@@ -21,6 +21,7 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                         codemod: pattern.codemod.map(|s| s.to_string()),
                         confidence: None,
                         judge_rationale: None,
+                        reachability: None,
                     });
                 }
             }

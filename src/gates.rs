@@ -208,6 +208,7 @@ mod tests {
                 codemod: None,
                 confidence: None,
                 judge_rationale: None,
+                reachability: None,
             });
         }
         for _ in 0..warning {
@@ -223,6 +224,7 @@ mod tests {
                 codemod: None,
                 confidence: None,
                 judge_rationale: None,
+                reachability: None,
             });
         }
         for _ in 0..info {
@@ -238,6 +240,7 @@ mod tests {
                 codemod: None,
                 confidence: None,
                 judge_rationale: None,
+                reachability: None,
             });
         }
         out

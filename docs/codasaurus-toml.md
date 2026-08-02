@@ -68,6 +68,13 @@ threshold = 5.0
 [confidence]
 judge_tier1 = false
 drop_ungrounded = false
+
+[index]
+languages = ["rust", "go", "python", "javascript", "typescript"]
+max_files = 50000
+
+[reachability]
+enabled = true
 ```
 
 ## Sections
@@ -81,6 +88,8 @@ drop_ungrounded = false
 | `[pre_merge]`  | Soft caps used as defaults before DB policy overlay       |
 | `[quality_gate]` | Sonar-style gate on new findings; failed gate blocks the check run when `block_on_fail` |
 | `[confidence]` | Per-finding confidence 0-5: optional LLM judge + grounding filter |
+| `[index]` | Whole-repo symbol index: enabled, languages, max_files |
+| `[reachability]` | OSV reachability: upgrade import-hit vulns to OSV severity, tag manifest-only as info |
 
 ## `review_strictness`
 
