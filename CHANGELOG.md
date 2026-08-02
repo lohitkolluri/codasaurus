@@ -33,7 +33,7 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 
 ### Changed
 
-- Review walkthrough is summary-first and list-based (no markdown tables in the main comment); Context/diagram stay collapsed.
+- Review walkthrough uses short prose + Changes list + effort line; findings only as inline comments (no table dump).
 - Related / similar PRs: sample high-signal source paths (skip changelog/docs/lockfile noise), rank by overlap strength instead of GitHub file-list order.
 - Durable `@codasaurus` command replies (describe, summarize, improve, ask, …) update their issue-comment slots in place instead of stacking new posts.
 - Clean-PR `APPROVE` reviews only on open/reopen/ready (not every synchronize); Check Runs update in place on the same SHA.

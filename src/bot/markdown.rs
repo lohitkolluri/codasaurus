@@ -228,8 +228,8 @@ pub fn walkthrough_body(
 
 /// Extended walkthrough with related PRs + novelty sections.
 ///
-/// Layout follows the CodeRabbit-style pattern: short summary above the fold,
-/// walkthrough collapsed by default, secondary context nested in `<details>`.
+/// Shape: short prose Walkthrough, Changes list, estimated effort.
+/// Findings stay on inline review comments — not duplicated here.
 #[allow(clippy::too_many_arguments)]
 pub fn walkthrough_body_ext(
     findings: &Findings,
@@ -263,11 +263,11 @@ pub fn walkthrough_body_ext(
         (
             "review",
             "f59e0b",
-            "Non-blocking findings remain — review before merge.",
+            "Non-blocking findings remain — see inline comments.",
         )
     };
 
-    let mut body = String::with_capacity(3072);
+    let mut body = String::with_capacity(2048);
 
     let brand = shield("codasaurus", "review", "111827");
     let verdict_badge = shield("verdict", verdict_label, verdict_color);
@@ -291,29 +291,28 @@ pub fn walkthrough_body_ext(
         let _ = writeln!(body, "{badge}\n");
     }
 
-    // High-level summary always visible (CodeRabbit: summary above the fold).
-    let _ = writeln!(body, "### Summary\n");
-    write_high_level_summary(&mut body, pr_title, files, total, blocking, warning);
+    let _ = writeln!(body, "## Walkthrough\n");
+    let _ = writeln!(
+        body,
+        "{}\n",
+        walkthrough_prose(pr_title, files, total, blocking, warning)
+    );
+
+    let _ = writeln!(body, "## Changes\n");
+    write_changed_files_summary(&mut body, files);
 
     let effort = estimate_review_effort(files.len(), total, blocking);
-    let effort_badge = shield("effort", &format!("{effort}/5"), effort_color(effort));
+    let (effort_label, minutes) = effort_label_and_minutes(effort);
+    let _ = writeln!(body, "## Review effort\n");
     let _ = writeln!(
         body,
-        "{effort_badge} · {} file{} · {total} finding{}\n",
+        "**{effort}/5** ({effort_label}) · ~{minutes} min · {} file{}\n",
         files.len(),
         if files.len() == 1 { "" } else { "s" },
-        if total == 1 { "" } else { "s" },
     );
-
-    // Collapsed by default — matches CodeRabbit `collapse_walkthrough: true`.
-    let _ = writeln!(body, "<details>");
-    let _ = writeln!(
-        body,
-        "<summary><strong>Walkthrough</strong> — {}</summary>\n",
-        escape_md(pr_title)
-    );
-
-    write_changed_files_summary(&mut body, files);
+    if total > 0 {
+        let _ = writeln!(body, "**Inline comments:** {total} on the diff\n");
+    }
 
     if include_mermaid {
         if let Some(diagram) = mermaid_change_flow(files) {
@@ -365,32 +364,6 @@ pub fn walkthrough_body_ext(
         let _ = writeln!(body, "</details>\n");
     }
 
-    if !findings.is_empty() {
-        let _ = writeln!(body, "**Findings**\n");
-        for f in findings.findings.iter().take(12) {
-            let loc = if f.line > 0 {
-                format!("`{}:{}`", f.file, f.line)
-            } else {
-                format!("`{}`", f.file)
-            };
-            let _ = writeln!(
-                body,
-                "- **{}** · {} — {loc}",
-                f.severity,
-                escape_md(&finding_title(f))
-            );
-        }
-        if findings.findings.len() > 12 {
-            let _ = writeln!(
-                body,
-                "- _…{} more — see inline comments_",
-                findings.findings.len() - 12
-            );
-        }
-        let _ = writeln!(body);
-    }
-
-    let _ = writeln!(body, "**Pre-merge**\n");
     let checks = [
         (!has_blocking, "No blocking findings"),
         (
@@ -399,11 +372,17 @@ pub fn walkthrough_body_ext(
         ),
         (!pr_title.trim().is_empty(), "PR has a title"),
     ];
+    let passed = checks.iter().filter(|(ok, _)| *ok).count();
+    let failed = checks.len() - passed;
+    let _ = writeln!(
+        body,
+        "<details>\n<summary>Pre-merge checks · ✓ {passed} · ✗ {failed}</summary>\n"
+    );
     for (ok, label) in checks {
         let mark = if ok { "✓" } else { "✗" };
         let _ = writeln!(body, "- {mark} {label}");
     }
-    let _ = writeln!(body);
+    let _ = writeln!(body, "\n</details>\n");
 
     if !reviewers.is_empty() {
         let _ = writeln!(
@@ -418,7 +397,6 @@ pub fn walkthrough_body_ext(
         let _ = writeln!(body);
     }
 
-    let _ = writeln!(body, "</details>\n");
     body.push_str(&commands_details());
 
     if include_brand_gif {
@@ -434,16 +412,16 @@ pub fn walkthrough_body_ext(
     body
 }
 
-/// Heuristic TL;DR bullets (no LLM) — areas touched + outcome.
-fn write_high_level_summary(
-    body: &mut String,
+/// One short prose paragraph summarizing the PR.
+fn walkthrough_prose(
     pr_title: &str,
     files: &[serde_json::Value],
     total: usize,
     blocking: usize,
     warning: usize,
-) {
+) -> String {
     use std::collections::BTreeMap;
+    let title = pr_title.trim();
     let mut by_area: BTreeMap<String, usize> = BTreeMap::new();
     for file in files {
         let name = file["filename"].as_str().unwrap_or("?");
@@ -460,33 +438,39 @@ fn write_high_level_summary(
     let area_bits: Vec<String> = areas
         .iter()
         .take(4)
-        .map(|(a, n)| format!("`{a}` ({n})"))
+        .map(|(a, n)| format!("`{a}` ({n} file{})", if *n == 1 { "" } else { "s" }))
         .collect();
 
-    let title = escape_md(pr_title.trim());
+    let mut s = String::new();
     if !title.is_empty() {
-        let _ = writeln!(body, "- **{title}**");
+        s.push_str(&format!("**{}.** ", escape_md(title)));
     }
-    if !area_bits.is_empty() {
-        let _ = writeln!(body, "- Touches {}", area_bits.join(", "));
+    if files.is_empty() {
+        s.push_str("No file changes were detected in the diff.");
+    } else if area_bits.len() == 1 {
+        s.push_str(&format!(
+            "Updates focus on {} across {} path{}.",
+            area_bits[0],
+            files.len(),
+            if files.len() == 1 { "" } else { "s" }
+        ));
     } else {
-        let _ = writeln!(body, "- No file changes detected in the diff");
+        s.push_str(&format!("Touches {}.", area_bits.join(", ")));
     }
     if total == 0 {
-        let _ = writeln!(body, "- Detectors found nothing to flag");
+        s.push_str(" Detectors found nothing to flag.");
     } else if blocking > 0 {
-        let _ = writeln!(
-            body,
-            "- **{blocking}** blocking · {warning} warning · see Findings below"
-        );
-    } else {
-        let _ = writeln!(
-            body,
-            "- {total} non-blocking finding{} — skim Findings, then inline comments",
+        s.push_str(&format!(
+            " Review flagged **{blocking}** blocking and {warning} warning finding{} as inline comments.",
             if total == 1 { "" } else { "s" }
-        );
+        ));
+    } else {
+        s.push_str(&format!(
+            " {total} non-blocking finding{} posted as inline comments.",
+            if total == 1 { "" } else { "s" }
+        ));
     }
-    let _ = writeln!(body);
+    s
 }
 
 /// Clean APPROVE body with optional novelty sections (agent / blast / dep-delta).
@@ -582,20 +566,19 @@ fn estimate_review_effort(files: usize, findings: usize, blocking: usize) -> u8 
     score.min(5)
 }
 
-fn effort_color(effort: u8) -> &'static str {
+fn effort_label_and_minutes(effort: u8) -> (&'static str, u16) {
     match effort {
-        1 => "22c55e",
-        2 => "84cc16",
-        3 => "f59e0b",
-        4 => "f97316",
-        _ => "e11d48",
+        1 => ("Trivial", 2),
+        2 => ("Simple", 10),
+        3 => ("Moderate", 20),
+        4 => ("Complex", 35),
+        _ => ("Critical", 50),
     }
 }
 
-/// Grouped changed-files summary as short bullets (no tables — they dominate GitHub threads).
+/// Grouped changed-files as short cohort bullets (no markdown tables).
 fn write_changed_files_summary(body: &mut String, files: &[serde_json::Value]) {
     use std::collections::BTreeMap;
-    let _ = writeln!(body, "**Changes**\n");
     if files.is_empty() {
         let _ = writeln!(body, "_No files in diff._\n");
         return;
@@ -614,28 +597,42 @@ fn write_changed_files_summary(body: &mut String, files: &[serde_json::Value]) {
         by_area.entry(area).or_default().push((name, status));
     }
 
-    for (area, entries) in by_area.iter().take(8) {
+    for (area, entries) in by_area.iter().take(6) {
         let summary = area_change_summary(area, entries);
+        let sample: Vec<&str> = entries
+            .iter()
+            .take(3)
+            .map(|(n, _)| n.rsplit('/').next().unwrap_or(n))
+            .collect();
+        let sample_s = sample
+            .iter()
+            .map(|n| format!("`{n}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let more = if entries.len() > 3 {
+            format!(" +{}", entries.len() - 3)
+        } else {
+            String::new()
+        };
         let _ = writeln!(
             body,
-            "- `{area}` · {} file{} — {summary}",
-            entries.len(),
-            if entries.len() == 1 { "" } else { "s" }
+            "- **{area}** ({}) — {sample_s}{more}. {summary}",
+            entries.len()
         );
     }
-    if by_area.len() > 8 {
-        let _ = writeln!(body, "- _…{} more areas_", by_area.len() - 8);
+    if by_area.len() > 6 {
+        let _ = writeln!(body, "- _…{} more areas_", by_area.len() - 6);
     }
     let _ = writeln!(body);
 
     let _ = writeln!(body, "<details>\n<summary>File list</summary>\n");
-    for file in files.iter().take(30) {
+    for file in files.iter().take(25) {
         let name = file["filename"].as_str().unwrap_or("?");
         let status = file["status"].as_str().unwrap_or("modified");
         let _ = writeln!(body, "- `{name}` ({status})");
     }
-    if files.len() > 30 {
-        let _ = writeln!(body, "- _…{} more_", files.len() - 30);
+    if files.len() > 25 {
+        let _ = writeln!(body, "- _…{} more_", files.len() - 25);
     }
     let _ = writeln!(body, "\n</details>\n");
 }
@@ -771,7 +768,7 @@ mod tests {
     }
 
     #[test]
-    fn walkthrough_is_summary_first_and_collapsed() {
+    fn walkthrough_is_prose_changes_effort() {
         let findings = Findings {
             findings: vec![Finding {
                 detector: "boilerplate".into(),
@@ -803,14 +800,15 @@ mod tests {
             true,
             WalkthroughExtras::default(),
         );
-        assert!(body.contains("### Summary"));
-        assert!(body.contains("<details>\n<summary><strong>Walkthrough</strong>"));
-        assert!(!body.contains("<details open>"));
-        assert!(body.contains("**Findings**"));
-        assert!(body.contains("- **warning** ·"));
-        assert!(!body.contains("| Sev | Finding | Location |"));
-        assert!(!body.contains("| Area | Files | Summary |"));
-        // Compact counts badge (slashes URL-encoded for shields.io).
+        assert!(body.contains("## Walkthrough"));
+        assert!(body.contains("## Changes"));
+        assert!(body.contains("## Review effort"));
+        assert!(body.contains("Inline comments:"));
+        assert!(body.contains("<summary>Pre-merge checks"));
+        // Findings belong on inline comments — not listed in the walkthrough.
+        assert!(!body.contains("**Findings**"));
+        assert!(!body.contains("| Sev |"));
+        assert!(!body.contains("| Area |"));
         assert!(body.contains("0b%2F1w%2F0i") || body.contains("1w"));
     }
 
