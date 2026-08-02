@@ -170,6 +170,7 @@
   let publicUrl = $state("");
   let auditRetentionDays = $state("90");
   let offlineMode = $state(false);
+  let offlineModeSource = $state("off"); // env | db | off
   // Advanced (hidden by default)
   let queueWorkers = $state("");
   let maxConcurrentReviews = $state("");
@@ -399,7 +400,8 @@
         customInstructions = data.custom_instructions ?? "";
         updatePrDescription = data.update_pr_description === "true";
         allowAutoFix = data.allow_auto_fix === "true";
-        offlineMode = truthy(data.offline_mode);
+        offlineMode = truthy(data.offline_mode_effective ?? data.offline_mode);
+        offlineModeSource = data.offline_mode_source ?? (offlineMode ? "db" : "off");
         publicUrl = data.public_url ?? "";
         auditRetentionDays = data.audit_retention_days ?? "90";
         queueWorkers = data.queue_workers ?? "";
@@ -1352,6 +1354,15 @@
               </div>
             </label>
           </div>
+          <p class="field-hint">
+            Independent of your OpenRouter key — when on, LLM and live registry/OSV calls are blocked.
+            {#if offlineModeSource === "env"}
+              Currently forced by the <code>CODASAURUS_OFFLINE</code> environment variable (e.g. Render).
+              Remove that env var and redeploy, or turn this off and Save (clears the in-process flag until the next deploy).
+            {:else if offlineMode}
+              Turn off and Save under System to re-enable LLM reviews.
+            {/if}
+          </p>
 
           <details class="settings-advanced">
             <summary>Advanced (workers, caps, security)</summary>

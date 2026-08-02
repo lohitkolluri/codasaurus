@@ -185,6 +185,28 @@ async fn get_settings(
         }
     }
 
+    // Offline is a kill-switch independent of OpenRouter keys. Surface the
+    // effective value when `CODASAURUS_OFFLINE` in the process env overrides DB.
+    let db_off = map
+        .get("offline_mode")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let env_forces = std::env::var("CODASAURUS_OFFLINE")
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false);
+    let effective = crate::bot::offline::offline_mode_from_env_and_db(db_off.as_deref());
+    map.insert("offline_mode_effective".into(), json!(effective));
+    map.insert(
+        "offline_mode_source".into(),
+        json!(if env_forces {
+            "env"
+        } else if effective {
+            "db"
+        } else {
+            "off"
+        }),
+    );
+
     Ok(Json(serde_json::Value::Object(map)))
 }
 
@@ -348,6 +370,12 @@ async fn set_setting(
             "1" | "true" | "yes" | "on"
         );
         crate::registry::set_offline_mode(on);
+        // Clearing the kill-switch: drop process env so a stale CODASAURUS_OFFLINE=1
+        // from an earlier mirror does not keep LLM disabled until restart.
+        // (Render dashboard env vars still win on the next deploy — remove them there.)
+        if !on {
+            std::env::remove_var("CODASAURUS_OFFLINE");
+        }
     }
 
     let restart_required = db::config::RESTART_REQUIRED_KEYS.contains(&key.as_str());

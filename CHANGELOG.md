@@ -34,6 +34,7 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 ### Changed
 
 - Related / similar PRs: sample high-signal source paths (skip changelog/docs/lockfile noise), rank by overlap strength instead of GitHub file-list order.
+- Settings → System clarifies that Offline mode is a kill-switch (not tied to LLM keys) and shows when `CODASAURUS_OFFLINE` env forces it.
 - Settings tabs sync to the URL (`/app/settings/llm|review|…`) so deep links stay accurate.
 - Agent-authored PR badge reasons are generic (no vendor product names in walkthrough copy).
 - `.env.example` documents the full dashboard ↔ env mirror set (timeouts, cookies, model cheap, etc.).
