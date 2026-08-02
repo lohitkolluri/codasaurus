@@ -390,7 +390,15 @@ fn status_badge_strip(blocking: usize, warning: usize, info: usize, ready: bool)
     )
 }
 
+/// Note shown in the overview when a PR title was suggested or auto-updated.
+#[derive(Debug, Clone)]
+pub struct TitleFixNote {
+    pub proposed: String,
+    pub applied: bool,
+}
+
 /// Message 1: status badges + prose + what-to-do checklist + progress + Changes.
+#[allow(clippy::too_many_arguments)]
 pub fn overview_comment_body(
     findings: &Findings,
     has_blocking: bool,
@@ -399,6 +407,7 @@ pub fn overview_comment_body(
     runtime: &BotRuntimeConfig,
     agent_badge: Option<&str>,
     progress: Option<&FindingProgress>,
+    title_fix: Option<&TitleFixNote>,
 ) -> String {
     let counts = findings.count_by_severity();
     let blocking = *counts.get("blocking").unwrap_or(&0);
@@ -425,6 +434,7 @@ pub fn overview_comment_body(
     }
 
     write_next_actions(&mut body, &findings.findings);
+    write_title_fix_note(&mut body, title_fix);
     write_agent_fix_prompt(&mut body, &findings.findings, pr_title);
 
     let _ = writeln!(body, "## Changes\n");
@@ -433,6 +443,24 @@ pub fn overview_comment_body(
         truncate_utf8_owned(&mut body, runtime.max_comment_bytes);
     }
     body
+}
+
+fn write_title_fix_note(body: &mut String, note: Option<&TitleFixNote>) {
+    let Some(note) = note else {
+        return;
+    };
+    let title = redact_secrets(&note.proposed);
+    if note.applied {
+        let _ = writeln!(
+            body,
+            "> Updated PR title to `{title}` (high-confidence title fix).\n"
+        );
+    } else {
+        let _ = writeln!(
+            body,
+            "> Suggested title: `{title}` — rename the PR if this looks right.\n"
+        );
+    }
 }
 
 fn write_next_actions(body: &mut String, findings: &[Finding]) {
@@ -1134,6 +1162,7 @@ mod tests {
             &runtime,
             None,
             None,
+            None,
         );
         assert!(body.contains("<!-- codasaurus:overview:v1 -->"));
         assert!(body.contains("## What to do next"));
@@ -1186,6 +1215,7 @@ mod tests {
             &runtime,
             None,
             None,
+            None,
         );
         assert!(!clean_overview.contains("Copy this into your AI coding agent"));
         assert!(!clean_overview.contains("Findings to fix:"));
@@ -1209,10 +1239,41 @@ mod tests {
             &runtime,
             None,
             Some(&progress),
+            None,
         );
         assert!(with_progress.contains("## Since last review"));
         assert!(with_progress.contains("**Resolved**"));
         assert!(with_progress.contains("**Still open**"));
+
+        let suggested = overview_comment_body(
+            &Findings::default(),
+            false,
+            "update",
+            &files,
+            &runtime,
+            None,
+            None,
+            Some(&TitleFixNote {
+                proposed: "feat: add title fix".into(),
+                applied: false,
+            }),
+        );
+        assert!(suggested.contains("Suggested title: `feat: add title fix`"));
+        let applied = overview_comment_body(
+            &Findings::default(),
+            false,
+            "feat: add title fix",
+            &files,
+            &runtime,
+            None,
+            None,
+            Some(&TitleFixNote {
+                proposed: "feat: add title fix".into(),
+                applied: true,
+            }),
+        );
+        assert!(applied.contains("Updated PR title to `feat: add title fix`"));
+        assert!(!applied.contains("Suggested title:"));
 
         let ctx = context_comment_body(
             &WalkthroughExtras {

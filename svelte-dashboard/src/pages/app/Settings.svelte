@@ -49,6 +49,7 @@
   let customInstructions = $state("");
   let updatePrDescription = $state(false);
   let allowAutoFix = $state(false);
+  let prTitleFix = $state("off");
   let reviewSaving = $state(false);
   let reviewMsg = $state("");
 
@@ -400,6 +401,9 @@
         customInstructions = data.custom_instructions ?? "";
         updatePrDescription = data.update_pr_description === "true";
         allowAutoFix = data.allow_auto_fix === "true";
+        prTitleFix = ["off", "suggest", "auto"].includes(data.pr_title_fix)
+          ? data.pr_title_fix
+          : "off";
         offlineMode = truthy(data.offline_mode_effective ?? data.offline_mode);
         offlineModeSource = data.offline_mode_source ?? (offlineMode ? "db" : "off");
         publicUrl = data.public_url ?? "";
@@ -505,6 +509,7 @@
         ["custom_instructions", customInstructions],
         ["update_pr_description", boolVal(updatePrDescription)],
         ["allow_auto_fix", boolVal(allowAutoFix)],
+        ["pr_title_fix", prTitleFix],
       ];
       const { failed } = await putMany(pairs);
       reviewMsg = failed === 0 ? "Saved" : `Save failed (${failed} errors)`;
@@ -1115,6 +1120,15 @@
                       <div class="toggle-knob"></div>
                     </div>
                   </label>
+                </div>
+                <div class="form-group" style="margin-top:12px">
+                  <label for="pr-title-fix">PR title fix</label>
+                  <select id="pr-title-fix" bind:value={prTitleFix} disabled={!canEditSettings}>
+                    <option value="off">Off</option>
+                    <option value="suggest">Suggest only</option>
+                    <option value="auto">Auto-update</option>
+                  </select>
+                  <p class="field-hint">Suggest posts a proposed title; Auto updates the GitHub title when confidence is high. Requires Pull requests: Write.</p>
                 </div>
               </div>
             </details>

@@ -75,6 +75,7 @@ Dashboard **Settings → Review → Tone & thresholds** overrides TOML when set.
     "auto_describe": true,
     "auto_review_diff": false,
     "allow_auto_fix": false,
+    "pr_title_fix": "off",
     "exclude_patterns": ["vendor/"],
     "policy": {
         "min_severity": "warning",

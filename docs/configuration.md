@@ -171,6 +171,18 @@ Use this checklist when GitHub Enterprise is reachable but the public internet i
 
 Do **not** enable `allow_auto_fix` in air-gap until Contents Write is granted and you accept branch commits from the bot.
 
+### PR title fix
+
+Dashboard **Settings → Review** (and per-repo Automation) exposes `pr_title_fix`:
+
+| Value           | Behavior                                                                                                                                                     |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `off` (default) | No title suggestion or update                                                                                                                                |
+| `suggest`       | Overview comments include a high-confidence suggested title                                                                                                  |
+| `auto`          | Codasaurus PATCHes the PR title when confidence is high (conventional commit subject, or guidelines + type prefix). Falls back to suggest if the apply fails |
+
+Proposals follow PR title best practices: conventional `type(scope): description` when guidelines require it, imperative mood, lowercase description, no trailing period, ~72 character soft cap, and skip merge-commit noise. Repo `config_json.pr_title_fix` overrides the org setting. Auto uses Pull requests: Write (same as reviews) — not Contents Write.
+
 ## Offline / egress profiles
 
 `/health` reports:

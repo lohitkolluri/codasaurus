@@ -362,18 +362,24 @@ async fn patch_pr_body(token: &str, repo: &str, pr_number: i64, body: &str) -> a
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()?;
-    let url = format!("https://api.github.com/repos/{repo}/pulls/{pr_number}");
-    let resp = client
-        .patch(&url)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", USER_AGENT)
-        .json(&serde_json::json!({ "body": body }))
-        .send()
-        .await?;
-    if !resp.status().is_success() {
-        tracing::warn!(status = %resp.status(), "update_pr_description failed");
-    }
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::AUTHORIZATION,
+        reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))?,
+    );
+    headers.insert(
+        reqwest::header::ACCEPT,
+        reqwest::header::HeaderValue::from_static("application/vnd.github+json"),
+    );
+    let _ = crate::bot::github_extra::patch_pull_request(
+        &client,
+        &headers,
+        repo,
+        pr_number,
+        None,
+        Some(body),
+    )
+    .await?;
     Ok(())
 }
 
