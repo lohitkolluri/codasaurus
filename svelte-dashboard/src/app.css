@@ -387,7 +387,8 @@ button.choice:not(:disabled):hover span {
 
 button.choice.active {
     border-color: var(--accent-soft);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-soft) 45%, transparent);
+    box-shadow: inset 0 0 0 1px
+        color-mix(in srgb, var(--accent-soft) 45%, transparent);
     background: color-mix(in srgb, var(--accent-soft) 10%, var(--bg-primary));
     color: var(--text-primary);
 }
@@ -396,7 +397,8 @@ button.choice.active:not(:disabled):hover {
     background: color-mix(in srgb, var(--accent-soft) 14%, var(--bg-secondary));
     border-color: var(--accent-soft);
     transform: none;
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-soft) 45%, transparent);
+    box-shadow: inset 0 0 0 1px
+        color-mix(in srgb, var(--accent-soft) 45%, transparent);
 }
 
 /* Ghost */
@@ -1314,9 +1316,19 @@ body,
 }
 
 .finding-location {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
     font-size: var(--text-xs);
     color: var(--text-muted);
     margin-bottom: var(--space-1);
+}
+
+.finding-location .rd-dismiss,
+.finding-location button.rd-dismiss {
+    margin-left: auto;
+    flex-shrink: 0;
 }
 
 .finding-message {
@@ -3066,14 +3078,30 @@ body,
     min-width: 4px;
 }
 
-.analytics-det-fill.tone-0 { --det-bar: var(--accent-soft); }
-.analytics-det-fill.tone-1 { --det-bar: var(--info); }
-.analytics-det-fill.tone-2 { --det-bar: var(--warning); }
-.analytics-det-fill.tone-3 { --det-bar: var(--success); }
-.analytics-det-fill.tone-4 { --det-bar: #a78bfa; }
-.analytics-det-fill.tone-5 { --det-bar: #22d3ee; }
-.analytics-det-fill.tone-6 { --det-bar: #fb7185; }
-.analytics-det-fill.tone-7 { --det-bar: #94a3b8; }
+.analytics-det-fill.tone-0 {
+    --det-bar: var(--accent-soft);
+}
+.analytics-det-fill.tone-1 {
+    --det-bar: var(--info);
+}
+.analytics-det-fill.tone-2 {
+    --det-bar: var(--warning);
+}
+.analytics-det-fill.tone-3 {
+    --det-bar: var(--success);
+}
+.analytics-det-fill.tone-4 {
+    --det-bar: #a78bfa;
+}
+.analytics-det-fill.tone-5 {
+    --det-bar: #22d3ee;
+}
+.analytics-det-fill.tone-6 {
+    --det-bar: #fb7185;
+}
+.analytics-det-fill.tone-7 {
+    --det-bar: #94a3b8;
+}
 
 .analytics-det-count {
     text-align: right;

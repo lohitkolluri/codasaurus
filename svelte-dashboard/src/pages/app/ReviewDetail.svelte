@@ -339,7 +339,7 @@
               <p class="rd-muted">No findings match these filters.</p>
             {:else}
               <p class="rd-nav-hint rd-muted">
-                Open the line on GitHub to judge a dismiss — dashboard findings are summaries, not the full diff.
+                Open a line on GitHub before dismissing.
                 {#if githubPrFilesUrl()}
                   <a href={githubPrFilesUrl()} target="_blank" rel="noopener noreferrer">PR files ↗</a>
                 {/if}
@@ -619,6 +619,7 @@
 
   .rd-dismiss {
     margin-left: auto;
+    flex-shrink: 0;
     font-size: 12px;
   }
 
