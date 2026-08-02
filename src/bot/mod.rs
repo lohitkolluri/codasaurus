@@ -313,20 +313,13 @@ fn author_can_command(payload: &WebhookPayload) -> bool {
 
 /// Who may dismiss findings via emoji reactions (same trust bar as slash commands).
 fn reactor_can_dismiss(payload: &WebhookPayload) -> bool {
-    let reaction_assoc = payload
+    let assoc = payload
         .reaction
         .as_ref()
         .and_then(|r| r.get("author_association"))
         .and_then(|a| a.as_str())
         .unwrap_or("");
-    if matches!(
-        reaction_assoc,
-        "OWNER" | "MEMBER" | "COLLABORATOR" | "CONTRIBUTOR"
-    ) {
-        return true;
-    }
-
-    let reactor = payload
+    let login = payload
         .reaction
         .as_ref()
         .and_then(|r| r.pointer("/user/login"))
@@ -337,23 +330,64 @@ fn reactor_can_dismiss(payload: &WebhookPayload) -> bool {
                 .as_ref()
                 .and_then(|s| s.get("login"))
                 .and_then(|v| v.as_str())
-        })
-        .unwrap_or("");
-    if reactor.is_empty() {
-        return false;
-    }
+        });
+    actor_can_dismiss(
+        assoc,
+        login,
+        repo_owner_login(payload),
+        pr_author_login(payload),
+    )
+}
 
-    let repo_owner = payload
+/// Who may dismiss findings by resolving a review thread (same trust bar as reactions).
+fn thread_resolver_can_dismiss(payload: &WebhookPayload) -> bool {
+    let assoc = payload
+        .thread
+        .as_ref()
+        .and_then(|t| t.pointer("/comments/0/author_association"))
+        .and_then(|a| a.as_str())
+        .unwrap_or("");
+    let login = payload
+        .thread
+        .as_ref()
+        .and_then(|t| t.pointer("/comments/0/user/login"))
+        .and_then(|v| v.as_str())
+        .or_else(|| {
+            payload
+                .sender
+                .as_ref()
+                .and_then(|s| s.get("login"))
+                .and_then(|v| v.as_str())
+        });
+    actor_can_dismiss(
+        assoc,
+        login,
+        repo_owner_login(payload),
+        pr_author_login(payload),
+    )
+}
+
+fn actor_can_dismiss(assoc: &str, login: Option<&str>, repo_owner: &str, pr_author: &str) -> bool {
+    if matches!(assoc, "OWNER" | "MEMBER" | "COLLABORATOR" | "CONTRIBUTOR") {
+        return true;
+    }
+    let Some(login) = login.filter(|l| !l.is_empty()) else {
+        return false;
+    };
+    login.eq_ignore_ascii_case(repo_owner) || login.eq_ignore_ascii_case(pr_author)
+}
+
+fn repo_owner_login(payload: &WebhookPayload) -> &str {
+    payload
         .repo
         .as_ref()
         .and_then(|r| r.pointer("/owner/login"))
         .and_then(|v| v.as_str())
-        .unwrap_or("");
-    if reactor.eq_ignore_ascii_case(repo_owner) {
-        return true;
-    }
+        .unwrap_or("")
+}
 
-    let pr_author = payload
+fn pr_author_login(payload: &WebhookPayload) -> &str {
+    payload
         .issue
         .as_ref()
         .and_then(|i| i.pointer("/user/login"))
@@ -365,56 +399,7 @@ fn reactor_can_dismiss(payload: &WebhookPayload) -> bool {
                 .and_then(|pr| pr.pointer("/user/login"))
                 .and_then(|v| v.as_str())
         })
-        .unwrap_or("");
-    reactor.eq_ignore_ascii_case(pr_author)
-}
-
-/// Who may dismiss findings by resolving a review thread (same trust bar as reactions).
-fn thread_resolver_can_dismiss(payload: &WebhookPayload) -> bool {
-    let assoc = payload
-        .thread
-        .as_ref()
-        .and_then(|t| t.pointer("/comments/0/author_association"))
-        .and_then(|a| a.as_str())
-        .unwrap_or("");
-    if matches!(assoc, "OWNER" | "MEMBER" | "COLLABORATOR" | "CONTRIBUTOR") {
-        return true;
-    }
-
-    let resolver = payload
-        .thread
-        .as_ref()
-        .and_then(|t| t.pointer("/comments/0/user/login"))
-        .and_then(|v| v.as_str())
-        .or_else(|| {
-            payload
-                .sender
-                .as_ref()
-                .and_then(|s| s.get("login"))
-                .and_then(|v| v.as_str())
-        })
-        .unwrap_or("");
-    if resolver.is_empty() {
-        return false;
-    }
-
-    let repo_owner = payload
-        .repo
-        .as_ref()
-        .and_then(|r| r.pointer("/owner/login"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    if resolver.eq_ignore_ascii_case(repo_owner) {
-        return true;
-    }
-
-    let pr_author = payload
-        .pull_request
-        .as_ref()
-        .and_then(|pr| pr.pointer("/user/login"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    resolver.eq_ignore_ascii_case(pr_author)
+        .unwrap_or("")
 }
 
 pub(crate) async fn handle_webhook(
