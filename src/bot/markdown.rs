@@ -1,17 +1,53 @@
-//! Aesthetic, readable PR comment markdown (CodeRabbit / PR-Agent inspired).
+//! Aesthetic, readable PR comment markdown (CodeRabbit / Greptile inspired).
+//!
+//! Uses shields.io badge images (GitHub renders them inline) plus compact tables
+//! and `<details>` sections — same patterns as top AI review bots.
 
 use crate::bot_runtime::BotRuntimeConfig;
 use crate::config::Config;
 use crate::detectors::{Finding, Findings};
 use std::fmt::Write;
 
-/// Severity badge — monospace chips, no emoji noise.
-pub fn severity_badge(severity: &str) -> &'static str {
+/// shields.io badge (flat-square) — safe for GitHub PR markdown.
+fn shield(label: &str, message: &str, color: &str) -> String {
+    let label = urlencoding_lite(label);
+    let message = urlencoding_lite(message);
+    format!(
+        "<img src=\"https://img.shields.io/badge/{label}-{message}-{color}?style=flat-square\" alt=\"{label}: {message}\" />"
+    )
+}
+
+/// Minimal path-segment encoder for shields.io (`-` → `--`, `_` → `__`, space → `_`).
+fn urlencoding_lite(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '-' => "--".to_string(),
+            '_' => "__".to_string(),
+            ' ' => "_".to_string(),
+            '/' => "%2F".to_string(),
+            '?' => "%3F".to_string(),
+            '#' => "%23".to_string(),
+            '&' => "%26".to_string(),
+            c if c.is_ascii_alphanumeric() => c.to_string(),
+            _ => format!("%{:02X}", c as u8),
+        })
+        .collect()
+}
+
+/// Severity badge — shields for the summary table; monospace in tight lists.
+pub fn severity_badge(severity: &str) -> String {
     match severity {
-        "blocking" => "`blocking`",
-        "warning" => "`warning`",
-        _ => "`info`",
+        "blocking" => shield("sev", "blocking", "e11d48"),
+        "warning" => shield("sev", "warning", "f59e0b"),
+        _ => shield("sev", "info", "64748b"),
     }
+}
+
+pub fn ask_header() -> String {
+    format!(
+        "### {} Codasaurus ask\n",
+        shield("codasaurus", "ask", "0ea5e9")
+    )
 }
 
 /// Short fingerprint for display (first 12 hex chars).
@@ -22,7 +58,7 @@ pub fn short_fp(finding: &Finding) -> String {
 
 /// Shared compact commands footer for review / describe comments.
 pub fn commands_details() -> String {
-    "<details>\n<summary><strong>Commands</strong></summary>\n\n\
+    "<details>\n<summary><strong>Commands</strong> · type as plain text (GitHub Apps are not @-mentionable)</summary>\n\n\
      | Command | Action |\n\
      | --- | --- |\n\
      | `@codasaurus review` | Re-run review |\n\
@@ -40,6 +76,7 @@ pub fn commands_details() -> String {
      | `@codasaurus ask …` | Ask about this PR |\n\
      | `@codasaurus ignore <fp>` | Dismiss a finding |\n\
      | `@codasaurus help` | Full command list |\n\n\
+     <sub>Tip: type <code>@codasaurus ask …</code> or <code>codasaurus ask …</code> — no autocomplete user needed.</sub>\n\n\
      </details>\n"
         .into()
 }
@@ -59,12 +96,12 @@ pub fn inline_finding_comment(f: &Finding) -> String {
         String::new()
     };
     let mut body = format!(
-        "**{title}** · {badge}\n\n\
+        "{badge} **{title}**\n\n\
          {why}\n\n\
          **Fix:** {action}\n\n\
          <details>\n<summary>Provenance</summary>\n\n{provenance}\n\n</details>\n\n\
          ---\n\
-         <sub>`fingerprint: {fp}` · `@codasaurus ignore {fp}`{fix_cta} · 👎 to dismiss</sub>"
+         <sub><code>fingerprint: {fp}</code> · <code>@codasaurus ignore {fp}</code>{fix_cta} · 👎 to dismiss</sub>"
     );
 
     if let Some(ref code) = f.codemod {
@@ -226,44 +263,77 @@ pub fn walkthrough_body_ext(
     let info = *counts.get("info").unwrap_or(&0);
     let total = findings.findings.len();
 
-    let (verdict_label, verdict_detail) = if findings.is_empty() {
-        ("ship", "No findings — ready to merge.")
+    let (verdict_label, verdict_color, verdict_detail) = if findings.is_empty() {
+        ("ship", "22c55e", "No findings — ready to merge.")
     } else if has_blocking {
-        ("hold", "Blocking findings must be fixed or dismissed.")
+        (
+            "hold",
+            "e11d48",
+            "Blocking findings must be fixed or dismissed.",
+        )
     } else {
         (
-            "fix-before-ship",
+            "review",
+            "f59e0b",
             "Non-blocking findings remain — review before merge.",
         )
     };
 
-    let mut body = String::with_capacity(2048);
+    let mut body = String::with_capacity(3072);
 
+    let brand = shield("codasaurus", "review", "111827");
+    let verdict_badge = shield("verdict", verdict_label, verdict_color);
+    let block_badge = shield(
+        "blocking",
+        &blocking.to_string(),
+        if blocking > 0 { "e11d48" } else { "22c55e" },
+    );
+    let warn_badge = shield(
+        "warning",
+        &warning.to_string(),
+        if warning > 0 { "f59e0b" } else { "94a3b8" },
+    );
+    let info_badge = shield("info", &info.to_string(), "64748b");
+    let total_badge = shield("findings", &total.to_string(), "0ea5e9");
+
+    let _ = writeln!(body, "### {brand} Codasaurus Review\n");
+    let _ = writeln!(
+        body,
+        "{verdict_badge} {block_badge} {warn_badge} {info_badge} {total_badge}\n"
+    );
     if include_brand_gif && runtime.max_inline_comments > 0 {
-        let _ = writeln!(body, "<sub>Codasaurus · self-hosted PR review</sub>\n");
+        let _ = writeln!(
+            body,
+            "<sub>Self-hosted · BYOK · fail-closed offline mode</sub>\n"
+        );
     }
-
-    let _ = writeln!(body, "### Codasaurus review\n");
     if let Some(badge) = extras.agent_badge {
         let _ = writeln!(body, "{badge}\n");
     }
+    let _ = writeln!(body, "> **{verdict_detail}**\n");
+
+    // CodeRabbit-inspired walkthrough: effort → diagram → files → issues → findings.
+    let _ = writeln!(body, "<details open>");
     let _ = writeln!(
         body,
-        "> **Verdict:** `{verdict_label}` — {verdict_detail}\n"
-    );
-    let _ = writeln!(
-        body,
-        "| | Blocking | Warning | Info | Total |\n\
-         | --- | ---: | ---: | ---: | ---: |\n\
-         | Findings | **{blocking}** | {warning} | {info} | {total} |\n"
+        "<summary><strong>Walkthrough</strong> — {}</summary>\n",
+        escape_md(pr_title)
     );
 
-    let _ = writeln!(body, "<details open>");
-    let _ = writeln!(body, "<summary><strong>Walkthrough</strong></summary>\n");
-    let _ = writeln!(body, "**PR:** {}\n", escape_md(pr_title));
+    let effort = estimate_review_effort(files.len(), total, blocking);
+    let effort_badge = shield("effort", &format!("{effort}/5"), effort_color(effort));
+    let _ = writeln!(body, "#### Estimated review effort\n");
+    let _ = writeln!(
+        body,
+        "{effort_badge} · **{}** file{} · **{total}** finding{}\n",
+        files.len(),
+        if files.len() == 1 { "" } else { "s" },
+        if total == 1 { "" } else { "s" },
+    );
 
     if include_mermaid {
         if let Some(diagram) = mermaid_change_flow(files) {
+            let _ = writeln!(body, "#### Change map\n");
             let _ = writeln!(body, "```mermaid\n{diagram}\n```\n");
         }
     }
@@ -291,18 +361,7 @@ pub fn walkthrough_body_ext(
         let _ = writeln!(body);
     }
 
-    let _ = writeln!(body, "#### Changed files\n");
-    let _ = writeln!(body, "| File | Status |");
-    let _ = writeln!(body, "| --- | --- |");
-    for file in files.iter().take(40) {
-        let name = file["filename"].as_str().unwrap_or("?");
-        let status = file["status"].as_str().unwrap_or("modified");
-        let _ = writeln!(body, "| `{name}` | `{status}` |");
-    }
-    if files.len() > 40 {
-        let _ = writeln!(body, "| _…_ | _{} more_ |", files.len() - 40);
-    }
-    let _ = writeln!(body);
+    write_changed_files_summary(&mut body, files);
 
     if !findings.is_empty() {
         let _ = writeln!(body, "#### Findings\n");
@@ -317,7 +376,7 @@ pub fn walkthrough_body_ext(
                 body,
                 "- {} **{}** — {loc} · `{fp}`",
                 severity_badge(f.severity),
-                finding_title(f),
+                finding_title(f)
             );
         }
         if findings.findings.len() > 30 {
@@ -346,9 +405,10 @@ pub fn walkthrough_body_ext(
     let _ = writeln!(body);
 
     if !reviewers.is_empty() {
+        let _ = writeln!(body, "#### Suggested reviewers\n");
         let _ = writeln!(
             body,
-            "**Suggested reviewers:** {}",
+            "{}",
             reviewers
                 .iter()
                 .map(|r| format!("@{r}"))
@@ -373,10 +433,15 @@ pub fn clean_approve_body_ext(
     blast_md: &str,
     dep_delta_md: &str,
 ) -> String {
-    let mut body = String::from(
-        "### Codasaurus review\n\n\
-         > **Verdict:** `ship` — No findings.\n\n\
-         Tier-1 detectors found nothing to block. You're clear to merge.\n\n",
+    let mut body = String::new();
+    let brand = shield("codasaurus", "review", "111827");
+    let verdict = shield("verdict", "ship", "22c55e");
+    let findings = shield("findings", "0", "22c55e");
+    let _ = writeln!(body, "### {brand} Codasaurus Review\n");
+    let _ = writeln!(body, "{verdict} {findings}\n");
+    let _ = writeln!(
+        body,
+        "> **No findings — ready to merge.** Tier-1 detectors found nothing to block.\n"
     );
     if let Some(badge) = agent_badge.filter(|s| !s.is_empty()) {
         body.push_str(badge);
@@ -399,35 +464,127 @@ pub fn clean_approve_body_ext(
 }
 
 pub fn help_body() -> String {
-    "### Codasaurus commands\n\n\
-     Mention `@codasaurus` on a PR comment:\n\n\
-     | Command | What it does |\n\
-     | --- | --- |\n\
-     | `review` | Static (+ optional LLM) review |\n\
-     | `describe` | Walkthrough / PR summary |\n\
-     | `summarize` | Short executive summary |\n\
-     | `improve` | Actionable improvement suggestions |\n\
-     | `security` | Secrets / vuln-focused scan |\n\
-     | `labels` | Suggest and apply PR labels |\n\
-     | `changelog` / `update_changelog` | Keep a Changelog draft |\n\
-     | `add_docs` | README / docs stubs |\n\
-     | `similar` | Related PRs by path history |\n\
-     | `impact` | Blast-radius estimate |\n\
-     | `fix` / `fix <fp>` | Apply available codemods (opt-in) |\n\
-     | `digest` | Weekly review rollup |\n\
-     | `ask …` | Answer a question about this PR |\n\
-     | `ignore <fp>` | Dismiss a finding by fingerprint |\n\
-     | 👎 / `-1` on a finding | Learn dismiss (reaction) |\n\
-     | `help` | Show this help |\n\n\
-     <sub>Self-hosted · BYOK · fail-closed offline mode</sub>\n"
-        .into()
+    let brand = shield("codasaurus", "commands", "8b5cf6");
+    format!(
+        "### {brand} Codasaurus commands\n\n\
+         GitHub Apps **cannot be @-mentioned** like a user. Type the text literally:\n\n\
+         ```text\n\
+         @codasaurus ask why is this flaky?\n\
+         codasaurus review\n\
+         ```\n\n\
+         | Command | What it does |\n\
+         | --- | --- |\n\
+         | `review` | Static (+ optional LLM) review |\n\
+         | `describe` | Walkthrough / PR summary |\n\
+         | `summarize` | Short executive summary |\n\
+         | `improve` | Actionable improvement suggestions |\n\
+         | `security` | Secrets / vuln-focused scan |\n\
+         | `labels` | Suggest and apply PR labels |\n\
+         | `changelog` / `update_changelog` | Keep a Changelog draft |\n\
+         | `add_docs` | README / docs stubs |\n\
+         | `similar` | Related PRs by path history |\n\
+         | `impact` | Blast-radius estimate |\n\
+         | `fix` / `fix <fp>` | Apply available codemods (opt-in) |\n\
+         | `digest` | Weekly review rollup |\n\
+         | `ask …` | Answer a question about this PR |\n\
+         | `ignore <fp>` | Dismiss a finding by fingerprint |\n\
+         | 👎 / `-1` on a finding | Learn dismiss (reaction) |\n\
+         | `help` | Show this help |\n\n\
+         <sub>Self-hosted · BYOK · fail-closed offline mode</sub>\n"
+    )
 }
 
 fn escape_md(s: &str) -> String {
     s.replace('|', "\\|").replace('\n', " ").replace('*', "\\*")
 }
 
-/// Compact mermaid flowchart of top path prefixes (shown when LLM is on).
+/// Heuristic 1–5 review effort (CodeRabbit-style estimate; no LLM).
+fn estimate_review_effort(files: usize, findings: usize, blocking: usize) -> u8 {
+    let mut score = 1u8;
+    if files > 3 {
+        score += 1;
+    }
+    if files > 12 {
+        score += 1;
+    }
+    if findings > 0 {
+        score += 1;
+    }
+    if blocking > 0 || findings > 8 {
+        score += 1;
+    }
+    score.min(5)
+}
+
+fn effort_color(effort: u8) -> &'static str {
+    match effort {
+        1 => "22c55e",
+        2 => "84cc16",
+        3 => "f59e0b",
+        4 => "f97316",
+        _ => "e11d48",
+    }
+}
+
+/// Grouped changed-files summary (CodeRabbit “changed files summary” pattern).
+fn write_changed_files_summary(body: &mut String, files: &[serde_json::Value]) {
+    use std::collections::BTreeMap;
+    let _ = writeln!(body, "#### Changed files\n");
+    if files.is_empty() {
+        let _ = writeln!(body, "_No files in diff._\n");
+        return;
+    }
+
+    let mut by_area: BTreeMap<String, Vec<(&str, &str)>> = BTreeMap::new();
+    for file in files {
+        let name = file["filename"].as_str().unwrap_or("?");
+        let status = file["status"].as_str().unwrap_or("modified");
+        let area = name
+            .split('/')
+            .next()
+            .filter(|p| !p.is_empty() && *p != name)
+            .unwrap_or("(root)")
+            .to_string();
+        by_area.entry(area).or_default().push((name, status));
+    }
+
+    let _ = writeln!(body, "| Area | Files | Status mix |");
+    let _ = writeln!(body, "| --- | ---: | --- |");
+    for (area, entries) in by_area.iter().take(12) {
+        let mut added = 0usize;
+        let mut modified = 0usize;
+        let mut removed = 0usize;
+        for (_, st) in entries {
+            match *st {
+                "added" => added += 1,
+                "removed" => removed += 1,
+                _ => modified += 1,
+            }
+        }
+        let mix = format!("+{added} ~{modified} -{removed}");
+        let _ = writeln!(body, "| `{area}` | {} | `{mix}` |", entries.len());
+    }
+    if by_area.len() > 12 {
+        let _ = writeln!(body, "| _…_ | _{} areas_ | |", by_area.len() - 12);
+    }
+    let _ = writeln!(body);
+
+    // Compact path list (capped) for reviewers who want the full set.
+    let _ = writeln!(body, "<details>\n<summary>File list</summary>\n");
+    let _ = writeln!(body, "| File | Status |");
+    let _ = writeln!(body, "| --- | --- |");
+    for file in files.iter().take(40) {
+        let name = file["filename"].as_str().unwrap_or("?");
+        let status = file["status"].as_str().unwrap_or("modified");
+        let _ = writeln!(body, "| `{name}` | `{status}` |");
+    }
+    if files.len() > 40 {
+        let _ = writeln!(body, "| _…_ | _{} more_ |", files.len() - 40);
+    }
+    let _ = writeln!(body, "\n</details>\n");
+}
+
+/// Mermaid change-map of top path prefixes (GitHub renders natively; no LLM).
 fn mermaid_change_flow(files: &[serde_json::Value]) -> Option<String> {
     use std::collections::BTreeMap;
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
@@ -454,12 +611,13 @@ fn mermaid_change_flow(files: &[serde_json::Value]) -> Option<String> {
     }
     let mut nodes: Vec<(String, usize)> = counts.into_iter().collect();
     nodes.sort_by(|a, b| b.1.cmp(&a.1));
-    nodes.truncate(6);
+    nodes.truncate(8);
 
-    let mut out = String::from("flowchart LR\n  Author --> Review[Codasaurus]\n");
+    // Top-down map reads better in the walkthrough than a left-to-right chain.
+    let mut out = String::from("flowchart TB\n  PR[Pull request] --> Review[Codasaurus]\n");
     for (i, (name, n)) in nodes.iter().enumerate() {
         let id = format!("N{i}");
-        let _ = writeln!(out, "  Review --> {id}[{name} ×{n}]");
+        let _ = writeln!(out, "  Review --> {id}[{name} x{n}]");
     }
     Some(out)
 }
@@ -525,5 +683,24 @@ mod tests {
     fn help_lists_impact() {
         assert!(help_body().contains("impact"));
         assert!(commands_details().contains("`@codasaurus impact`"));
+    }
+
+    #[test]
+    fn mermaid_change_map_from_files() {
+        let files = vec![
+            serde_json::json!({"filename": "src/bot/mod.rs", "status": "modified"}),
+            serde_json::json!({"filename": "src/api/setup.rs", "status": "modified"}),
+            serde_json::json!({"filename": "docs/setup.md", "status": "added"}),
+        ];
+        let diagram = mermaid_change_flow(&files).expect("diagram");
+        assert!(diagram.contains("flowchart TB"));
+        assert!(diagram.contains("src"));
+        assert!(diagram.contains("docs"));
+    }
+
+    #[test]
+    fn effort_scales_with_size() {
+        assert_eq!(estimate_review_effort(1, 0, 0), 1);
+        assert!(estimate_review_effort(20, 10, 2) >= 4);
     }
 }

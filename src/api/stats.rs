@@ -238,7 +238,7 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
     let pass_rate_7d: Option<f64> = crate::db::db_scalar!(
         &state.pool,
         Option<f64>,
-        "SELECT AVG(CASE WHEN status = 'passed' THEN 100.0 WHEN status = 'failed' THEN 0.0 ELSE NULL END)
+        "SELECT AVG(CASE WHEN status = 'passed' THEN 100.0 WHEN status = 'failed' THEN 0.0 ELSE NULL END)::float8
          FROM reviews
          WHERE created_at >= NOW() - INTERVAL '7 days'"
     )
@@ -248,7 +248,7 @@ async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>,
     let pass_rate_prev_7d: Option<f64> = crate::db::db_scalar!(
         &state.pool,
         Option<f64>,
-        "SELECT AVG(CASE WHEN status = 'passed' THEN 100.0 WHEN status = 'failed' THEN 0.0 ELSE NULL END)
+        "SELECT AVG(CASE WHEN status = 'passed' THEN 100.0 WHEN status = 'failed' THEN 0.0 ELSE NULL END)::float8
          FROM reviews
          WHERE created_at >= NOW() - INTERVAL '14 days'
            AND created_at < NOW() - INTERVAL '7 days'"

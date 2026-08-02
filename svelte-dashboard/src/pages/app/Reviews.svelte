@@ -56,18 +56,30 @@
   function goToReview(id) {
     push(`/app/reviews/${id}`);
   }
+
+  function formatWhen(iso) {
+    if (!iso) return "";
+    try {
+      return new Date(iso).toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "";
+    }
+  }
 </script>
 
 <AppShell title="Reviews">
-  <div class="page-panel">
-    <div class="page-panel-toolbar">
-      <div class="page-toolbar compact" style="margin-bottom: 0">
-        <div>
-          <h1 class="page-title">Reviews</h1>
-          <p class="page-description">Every automated review and its findings.</p>
-        </div>
+  <div class="page-panel reviews-page">
+    <div class="page-panel-toolbar reviews-toolbar">
+      <div class="reviews-heading">
+        <h1 class="page-title">Reviews</h1>
+        <p class="page-description">Every automated review and its findings.</p>
       </div>
-      <div class="filter-bar" style="margin-top: var(--space-4); margin-bottom: 0">
+      <div class="filter-bar reviews-filters">
         <div class="form-group">
           <label for="filter-repo">Repository</label>
           <select id="filter-repo" bind:value={filterRepo} onchange={handleFilterChange}>
@@ -122,11 +134,14 @@
                 }
               }}
             >
-              <h3>{review.pr_title ?? `PR #${review.pr_number}`}</h3>
-              <div class="review-meta">
-                <span>{review.repo_name ?? `Repo #${review.repo_id}`}</span>
+              <div class="review-card-top">
+                <h3>{review.pr_title ?? `PR #${review.pr_number}`}</h3>
                 <span class="status-badge {review.status}">{review.status}</span>
-                <span>{review.created_at ? new Date(review.created_at).toLocaleString() : ""}</span>
+              </div>
+              <div class="review-meta">
+                <span class="review-repo">{review.repo_name ?? `Repo #${review.repo_id}`}</span>
+                <span class="review-sep" aria-hidden="true">·</span>
+                <span class="review-when">{formatWhen(review.created_at)}</span>
               </div>
             </div>
           {/each}
@@ -148,6 +163,24 @@
 </AppShell>
 
 <style>
+  .reviews-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--space-4);
+  }
+
+  .reviews-heading {
+    min-width: min(100%, 240px);
+    flex: 1 1 240px;
+  }
+
+  .reviews-filters {
+    margin: 0;
+    flex: 0 1 auto;
+  }
+
   .reviews-scroll {
     border: none;
     background: transparent;
@@ -156,5 +189,57 @@
 
   .reviews-scroll .activity-list {
     margin: 0;
+  }
+
+  .reviews-page :global(.review-card-top) {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+  }
+
+  .reviews-page :global(.review-card-top h3) {
+    margin: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+    line-height: 1.35;
+  }
+
+  .reviews-page :global(.review-card-top .status-badge) {
+    margin-left: 0;
+    flex-shrink: 0;
+    text-transform: capitalize;
+  }
+
+  .reviews-page :global(.review-meta) {
+    gap: var(--space-2);
+  }
+
+  .review-sep {
+    opacity: 0.45;
+  }
+
+  .review-repo {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 12px;
+  }
+
+  .review-when {
+    color: var(--text-muted);
+  }
+
+  @media (max-width: 640px) {
+    .reviews-toolbar {
+      align-items: stretch;
+    }
+
+    .reviews-filters {
+      width: 100%;
+    }
+
+    .reviews-filters :global(.form-group) {
+      flex: 1 1 140px;
+    }
   }
 </style>

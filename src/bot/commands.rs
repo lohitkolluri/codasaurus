@@ -34,11 +34,12 @@ pub(crate) enum BotCommand {
 
 pub(crate) fn parse_bot_command(body: &str) -> Option<BotCommand> {
     let lower = body.to_ascii_lowercase();
-    let mentions = ["@codasaurus", "@codasaurus-bot"];
-    if !mentions.iter().any(|m| lower.contains(m)) {
+    // GitHub Apps are not @-mentionable via autocomplete — accept plain-text
+    // `@codasaurus`, slug form, and `codasaurus …` / `/codasaurus …` prefixes.
+    if !is_bot_addressed(&lower) {
         return None;
     }
-    if lower.contains("@codasaurus help") || lower.contains("@codasaurus-bot help") {
+    if lower.contains("codasaurus help") || lower.contains("codasaurus-bot help") {
         return Some(BotCommand::Help);
     }
     if lower.contains("add_docs") || lower.contains("add-docs") || lower.contains("add docs") {
@@ -91,8 +92,39 @@ pub(crate) fn parse_bot_command(body: &str) -> Option<BotCommand> {
     None
 }
 
+/// True when the comment is directed at Codasaurus (mention or bare name).
+fn is_bot_addressed(lower: &str) -> bool {
+    if lower.contains("@codasaurus") || lower.contains("@codasaurus-bot") {
+        return true;
+    }
+    let trimmed = lower.trim_start();
+    if trimmed.starts_with("/codasaurus")
+        || trimmed.starts_with("codasaurus ")
+        || trimmed.starts_with("codasaurus\n")
+        || trimmed.starts_with("codasaurus\t")
+    {
+        return true;
+    }
+    // App slug from manifest (e.g. `@codasaurus-a1b2`) — not always in autocomplete.
+    if let Ok(slug) = std::env::var("GITHUB_APP_SLUG") {
+        let slug = slug.trim().to_ascii_lowercase();
+        if !slug.is_empty() {
+            let at = format!("@{slug}");
+            if lower.contains(&at) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 fn extract_ask_question(body: &str) -> Option<String> {
-    for prefix in ["@codasaurus ask ", "@codasaurus-bot ask "] {
+    for prefix in [
+        "@codasaurus ask ",
+        "@codasaurus-bot ask ",
+        "/codasaurus ask ",
+        "codasaurus ask ",
+    ] {
         if let Some(rest) = body.split(prefix).nth(1) {
             let q = rest.trim();
             if !q.is_empty() {
@@ -479,10 +511,11 @@ async fn spawn_ask(ctx: WebhookContext, pr_number: i64, question: String, timeou
                 .await
                 .unwrap_or_else(|e| format!("Could not answer: {e}"))
         } else {
-            "Configure an LLM API key to use `@codasaurus ask`.".into()
+            crate::llm::LlmConfig::unavailable_reason(pool).await
         };
         let text = format!(
-            "### Codasaurus ask\n\n**Question**\n\n> {question}\n\n**Answer**\n\n{answer}\n\n---\n{}",
+            "{}\n\n**Question**\n\n> {question}\n\n**Answer**\n\n{answer}\n\n---\n{}",
+            crate::bot::markdown::ask_header(),
             crate::bot::markdown::commands_details()
         );
         post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
@@ -1458,8 +1491,19 @@ mod tests {
     }
 
     #[test]
+    fn parses_bare_codasaurus_ask_without_at() {
+        let cmd = parse_bot_command("codasaurus ask why is the cache keyed only on user id?");
+        match cmd {
+            Some(BotCommand::Ask(q)) => assert!(q.contains("cache")),
+            other => panic!("expected Ask, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn ignores_unrelated_comments() {
         assert!(parse_bot_command("lgtm thanks").is_none());
+        // Prose mentioning the product name mid-sentence should not trigger.
+        assert!(parse_bot_command("I like how codasaurus handles reviews").is_none());
     }
 
     #[test]

@@ -67,6 +67,16 @@
         Next you'll create an admin login. After that, install the App on the repos you want reviewed.
       </p>
     </div>
+    <div class="info-box" style="margin-top:12px">
+      <strong style="font-size:13px">Optional: App icon</strong>
+      <p style="margin:8px 0 0;font-size:13px;opacity:0.9">
+        GitHub’s create-from-manifest flow cannot set a logo. After setup, open
+        <strong>GitHub → Settings → Developer settings → GitHub Apps → your app → Display information</strong>
+        and upload
+        <a href="/branding/logo.png" target="_blank" rel="noopener noreferrer">/branding/logo.png</a>
+        (512×512 PNG).
+      </p>
+    </div>
   {:else}
     <button class="primary" onclick={openManifest} style="width:100%;margin-bottom:12px;padding:12px">
       Create GitHub App

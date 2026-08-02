@@ -40,7 +40,7 @@ pub async fn spend_usd_last_day(pool: &DbPool) -> f64 {
     db_scalar!(
         pool,
         f64,
-        "SELECT COALESCE(SUM(cost_usd_est), 0)
+        "SELECT COALESCE(SUM(cost_usd_est), 0)::float8
          FROM agent_events
          WHERE event_type = 'llm.call'
            AND ts >= NOW() - INTERVAL '1 day'"

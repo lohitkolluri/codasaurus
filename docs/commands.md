@@ -5,7 +5,9 @@
   <a href="README.md"><img src="https://img.shields.io/badge/docs-index-111827" alt="Docs index"></a>
 </p>
 
-Mention **`@codasaurus`** (or your App’s slug) on a pull request comment. Commands are case-insensitive; extra words after the verb become arguments for `ask` / `ignore` / `fix`.
+Type **`@codasaurus`** (or your App’s slug) as plain text on a pull request comment. GitHub Apps are **not** @-mentionable like users — they will not appear in the autocomplete picker. You can also start a comment with `codasaurus ask …` (no `@`).
+
+Commands are case-insensitive; extra words after the verb become arguments for `ask` / `ignore` / `fix`. LLM commands (`ask`, `improve`, …) need an API key under **Settings → LLM**.
 
 ## Core review
 

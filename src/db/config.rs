@@ -243,6 +243,12 @@ pub const ENV_MIRROR_KEYS: &[(&str, &str)] = &[
     ("secure_cookies", "CODASAURUS_SECURE_COOKIES"),
     ("llm_daily_budget_usd", "CODASAURUS_LLM_DAILY_BUDGET_USD"),
     ("offline_mode", "CODASAURUS_OFFLINE"),
+    // LLM — so `@codasaurus ask` and workers see dashboard keys without restart.
+    ("openrouter_api_key", "OPENROUTER_API_KEY"),
+    ("llm_model", "CODASAURUS_MODEL"),
+    ("llm_model_cheap", "CODASAURUS_MODEL_CHEAP"),
+    ("llm_base_url", "CODASAURUS_BASE_URL"),
+    ("github_app_slug", "GITHUB_APP_SLUG"),
     ("jira_base_url", "JIRA_BASE_URL"),
     ("jira_email", "JIRA_EMAIL"),
     ("jira_api_token", "JIRA_API_TOKEN"),

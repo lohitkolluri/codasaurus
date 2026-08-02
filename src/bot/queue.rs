@@ -30,11 +30,16 @@ pub async fn enqueue(
          VALUES (?, ?, ?, ?, ?, 'pending', 0, NOW(), NOW())
          ON CONFLICT(repo, pr_number, head_sha) DO UPDATE SET
            status = CASE
-             WHEN review_jobs.status IN ('done', 'failed') THEN 'pending'
+             -- Retry failures only. Do not re-pend a successful job for the same
+             -- SHA (duplicate opened/synchronize deliveries would post twice).
+             WHEN review_jobs.status = 'failed' THEN 'pending'
              ELSE review_jobs.status
            END,
-           installation_id = excluded.installation_id,
-           action = excluded.action,
+           installation_id = COALESCE(excluded.installation_id, review_jobs.installation_id),
+           action = CASE
+             WHEN review_jobs.status = 'failed' THEN excluded.action
+             ELSE review_jobs.action
+           END,
            updated_at = NOW()
          RETURNING id",
         repo,
