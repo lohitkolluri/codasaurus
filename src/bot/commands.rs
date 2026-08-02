@@ -30,6 +30,8 @@ pub(crate) enum BotCommand {
     Ask(String),
     Ignore(Option<String>),
     Retry,
+    Wiki,
+    ApproveRule(Option<String>),
     Help,
 }
 
@@ -58,6 +60,12 @@ pub(crate) fn parse_bot_command(body: &str) -> Option<BotCommand> {
     }
     if lower.contains("digest") || lower.contains("weekly") {
         return Some(BotCommand::Digest);
+    }
+    if lower.contains("wiki") || lower.contains("rules") {
+        return Some(BotCommand::Wiki);
+    }
+    if lower.contains("approve-rule") || lower.contains("approve_rule") {
+        return Some(BotCommand::ApproveRule(extract_rule_id(body)));
     }
     if lower.contains("@codasaurus fix")
         || lower.contains("@codasaurus-bot fix")
@@ -174,6 +182,22 @@ fn extract_ignore_fingerprint(body: &str) -> Option<String> {
     None
 }
 
+fn extract_rule_id(body: &str) -> Option<String> {
+    let lower = body.to_ascii_lowercase();
+    let p = "approve-rule ";
+    let idx = lower.find(p)?;
+    let id = body[idx + p.len()..]
+        .split_whitespace()
+        .next()?
+        .trim()
+        .to_string();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id)
+    }
+}
+
 fn extract_fix_fingerprint(body: &str) -> Option<String> {
     for prefix in [
         "@codasaurus fix ",
@@ -223,6 +247,8 @@ pub(crate) async fn handle_bot_command(
         BotCommand::Impact => spawn_impact(ctx, pr_number, timeout_secs).await,
         BotCommand::Digest => spawn_digest(ctx, pr_number).await,
         BotCommand::Retry => spawn_review(ctx, pr_number, timeout_secs).await,
+        BotCommand::Wiki => spawn_wiki_comment(ctx, pr_number).await,
+        BotCommand::ApproveRule(id) => spawn_approve_rule(ctx, pr_number, id).await,
     }
 }
 
@@ -286,6 +312,76 @@ async fn spawn_simple_comment(ctx: WebhookContext, pr_number: i64, body: String)
             }
         }
         Err(e) => tracing::error!(error = %e, "auth error"),
+    }
+}
+
+/// Render approved team rules for this repo as a "wiki" comment.
+async fn spawn_wiki_comment(ctx: WebhookContext, pr_number: i64) {
+    let Some(pool) = bot_db_pool() else {
+        return;
+    };
+    let store = LearningStore::from_pool(pool);
+    let rules = match store.list_rules().await {
+        Ok(rules) => rules,
+        Err(e) => {
+            tracing::error!(error = %e, "wiki: list_rules failed");
+            return;
+        }
+    };
+    let approved: Vec<_> = rules
+        .into_iter()
+        .filter(|r| {
+            r.status == "approved"
+                && (r
+                    .repo_full_name
+                    .as_deref()
+                    .is_none_or(|rn| rn.is_empty() || rn == ctx.repo_full_name))
+        })
+        .collect();
+    let body = crate::bot::markdown::wiki_body(&approved);
+    match get_installation_token(&ctx.cfg, ctx.inst_id).await {
+        Ok(token) => {
+            if let Err(e) =
+                post_issue_comment_kind(&token, &ctx.repo_full_name, pr_number, &body, Some("wiki"))
+                    .await
+            {
+                tracing::error!(error = %e, "wiki: post failed");
+            }
+        }
+        Err(e) => tracing::error!(error = %e, "wiki: auth error"),
+    }
+}
+
+/// Approve a suggested rule mined from dismissals (maintainer-gated upstream).
+async fn spawn_approve_rule(ctx: WebhookContext, pr_number: i64, id: Option<String>) {
+    let Some(id) = id else {
+        spawn_simple_comment(
+            ctx,
+            pr_number,
+            "### Codasaurus\n\nUsage: `@codasaurus approve-rule <rule-id>`".into(),
+        )
+        .await;
+        return;
+    };
+    let Some(pool) = bot_db_pool() else {
+        return;
+    };
+    let store = LearningStore::from_pool(pool);
+    let body = match store.approve_rule(&id).await {
+        Ok(true) => format!("### Codasaurus\n\nApproved rule `{id}` — it now applies to future reviews."),
+        Ok(false) => format!("### Codasaurus\n\nNo *suggested* rule with id `{id}`. Run `@codasaurus wiki` to see candidate ids."),
+        Err(e) => format!("### Codasaurus\n\nFailed to approve rule `{id}`: {e}"),
+    };
+    match get_installation_token(&ctx.cfg, ctx.inst_id).await {
+        Ok(token) => {
+            if let Err(e) =
+                post_issue_comment_kind(&token, &ctx.repo_full_name, pr_number, &body, Some("wiki"))
+                    .await
+            {
+                tracing::error!(error = %e, "approve-rule: post failed");
+            }
+        }
+        Err(e) => tracing::error!(error = %e, "approve-rule: auth error"),
     }
 }
 
@@ -1579,6 +1675,22 @@ async fn spawn_fix(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_wiki_and_approve_rule() {
+        assert!(matches!(
+            parse_bot_command("@codasaurus wiki"),
+            Some(BotCommand::Wiki)
+        ));
+        assert!(matches!(
+            parse_bot_command("@codasaurus approve-rule auto-abc123"),
+            Some(BotCommand::ApproveRule(Some(ref id))) if id == "auto-abc123"
+        ));
+        assert!(matches!(
+            parse_bot_command("@codasaurus approve-rule"),
+            Some(BotCommand::ApproveRule(None))
+        ));
+    }
 
     #[test]
     fn parses_review_and_add_docs() {

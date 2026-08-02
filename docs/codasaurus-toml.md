@@ -90,6 +90,13 @@ enabled = true
 enabled = true
 require_approvals = 1
 block_on_blockers = true
+
+[learning]
+# Dismissals mine candidate rules; approve them with @codasaurus approve-rule <id>.
+auto_approve_rules = false
+# Reserved: write CODASAURUS_RULES.md into the repo via a bot PR (not implemented).
+publish_wiki = false
+min_dismissals_for_rule = 3
 ```
 
 ## Sections
@@ -106,6 +113,7 @@ block_on_blockers = true
 | `[index]` | Whole-repo symbol index: enabled, languages, max_files |
 | `[reachability]` | OSV reachability: upgrade import-hit vulns to OSV severity, tag manifest-only as info |
 | `[readiness]` | Merge-readiness score 0-5: hard blockers zero it, soft signals weight it |
+| `[learning]` | Dismissal → rule mining: approval gate, wiki publication (reserved), threshold |
 
 ## `review_strictness`
 

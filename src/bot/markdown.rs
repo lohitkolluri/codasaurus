@@ -1050,12 +1050,34 @@ pub fn help_body() -> String {
          | `impact` | Blast-radius estimate |\n\
          | `fix` / `fix <fp>` | Apply available codemods (opt-in) |\n\
          | `digest` | Weekly review rollup |\n\
+         | `wiki` | Team rules learned from dismissals |\n\
+         | `approve-rule <id>` | Approve a suggested rule |\n\
          | `ask …` | Answer a question about this PR |\n\
          | `ignore <fp>` | Dismiss a finding by fingerprint |\n\
          | 👎 / `-1` on a finding | Learn dismiss (reaction) |\n\
          | `help` | Show this help |\n\n\
          <sub>Self-hosted · BYOK · fail-closed offline mode</sub>\n"
     )
+}
+
+/// Render the team-rules wiki from approved learned rules.
+pub fn wiki_body(rules: &[crate::learning::LearnedRule]) -> String {
+    if rules.is_empty() {
+        return "## Team rules\n\n_No approved rules yet. Dismiss false positives on PRs to mine candidates, then `@codasaurus approve-rule <id>`._"
+            .into();
+    }
+    let mut md = String::from(
+        "## Team rules\n\n| Detector | Scope | Rule | Sources | Status |\n|---|---|---|---|---|\n",
+    );
+    for r in rules {
+        let scope = r.file_pattern.as_deref().unwrap_or("repo-wide");
+        let rule = format!("{}: {}", r.action.as_str(), r.reason);
+        md.push_str(&format!(
+            "| {} | `{}` | {} | {} | {} |\n",
+            r.detector, scope, rule, r.source_count, r.status
+        ));
+    }
+    md
 }
 
 fn escape_md(s: &str) -> String {
@@ -1150,6 +1172,28 @@ fn truncate_utf8_owned(s: &mut String, max_bytes: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wiki_body_renders_approved_rules() {
+        let rules = vec![crate::learning::LearnedRule {
+            id: "auto-1".into(),
+            detector: "secrets".into(),
+            file_pattern: Some("tests".into()),
+            message_pattern: None,
+            action: crate::learning::RuleAction::Ignore,
+            reason: "false positives in tests".into(),
+            created_at: chrono::Utc::now(),
+            repo_full_name: Some("acme/repo".into()),
+            status: "approved".into(),
+            source_count: 4,
+        }];
+        let md = wiki_body(&rules);
+        assert!(md.contains("## Team rules"));
+        assert!(
+            md.contains("| secrets | `tests` | ignore: false positives in tests | 4 | approved |")
+        );
+        assert!(wiki_body(&[]).contains("No approved rules"));
+    }
 
     #[test]
     fn redacts_long_tokens() {
