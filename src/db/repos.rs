@@ -80,43 +80,50 @@ pub async fn update_repo(
 }
 
 pub async fn delete_repo(pool: &DbPool, id: i64) -> Result<(), sqlx::Error> {
-    let full_name: Option<String> = crate::db::db_scalar_optional!(
-        pool,
-        String,
-        "SELECT full_name FROM repos WHERE id = ?",
-        id
-    )?;
-    if let Some(ref name) = full_name {
+    let mut tx = pool.as_pg().begin().await?;
+    let full_name: Option<(String,)> =
+        sqlx::query_as("SELECT full_name FROM repos WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if let Some((ref name,)) = full_name {
         let like = format!("{name}/%");
-        let _ = db_execute!(pool, "DELETE FROM review_jobs WHERE repo = ?", name);
-        let _ = db_execute!(
-            pool,
-            "DELETE FROM review_comments WHERE repo_pr LIKE ?",
-            &like
-        );
-        let _ = db_execute!(
-            pool,
-            "DELETE FROM reviewed_commits WHERE repo_pr LIKE ?",
-            &like
-        );
-        let _ = db_execute!(
-            pool,
-            "DELETE FROM dismissed_findings WHERE repo_full_name = ?",
-            name
-        );
-        let _ = db_execute!(
-            pool,
-            "DELETE FROM learned_rules WHERE repo_full_name = ?",
-            name
-        );
+        let _ = sqlx::query("DELETE FROM review_jobs WHERE repo = $1")
+            .bind(name)
+            .execute(&mut *tx)
+            .await;
+        let _ = sqlx::query("DELETE FROM review_comments WHERE repo_pr LIKE $1")
+            .bind(&like)
+            .execute(&mut *tx)
+            .await;
+        let _ = sqlx::query("DELETE FROM reviewed_commits WHERE repo_pr LIKE $1")
+            .bind(&like)
+            .execute(&mut *tx)
+            .await;
+        let _ = sqlx::query("DELETE FROM dismissed_findings WHERE repo_full_name = $1")
+            .bind(name)
+            .execute(&mut *tx)
+            .await;
+        let _ = sqlx::query("DELETE FROM learned_rules WHERE repo_full_name = $1")
+            .bind(name)
+            .execute(&mut *tx)
+            .await;
     }
     // Prefer explicit cleanup so installs without ON DELETE CASCADE still succeed.
-    let _ = db_execute!(
-        pool,
-        "DELETE FROM findings WHERE review_id IN (SELECT id FROM reviews WHERE repo_id = ?)",
-        id
-    );
-    let _ = db_execute!(pool, "DELETE FROM reviews WHERE repo_id = ?", id);
-    db_execute!(pool, "DELETE FROM repos WHERE id = ?", id)?;
+    let _ = sqlx::query(
+        "DELETE FROM findings WHERE review_id IN (SELECT id FROM reviews WHERE repo_id = $1)",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await;
+    let _ = sqlx::query("DELETE FROM reviews WHERE repo_id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await;
+    sqlx::query("DELETE FROM repos WHERE id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
     Ok(())
 }

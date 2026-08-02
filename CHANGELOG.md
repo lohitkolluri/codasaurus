@@ -20,6 +20,21 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 
 ## [Unreleased]
 
+### Security
+
+- Learned ignore rules are repo-scoped; security detectors require a maintainer dismissal before auto-promotion; mined false-positive comments no longer suppress `secrets`/`vulnerabilities`/`iac`.
+- Dismiss reactions on finding comments require the same ACL as `@codasaurus` commands (repo owner / PR author / association).
+- OIDC ID-token verification pins `RS256` instead of trusting the JWT header `alg`.
+
+### Fixed
+
+- Dashboard dismiss now sends `repo_full_name` so suppressions are not stored as global.
+- Global Settings `auto_approve` is honored by the review pipeline (in addition to per-repo config).
+- Failed GitHub PR review POSTs no longer claim the head SHA (allows retry).
+- Advisory drafts no longer show READY TO MERGE: YES.
+- Repo delete cascades run in a single DB transaction.
+- Dashboard: race-safe review/repo detail loads, role-gated RepoDetail/Sidebar, Space key on toggles, Stats mojibake, invite password `minlength` alignment.
+
 ### Added
 
 - CLI `codasaurus reset-password --email … --password …` for emergency local dashboard recovery (no email flow).

@@ -407,7 +407,7 @@ pub fn overview_comment_body(
     let warning = *counts.get("warning").unwrap_or(&0);
     let info = *counts.get("info").unwrap_or(&0);
     let total = findings.findings.len();
-    let ready = !has_blocking && blocking == 0;
+    let ready = !has_blocking && blocking == 0 && !advisory_draft;
 
     let mut body = String::with_capacity(1536);
     write_slot_header(&mut body, "codasaurus:overview:v1", "Codasaurus");
@@ -1243,6 +1243,10 @@ mod tests {
             true,
         );
         assert!(advisory.contains("Advisory draft"));
+        assert!(
+            advisory.contains("alt=\"READY TO MERGE: NO\""),
+            "advisory drafts must not show ready-to-merge"
+        );
 
         let ctx = context_comment_body(
             &WalkthroughExtras {

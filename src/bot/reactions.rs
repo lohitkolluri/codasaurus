@@ -60,12 +60,16 @@ pub fn is_lgtm_reaction(content: &str) -> bool {
 }
 
 /// Handle a `reaction` webhook: 👎 / confused → dismiss fingerprint from comment body.
+///
+/// `reactor_allowed` must be true (same ACL as `@codasaurus` commands) so random
+/// contributors cannot suppress findings via emoji on public repos.
 pub async fn handle_reaction_event(
     pool: &crate::db::DbPool,
     action: &str,
     reaction_content: &str,
     comment_body: &str,
     repo_full_name: &str,
+    reactor_allowed: bool,
 ) -> anyhow::Result<bool> {
     if action != "created" {
         return Ok(false);
@@ -76,6 +80,14 @@ pub async fn handle_reaction_event(
     };
 
     if is_dismiss_reaction(reaction_content) {
+        if !reactor_allowed {
+            tracing::info!(
+                repo = %repo_full_name,
+                fingerprint = %fp,
+                "dismiss reaction ignored: reactor lacks command ACL"
+            );
+            return Ok(false);
+        }
         let store = LearningStore::from_pool(pool);
         store
             .dismiss_fingerprint_for_repo(
@@ -86,7 +98,7 @@ pub async fn handle_reaction_event(
                 Some(repo_full_name),
                 None,
                 None,
-                false,
+                true, // ACL-gated reactor — treat as trusted dismiss
             )
             .await?;
         tracing::info!(

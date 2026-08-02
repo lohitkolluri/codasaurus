@@ -73,19 +73,21 @@
     detectorFilter = "all";
     try {
       const data = await api.get(`/api/reviews/${id}`);
+      // Ignore stale responses after rapid navigation.
+      if ($params?.id !== id) return;
       review = data.review ?? null;
       summary = data.summary ?? null;
       allFindings = data.findings ?? [];
       if (allFindings.length > 0) {
-        const first = files[0] ?? null;
         // files derived may lag one tick — pick from findings directly
         const path = allFindings[0]?.file_path ?? allFindings[0]?.file;
         if (path) selectedFile = path;
       }
     } catch (err) {
+      if ($params?.id !== id) return;
       error = err.message || "Failed to load review";
     } finally {
-      loading = false;
+      if ($params?.id === id) loading = false;
     }
   }
 
@@ -159,7 +161,7 @@
         file: finding.file_path ?? finding.file,
         message: finding.message,
         pr_number: review?.pr_number ?? null,
-        repo: review?.repo_name ?? review?.repo ?? null,
+        repo: review?.repo_full_name ?? null,
       });
       allFindings = allFindings.filter((f) => f.id !== finding.id);
       if (summary) {

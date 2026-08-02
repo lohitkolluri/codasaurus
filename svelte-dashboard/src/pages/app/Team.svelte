@@ -156,6 +156,7 @@
       await loadTeam();
     } catch (err) {
       setMsg(err.message || "Role change failed", true);
+      await loadTeam(); // revert select to server role
     }
   }
 

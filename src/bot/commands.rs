@@ -1023,6 +1023,7 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
             comment: None,
             issue: None,
             reaction: None,
+            sender: None,
             repositories: None,
             repositories_added: None,
         };

@@ -2,4 +2,4 @@
   let { message = "An error occurred." } = $props();
 </script>
 
-<div class="error-state">{message}</div>
+<div class="error-state" role="alert">{message}</div>

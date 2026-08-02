@@ -250,8 +250,8 @@
             stats.analytics?.weekly_digest?.dismissals ?? 0,
             stats.analytics?.dismissals_prev_7_days,
           )}
-          deltaLabel="dismissals ?"
-          hint="Dismissals ˜ (dismissals + findings)"
+          deltaLabel="dismissals Œî"
+          hint="Dismissals √∑ (dismissals + findings)"
         />
       </div>
     </section>
@@ -265,13 +265,13 @@
         <StatsCard
           label="Accept rate"
           value={fmtRate(stats.trust?.accept_rate)}
-          hint="Not dismissed ∑ 30d"
+          hint="Not dismissed ¬∑ 30d"
           tone={acceptTone(stats.trust?.accept_rate)}
         />
         <StatsCard
           label="FP proxy"
           value={fmtRatio(stats.trust?.fp_proxy_ratio ?? 0)}
-          hint="Dismissals ˜ Tier-1"
+          hint="Dismissals √∑ Tier-1"
           tone={fpTone(stats.trust?.fp_proxy_ratio)}
         />
         <StatsCard label="Tier-1 findings" value={stats.trust?.tier1_findings ?? 0} tone="info" />
@@ -281,8 +281,8 @@
             stats.llm?.spend_usd_last_day ?? stats.llm?.spend_usd_estimate ?? 0,
           )}
           hint={stats.llm?.daily_budget_usd > 0
-            ? `last day ∑ budget $${Number(stats.llm.daily_budget_usd).toFixed(2)}`
-            : `${stats.llm?.requests ?? 0} requests ∑ last day`}
+            ? `last day ¬∑ budget $${Number(stats.llm.daily_budget_usd).toFixed(2)}`
+            : `${stats.llm?.requests ?? 0} requests ¬∑ last day`}
         />
       </div>
     </section>
@@ -374,7 +374,7 @@
             {#if detectors.length > DETECTOR_PAGE}
               <div class="detector-page-meta">
                 <span>
-                  {detectors.length} detectors ù page {detectorPageSafe} of {detectorPages}
+                  {detectors.length} detectors ¬∑ page {detectorPageSafe} of {detectorPages}
                 </span>
                 <Pagination
                   page={detectorPageSafe}

@@ -144,6 +144,17 @@ pub async fn review_pr_with_options(
                 repo_flags.auto_labels = false;
             }
         }
+        // Global Settings toggle for auto-approve (repo config_json wins when true).
+        if !repo_flags.auto_approve {
+            if let Ok(Some(v)) = crate::db::config::get_config(pool, "auto_approve").await {
+                if matches!(
+                    v.to_ascii_lowercase().as_str(),
+                    "true" | "1" | "yes" | "on"
+                ) {
+                    repo_flags.auto_approve = true;
+                }
+            }
+        }
     }
     let mut options = options;
     if !repo_flags.auto_describe {
@@ -965,11 +976,16 @@ pub async fn review_pr_with_options(
         .await?;
 
         if !resp.status().is_success() {
-            // Walkthrough already updated above; inline comments are best-effort.
+            // Walkthrough already updated above; do not claim SHA so a retry can
+            // re-post inline comments / REQUEST_CHANGES after transient GitHub errors.
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
             tracing::warn!(
-                status = %resp.status(),
-                "PR review API failed after walkthrough update (inline comments skipped)"
+                status = %status,
+                body = %body.chars().take(400).collect::<String>(),
+                "PR review API failed after walkthrough update"
             );
+            anyhow::bail!("GitHub PR review POST failed with status {status}");
         }
     }
 

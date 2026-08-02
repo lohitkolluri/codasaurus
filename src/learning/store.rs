@@ -72,6 +72,7 @@ impl LearningStore {
             &finding.detector,
             &finding.file,
             &finding.message,
+            None,
         )
         .await;
         Ok(())
@@ -133,8 +134,14 @@ impl LearningStore {
             is_maintainer
         )?;
         crate::metrics::record_dismissal();
-        let _ =
-            crate::learning::mine::promote_dismissal_to_rule(self, detector, file, message).await;
+        let _ = crate::learning::mine::promote_dismissal_to_rule(
+            self,
+            detector,
+            file,
+            message,
+            repo_full_name,
+        )
+        .await;
         Ok(())
     }
 
@@ -147,24 +154,56 @@ impl LearningStore {
         )?)
     }
 
-    pub async fn count_distinct_prs_for_detector(&self, detector: &str) -> Result<i64> {
-        Ok(db_scalar!(
-            &self.pool,
-            i64,
-            "SELECT COUNT(DISTINCT pr_number) FROM dismissed_findings
-             WHERE detector = ? AND pr_number IS NOT NULL",
-            detector
-        )?)
+    pub async fn count_distinct_prs_for_detector(
+        &self,
+        detector: &str,
+        repo_full_name: Option<&str>,
+    ) -> Result<i64> {
+        if let Some(repo) = repo_full_name.filter(|r| !r.is_empty()) {
+            Ok(db_scalar!(
+                &self.pool,
+                i64,
+                "SELECT COUNT(DISTINCT pr_number) FROM dismissed_findings
+                 WHERE detector = ? AND pr_number IS NOT NULL AND repo_full_name = ?",
+                detector,
+                repo
+            )?)
+        } else {
+            Ok(db_scalar!(
+                &self.pool,
+                i64,
+                "SELECT COUNT(DISTINCT pr_number) FROM dismissed_findings
+                 WHERE detector = ? AND pr_number IS NOT NULL
+                   AND (repo_full_name IS NULL OR repo_full_name = '')",
+                detector
+            )?)
+        }
     }
 
-    pub async fn count_maintainer_dismissals_for_detector(&self, detector: &str) -> Result<i64> {
-        Ok(db_scalar!(
-            &self.pool,
-            i64,
-            "SELECT COUNT(*) FROM dismissed_findings
-             WHERE detector = ? AND is_maintainer = TRUE",
-            detector
-        )?)
+    pub async fn count_maintainer_dismissals_for_detector(
+        &self,
+        detector: &str,
+        repo_full_name: Option<&str>,
+    ) -> Result<i64> {
+        if let Some(repo) = repo_full_name.filter(|r| !r.is_empty()) {
+            Ok(db_scalar!(
+                &self.pool,
+                i64,
+                "SELECT COUNT(*) FROM dismissed_findings
+                 WHERE detector = ? AND is_maintainer = TRUE AND repo_full_name = ?",
+                detector,
+                repo
+            )?)
+        } else {
+            Ok(db_scalar!(
+                &self.pool,
+                i64,
+                "SELECT COUNT(*) FROM dismissed_findings
+                 WHERE detector = ? AND is_maintainer = TRUE
+                   AND (repo_full_name IS NULL OR repo_full_name = '')",
+                detector
+            )?)
+        }
     }
 
     pub fn add_rule(&self, rule: &crate::learning::LearnedRule) -> Result<()> {
@@ -172,7 +211,7 @@ impl LearningStore {
     }
 
     pub async fn add_rule_async(&self, rule: &crate::learning::LearnedRule) -> Result<()> {
-        let repo: Option<String> = None;
+        let repo = rule.repo_full_name.clone();
         db_execute!(
             &self.pool,
             "INSERT INTO learned_rules (id, detector, file_pattern, message_pattern, action, reason, repo_full_name)
@@ -205,11 +244,12 @@ impl LearningStore {
             action: String,
             reason: String,
             created_at: chrono::DateTime<chrono::Utc>,
+            repo_full_name: Option<String>,
         }
         let rows: Vec<Row> = db_fetch_all!(
             &self.pool,
             Row,
-            "SELECT id, detector, file_pattern, message_pattern, action, reason, created_at
+            "SELECT id, detector, file_pattern, message_pattern, action, reason, created_at, repo_full_name
              FROM learned_rules ORDER BY created_at DESC LIMIT 200"
         )?;
         Ok(rows
@@ -223,6 +263,7 @@ impl LearningStore {
                     .unwrap_or(crate::learning::RuleAction::Ignore),
                 reason: r.reason,
                 created_at: r.created_at,
+                repo_full_name: r.repo_full_name,
             })
             .collect())
     }
