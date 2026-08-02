@@ -206,6 +206,8 @@ mod tests {
                 suggestion: None,
                 evidence: None,
                 codemod: None,
+                confidence: None,
+                judge_rationale: None,
             });
         }
         for _ in 0..warning {
@@ -219,6 +221,8 @@ mod tests {
                 suggestion: None,
                 evidence: None,
                 codemod: None,
+                confidence: None,
+                judge_rationale: None,
             });
         }
         for _ in 0..info {
@@ -232,6 +236,8 @@ mod tests {
                 suggestion: None,
                 evidence: None,
                 codemod: None,
+                confidence: None,
+                judge_rationale: None,
             });
         }
         out

@@ -145,6 +145,8 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                         suggestion: Some(pattern.suggestion.to_string()),
                         evidence: Some(trimmed.chars().take(160).collect()),
                         codemod: None,
+                        confidence: None,
+                        judge_rationale: None,
                     });
                 }
             }

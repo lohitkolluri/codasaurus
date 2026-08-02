@@ -196,6 +196,8 @@ mod tests {
             suggestion: None,
             evidence: Some("AKIA".into()),
             codemod: None,
+            confidence: None,
+            judge_rationale: None,
         };
         let line = provenance_line(&f);
         assert!(line.contains("secrets"));

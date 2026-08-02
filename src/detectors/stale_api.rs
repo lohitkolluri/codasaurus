@@ -19,6 +19,8 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                         suggestion: Some(pattern.suggestion.to_string()),
                         evidence: Some(line.content.clone()),
                         codemod: pattern.codemod.map(|s| s.to_string()),
+                        confidence: None,
+                        judge_rationale: None,
                     });
                 }
             }

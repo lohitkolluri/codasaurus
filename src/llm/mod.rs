@@ -918,9 +918,136 @@ async fn chat_completion_text(
         .inspect_err(|_| crate::metrics::record_llm_error())
 }
 
+/// LLM judge verdict for one finding: 0-5 confidence + rationale.
+#[derive(Debug, Clone)]
+pub struct JudgeOutcome {
+    pub index: usize,
+    pub confidence: u8,
+    pub rationale: String,
+}
+
+const MAX_JUDGE_FINDINGS: usize = 25;
+
+/// Score findings 0-5 via the LLM. Best-effort: errors return empty verdicts.
+///
+/// Prompts the model with detector/file/line/message and asks for a strict JSON
+/// `{"verdicts":[{"index":0,"confidence":3,"rationale":"..."}]}`. Findings are
+/// identified by position; indices outside the batch are ignored.
+pub async fn judge_findings(
+    config: &LlmConfig,
+    findings: &[crate::detectors::Finding],
+) -> Result<Vec<JudgeOutcome>> {
+    if findings.is_empty() {
+        return Ok(Vec::new());
+    }
+    assert_endpoint_safe(config).await?;
+    let client = llm_client()?;
+    let url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
+
+    let batch: Vec<serde_json::Value> = findings
+        .iter()
+        .take(MAX_JUDGE_FINDINGS)
+        .enumerate()
+        .map(|(i, f)| {
+            json!({
+                "index": i,
+                "detector": f.detector,
+                "file": f.file,
+                "line": f.line,
+                "message": truncate_chars(&f.message, 300),
+            })
+        })
+        .collect();
+
+    let system_prompt = "\
+You are a skeptical review judge. For each finding, decide whether it is a real \
+problem (5) or noise (0) based only on the evidence shown. Never trust the \
+detector's own severity. Output strict JSON only: \
+{\"verdicts\":[{\"index\":<n>,\"confidence\":<0-5>,\"rationale\":\"<one sentence>\"}]}. \
+Empty verdicts when nothing is grounded.";
+
+    let user_prompt = format!("Judge these findings:\n{}", serde_json::to_string(&batch)?);
+    let max_tokens = 1024;
+    crate::metrics::record_llm_request(user_prompt.len() + system_prompt.len(), max_tokens, false);
+
+    let text = chat_completion_text(
+        client,
+        &url,
+        config,
+        system_prompt,
+        &user_prompt,
+        max_tokens,
+    )
+    .await?;
+    parse_judge_verdicts(&text)
+}
+
+fn parse_judge_verdicts(text: &str) -> Result<Vec<JudgeOutcome>> {
+    let mut outcomes = Vec::new();
+    let value: serde_json::Value = match serde_json::from_str(text) {
+        Ok(v) => v,
+        Err(_) => {
+            let Some(start) = text.find('{') else {
+                return Ok(Vec::new());
+            };
+            let Some(end) = text.rfind('}') else {
+                return Ok(Vec::new());
+            };
+            match serde_json::from_str(&text[start..=end]) {
+                Ok(v) => v,
+                Err(_) => return Ok(Vec::new()),
+            }
+        }
+    };
+    if let Some(verdicts) = value.get("verdicts").and_then(|v| v.as_array()) {
+        for v in verdicts {
+            let index = v["index"].as_u64().unwrap_or(u64::MAX) as usize;
+            let confidence = v["confidence"].as_u64().unwrap_or(0).min(5) as u8;
+            let rationale = v["rationale"].as_str().unwrap_or("").to_string();
+            outcomes.push(JudgeOutcome {
+                index,
+                confidence,
+                rationale,
+            });
+        }
+    }
+    Ok(outcomes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_judge_verdicts_json() {
+        let raw = r#"{"verdicts":[{"index":0,"confidence":4,"rationale":"real vuln"},{"index":2,"confidence":1,"rationale":"noise"}]}"#;
+        let v = parse_judge_verdicts(raw).unwrap();
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].index, 0);
+        assert_eq!(v[0].confidence, 4);
+        assert_eq!(v[1].index, 2);
+        assert_eq!(v[1].confidence, 1);
+    }
+
+    #[test]
+    fn parses_verdicts_wrapped_in_code_fence() {
+        let raw = "```json\n{\"verdicts\":[{\"index\":1,\"confidence\":5,\"rationale\":\"certain\"}]}\n```";
+        let v = parse_judge_verdicts(raw).unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].confidence, 5);
+    }
+
+    #[test]
+    fn clamps_confidence_to_5() {
+        let raw = r#"{"verdicts":[{"index":0,"confidence":99,"rationale":"overconfident"}]}"#;
+        let v = parse_judge_verdicts(raw).unwrap();
+        assert_eq!(v[0].confidence, 5);
+    }
+
+    #[test]
+    fn garbage_input_yields_empty() {
+        assert!(parse_judge_verdicts("not json at all").unwrap().is_empty());
+    }
 
     #[tokio::test]
     async fn offline_mode_blocks_llm_config_without_pool() {

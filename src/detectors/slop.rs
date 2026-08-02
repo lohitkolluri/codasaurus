@@ -107,6 +107,8 @@ pub fn detect_slop(
             ),
             evidence: None,
             codemod: None,
+            confidence: None,
+            judge_rationale: None,
         }]
     } else {
         vec![]

@@ -22,6 +22,9 @@ pub struct Config {
 
     #[serde(default)]
     pub quality_gate: QualityGateConfig,
+
+    #[serde(default)]
+    pub confidence: ConfidenceConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -161,6 +164,18 @@ pub struct QualityGateCondition {
     pub threshold: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ConfidenceConfig {
+    #[serde(default = "default_false")]
+    pub judge_tier1: bool,
+    #[serde(default = "default_false")]
+    pub drop_ungrounded: bool,
+}
+
+fn default_false() -> bool {
+    false
+}
+
 fn default_gate_name() -> String {
     "codasaurus way".into()
 }
@@ -254,6 +269,7 @@ impl Default for Config {
             guidelines: GuidelinesConfig::default(),
             pre_merge: PreMergeConfig::default(),
             quality_gate: QualityGateConfig::default(),
+            confidence: ConfidenceConfig::default(),
         }
     }
 }

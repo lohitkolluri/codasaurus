@@ -103,6 +103,8 @@ pub(crate) fn merge_vulnerability_findings(
             ),
             suggestion: group.first().and_then(|f| f.suggestion.clone()),
             codemod: None,
+            confidence: None,
+            judge_rationale: None,
             evidence: None,
         });
     }
@@ -156,6 +158,8 @@ mod tests {
             suggestion: sug.map(|s| s.into()),
             evidence: None,
             codemod: None,
+            confidence: None,
+            judge_rationale: None,
         }
     }
 

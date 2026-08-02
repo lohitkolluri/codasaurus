@@ -53,6 +53,14 @@ pub struct Finding {
     /// Auto-fix codemod suggestion — a code snippet to replace the issue
     #[serde(default)]
     pub codemod: Option<String>,
+
+    /// Confidence 0-5 that the finding is a real problem (5 = certain).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<u8>,
+
+    /// Judge rationale when an LLM judge scored this finding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judge_rationale: Option<String>,
 }
 
 impl Finding {

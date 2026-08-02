@@ -251,6 +251,32 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     migrate_v15_invites_email_index(pool).await?;
     migrate_v16_dismissal_provenance(pool).await?;
     migrate_v17_baseline_and_gates(pool).await?;
+    migrate_v18_confidence(pool).await?;
+    Ok(())
+}
+
+/// v18: per-finding confidence (0-5) + LLM judge rationale.
+async fn migrate_v18_confidence(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
+    if current.unwrap_or(0) >= 18 {
+        return Ok(());
+    }
+
+    let _ = sqlx::query("ALTER TABLE findings ADD COLUMN IF NOT EXISTS confidence INTEGER")
+        .execute(pool)
+        .await;
+
+    let _ = sqlx::query("ALTER TABLE findings ADD COLUMN IF NOT EXISTS judge_rationale TEXT")
+        .execute(pool)
+        .await;
+
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (18) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
