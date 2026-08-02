@@ -64,6 +64,10 @@ threshold = 0.0
 metric = "new_medium_issues"
 op = "gt"
 threshold = 5.0
+
+[confidence]
+judge_tier1 = false
+drop_ungrounded = false
 ```
 
 ## Sections
@@ -76,6 +80,7 @@ threshold = 5.0
 | `[guidelines]` | Contribution guideline path override                      |
 | `[pre_merge]`  | Soft caps used as defaults before DB policy overlay       |
 | `[quality_gate]` | Sonar-style gate on new findings; failed gate blocks the check run when `block_on_fail` |
+| `[confidence]` | Per-finding confidence 0-5: optional LLM judge + grounding filter |
 
 ## `review_strictness`
 
@@ -102,6 +107,17 @@ Sonar-style gate evaluated against findings on new code lines. Any failed condit
 | `new_info_issues`     | Severity `info`       |
 
 Operators: `gt`, `gte`, `lt`, `lte`, `eq`, `ne`.
+
+## `confidence`
+
+Every finding carries a confidence score 0-5. Tier-1 detectors (registry, manifest, secrets, IaC) get a base 5; heuristic detectors (style, stale APIs, guidelines, graph) get a base 3; LLM-authored prose findings default to 4.
+
+| Key              | Default | Effect |
+| ---------------- | ------- | ------ |
+| `judge_tier1`    | `false` | Also run the LLM judge on deterministic tier-1 findings |
+| `drop_ungrounded` | `false` | Drop findings with confidence <= 1 (after judge) |
+
+When a BYOK LLM is configured and enabled for the repo, the judge scores heuristic findings and stores `confidence` + `judge_rationale`. The judge is best-effort: LLM failure keeps base confidence and never fails the review.
 
 ## Repo `config_json` (dashboard)
 

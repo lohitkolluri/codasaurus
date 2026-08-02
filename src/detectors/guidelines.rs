@@ -61,6 +61,8 @@ pub fn detect_remote(
                         suggestion: None,
                         evidence: None,
                         codemod: None,
+                        confidence: None,
+                        judge_rationale: None,
                     });
                 }
                 ExtractedRule::FileRequired { path } => {
@@ -87,6 +89,8 @@ pub fn detect_remote(
                             )),
                             evidence: None,
                             codemod: None,
+                            confidence: None,
+                            judge_rationale: None,
                         });
                     }
                 }
@@ -145,6 +149,8 @@ fn check_branch_pattern_remote(
             suggestion: Some(format!("Rename branch to match '{pattern}'")),
             evidence: None,
             codemod: None,
+            confidence: None,
+            judge_rationale: None,
         });
     }
 }
@@ -180,6 +186,8 @@ fn check_sign_off_remote(
             ),
             evidence: Some(unsigned.join("\n")),
             codemod: None,
+            confidence: None,
+            judge_rationale: None,
         });
     }
 }
@@ -206,6 +214,8 @@ fn check_conventional_remote(
             ),
             evidence: Some(title.to_string()),
             codemod: None,
+            confidence: None,
+            judge_rationale: None,
         });
     }
 
@@ -234,6 +244,8 @@ fn check_conventional_remote(
             ),
             evidence: Some(non_conventional.join("\n")),
             codemod: None,
+            confidence: None,
+            judge_rationale: None,
         });
     }
 }

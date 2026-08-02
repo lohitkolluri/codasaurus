@@ -78,6 +78,8 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                     )),
                     evidence: Some(import.name.clone()),
                     codemod,
+                    confidence: None,
+                    judge_rationale: None,
                 });
             }
         }

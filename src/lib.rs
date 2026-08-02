@@ -2,6 +2,7 @@ pub mod api;
 pub mod baseline;
 pub mod bot;
 pub mod bot_runtime;
+pub mod confidence;
 pub mod config;
 pub mod context;
 pub mod db;

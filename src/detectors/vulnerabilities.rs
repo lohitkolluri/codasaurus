@@ -63,6 +63,8 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                             )),
                             evidence: Some(format!("{}: {}", vuln.id, vuln.summary)),
                             codemod: None,
+                            confidence: None,
+                            judge_rationale: None,
                         });
                     }
                 }
@@ -81,6 +83,8 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                         )),
                         evidence: None,
                         codemod: None,
+                        confidence: None,
+                        judge_rationale: None,
                     });
                 }
             }

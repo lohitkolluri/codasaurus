@@ -83,6 +83,10 @@ pub struct Finding {
     pub code_snippet: Option<String>,
     pub context: Option<String>,
     pub category: Option<String>,
+    #[sqlx(default)]
+    pub confidence: Option<i32>,
+    #[sqlx(default)]
+    pub judge_rationale: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -103,6 +107,8 @@ pub struct FindingCreate {
     pub code_snippet: Option<String>,
     pub context: Option<String>,
     pub category: Option<String>,
+    pub confidence: Option<i32>,
+    pub judge_rationale: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]

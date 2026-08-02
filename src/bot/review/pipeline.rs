@@ -692,6 +692,28 @@ pub async fn review_pr_with_options(
         }
     }
 
+    crate::confidence::apply_base(&mut findings.findings);
+
+    if repo_llm_enabled {
+        if let Some(llm_cfg) = crate::llm::LlmConfig::from_db_or_env(pool).await {
+            match crate::llm::judge_findings(&llm_cfg, &findings.findings).await {
+                Ok(verdicts) => {
+                    for v in verdicts {
+                        if let Some(f) = findings.findings.get_mut(v.index) {
+                            f.confidence = Some(v.confidence);
+                            f.judge_rationale = Some(v.rationale);
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "LLM judge failed; keeping base confidence"),
+            }
+        }
+    }
+
+    if config.confidence.drop_ungrounded {
+        crate::confidence::retain_grounded(&mut findings.findings);
+    }
+
     let mut gate = crate::gates::QualityGate::from(config.quality_gate.clone());
     if let Some(raw) = repo_config_json.as_deref() {
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) {
