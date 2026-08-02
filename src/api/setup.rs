@@ -356,16 +356,19 @@ async fn setup_llm(
             .map_err(ApiError::bad_request)?;
     }
 
-    // Always store the config
+    // Always store the config (+ mirror into process env for immediate ask/review use).
     db::config::set_config(&state.pool, "llm_provider", &body.provider).await?;
     if !api_key.is_empty() {
         db::config::set_config(&state.pool, "openrouter_api_key", api_key).await?;
+        db::config::apply_setting_to_env("openrouter_api_key", api_key);
     }
     if let Some(model) = &body.model {
         db::config::set_config(&state.pool, "llm_model", model).await?;
+        db::config::apply_setting_to_env("llm_model", model);
     }
     if !base_url.is_empty() {
         db::config::set_config(&state.pool, "llm_base_url", base_url).await?;
+        db::config::apply_setting_to_env("llm_base_url", base_url);
     }
 
     // If ?test=true, send a lightweight probe to the LLM endpoint
@@ -824,6 +827,7 @@ async fn github_callback(
     db::config::set_config(&state.pool, "github_webhook_secret", &webhook_secret).await?;
     db::config::set_config(&state.pool, "github_app_name", &app_name).await?;
     db::config::set_config(&state.pool, "github_app_slug", &slug).await?;
+    db::config::apply_setting_to_env("github_app_slug", &slug);
 
     // Update the in-memory bot config so the webhook handler picks up the
     // new credentials immediately without requiring a server restart.

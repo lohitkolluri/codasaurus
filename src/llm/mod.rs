@@ -170,12 +170,31 @@ impl LlmConfig {
                 let mut base_url = None;
                 for e in entries {
                     match e.key.as_str() {
-                        "openrouter_api_key" if !e.value.is_empty() => api_key = Some(e.value),
+                        "openrouter_api_key"
+                            if !e.value.is_empty()
+                                && !e.value.contains('•')
+                                && !e.value.contains('*') =>
+                        {
+                            api_key = Some(e.value)
+                        }
                         "llm_model" if !e.value.is_empty() => model = Some(e.value),
                         "llm_model_cheap" if !e.value.is_empty() => text_model = Some(e.value),
                         "llm_base_url" if !e.value.is_empty() => base_url = Some(e.value),
                         _ => {}
                     }
+                }
+                // Merge env so a host-injected OPENROUTER_API_KEY still works when
+                // the dashboard only has a masked placeholder.
+                if api_key.is_none() {
+                    api_key = std::env::var("OPENROUTER_API_KEY")
+                        .or_else(|_| std::env::var("CODASAURUS_API_KEY"))
+                        .ok()
+                        .filter(|k| !k.is_empty() && !k.contains('•'));
+                }
+                if base_url.is_none() {
+                    base_url = std::env::var("CODASAURUS_BASE_URL")
+                        .ok()
+                        .filter(|u| !u.is_empty());
                 }
                 if api_key.is_some() || base_url.is_some() {
                     let base = base_url.unwrap_or_else(default_base_url);
@@ -204,6 +223,27 @@ impl LlmConfig {
             return None;
         }
         Self::from_env()
+    }
+
+    /// Human-readable reason when [`from_db_or_env`] returns `None` (for PR replies).
+    pub async fn unavailable_reason(pool: Option<&crate::db::DbPool>) -> String {
+        if let Some(pool) = pool {
+            let db_off = crate::db::config::get_config(pool, "offline_mode")
+                .await
+                .ok()
+                .flatten();
+            if crate::bot::offline::offline_mode_from_env_and_db(db_off.as_deref()) {
+                return "Offline / air-gap mode is on — LLM commands are disabled. Turn it off under Settings → System.".into();
+            }
+            if let Ok(Some(provider)) = crate::db::config::get_config(pool, "llm_provider").await {
+                if provider.eq_ignore_ascii_case("disabled") {
+                    return "LLM provider is set to **disabled** under Settings → LLM. Pick OpenRouter, Ollama, or Custom and save an API key.".into();
+                }
+            }
+        } else if crate::bot::offline::offline_mode_from_env_and_db(None) {
+            return "Offline / air-gap mode is on — LLM commands are disabled.".into();
+        }
+        "No LLM API key found. Save an OpenRouter (or custom) key under **Settings → LLM**, then try again. If you already saved one, re-save the key (masked `••••` values are not re-sent).".into()
     }
 }
 

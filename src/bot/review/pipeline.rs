@@ -982,8 +982,9 @@ pub async fn review_pr_with_options(
                 dep_delta_md: &dep_delta_md,
             },
         );
-        let describe_body =
-            describe.replacen("### Codasaurus review", "### Codasaurus describe", 1);
+        let describe_body = describe
+            .replacen("Codasaurus Review", "Codasaurus Describe", 1)
+            .replacen("### Codasaurus review", "### Codasaurus describe", 1);
         if let Err(e) = post_or_update_comment(
             client,
             &auth_header,

@@ -260,10 +260,11 @@ pub async fn get_stats(pool: &DbPool) -> Result<serde_json::Value, sqlx::Error> 
            AND created_at < CURRENT_DATE + INTERVAL '1 day'"
     )?;
 
+    // Cast: bare `100.0` is NUMERIC in Postgres, which sqlx won't decode as f64.
     let pass_rate: Option<f64> = db_scalar!(
         pool,
         Option<f64>,
-        "SELECT AVG(CASE WHEN status = 'passed' THEN 100.0 WHEN status = 'failed' THEN 0.0 ELSE NULL END)
+        "SELECT AVG(CASE WHEN status = 'passed' THEN 100.0 WHEN status = 'failed' THEN 0.0 ELSE NULL END)::float8
          FROM reviews
          WHERE created_at >= NOW() - INTERVAL '30 days'"
     )?;

@@ -113,7 +113,7 @@ async fn process_queued_review(
     pr_number: i64,
     head_sha: &str,
     inst_id: Option<i64>,
-    action: &str,
+    _action: &str,
     attempts: i64,
     timeout_secs: u64,
 ) {
@@ -127,8 +127,10 @@ async fn process_queued_review(
     let _guard = lock.lock().await;
     let started = std::time::Instant::now();
 
+    // Walkthrough already lives in the PR review body — a second nearly-identical
+    // "describe" comment made it look like Codasaurus posted two reviews.
     let opts = ReviewOptions {
-        auto_describe: matches!(action, "opened" | "reopened" | "ready_for_review"),
+        auto_describe: false,
         auto_review_diff: true,
         force_draft: false,
     };
@@ -190,7 +192,7 @@ pub(crate) async fn run_webhook_review_inline(
     pr_number: i64,
     pr: Option<serde_json::Value>,
     inst_id: Option<i64>,
-    action: String,
+    _action: String,
     head_sha: String,
     timeout_secs: u64,
 ) {
@@ -202,7 +204,7 @@ pub(crate) async fn run_webhook_review_inline(
     let _guard = lock.lock().await;
     let started = std::time::Instant::now();
     let opts = ReviewOptions {
-        auto_describe: matches!(action.as_str(), "opened" | "reopened" | "ready_for_review"),
+        auto_describe: false,
         auto_review_diff: true,
         force_draft: false,
     };

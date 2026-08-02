@@ -24,11 +24,15 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 
 - Settings → Connections: **Test connection** for GitHub App, OIDC discovery, Jira, and Linear; **Clear** for SSO and ticket credentials.
 - GitHub App manifest now requests `installation` and `installation_repositories` events so installs sync without a manual Sync.
+- PR review comments use shields.io verdict / severity badges (CodeRabbit / Greptile–style walkthrough).
 
 ### Changed
 
 - Jira / Linear ticket context is taken from the PR **title and body**; Linear issues resolve via `issue(id:)` (supports bare `ENG-123` when Linear is configured).
 - Jira Cloud ADF descriptions are flattened into text for review context.
+- Automatic reviews no longer post a duplicate “describe” comment (walkthrough stays on the review).
+- Reviews list layout: title + status on one row, cleaner filters alignment.
+- Bot commands accept plain `codasaurus …` / `/codasaurus …` (GitHub Apps are not @-mentionable).
 
 ### Deprecated
 
@@ -36,12 +40,15 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 
 ### Removed
 
-- Nothing yet.
+- Placeholder “configure JIRA_*” linked-issue stubs from walkthroughs (only real tickets when integrations are configured).
 
 ### Fixed
 
 - OIDC allow-flags from the dashboard (`true`/`false`) were ignored at runtime (only `1` was accepted).
 - GitHub App manifest `callback_urls` pointed at a non-existent GitHub user-OAuth callback; they now match the setup callback.
+- Dashboard / Stats pass-rate queries failed on Postgres (`NUMERIC` vs `FLOAT8`) — cast `AVG` to `float8`.
+- Dashboard LLM keys now mirror into process env so `@codasaurus ask` sees Settings → LLM without a restart.
+- Same-SHA review jobs no longer re-queue after success (duplicate webhook deliveries).
 
 ### Security
 

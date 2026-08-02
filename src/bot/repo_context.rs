@@ -396,13 +396,13 @@ pub async fn fetch_external_tickets(pr_title: &str, pr_body: &str) -> Vec<IssueC
             }
         }
     } else if !keys.is_empty() && !jira_configured && !linear_configured {
-        for key in &keys {
-            out.push(IssueContext {
-                number: 0,
-                title: format!("[Ticket {key}] (configure JIRA_* or LINEAR_API_KEY to fetch)"),
-                body: None,
-            });
-        }
+        // Don't stub tickets into the walkthrough — a "configure …" placeholder
+        // looks like a linked issue and scores as "unclear". Operators enable
+        // Jira/Linear under Settings → Connections when they want this context.
+        tracing::debug!(
+            count = keys.len(),
+            "ticket keys in PR but Jira/Linear not configured; skipping"
+        );
     }
 
     if let Ok(api_key) = std::env::var("LINEAR_API_KEY") {
@@ -462,14 +462,6 @@ pub async fn fetch_external_tickets(pr_title: &str, pr_body: &str) -> Vec<IssueC
                 }
                 _ => {}
             }
-        }
-    } else {
-        for id in linear_from_url {
-            out.push(IssueContext {
-                number: 0,
-                title: format!("[Linear {id}] (configure LINEAR_API_KEY to fetch)"),
-                body: None,
-            });
         }
     }
     out

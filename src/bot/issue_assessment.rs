@@ -97,6 +97,16 @@ fn significant_tokens(s: &str) -> Vec<String> {
 
 /// Markdown block for walkthrough.
 pub fn assessment_markdown(rows: &[(IssueContext, IssueVerdict)]) -> String {
+    // Skip placeholder / unconfigured stubs if any still slip through.
+    let rows: Vec<_> = rows
+        .iter()
+        .filter(|(issue, _)| {
+            let t = issue.title.to_ascii_lowercase();
+            !t.contains("configure jira")
+                && !t.contains("configure linear")
+                && !t.contains("configure jira_*")
+        })
+        .collect();
     if rows.is_empty() {
         return String::new();
     }

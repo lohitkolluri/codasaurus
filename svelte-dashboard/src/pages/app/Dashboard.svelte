@@ -93,10 +93,12 @@
               onclick={() => goToReview(review.id)}
               onkeydown={(e) => onCardKey(e, review.id)}
             >
-              <h3>{review.pr_title ?? `PR #${review.pr_number ?? review.id}`}</h3>
+              <div class="review-card-top">
+                <h3>{review.pr_title ?? `PR #${review.pr_number ?? review.id}`}</h3>
+                <span class="status-badge {review.status}">{review.status}</span>
+              </div>
               <div class="review-meta">
                 <span>{review.repo ?? ""}</span>
-                <span class="status-badge {review.status}">{review.status}</span>
                 <span
                   >{review.created_at
                     ? new Date(review.created_at).toLocaleString()

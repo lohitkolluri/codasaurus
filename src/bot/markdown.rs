@@ -1,17 +1,53 @@
-//! Aesthetic, readable PR comment markdown (CodeRabbit / PR-Agent inspired).
+//! Aesthetic, readable PR comment markdown (CodeRabbit / Greptile inspired).
+//!
+//! Uses shields.io badge images (GitHub renders them inline) plus compact tables
+//! and `<details>` sections — same patterns as top AI review bots.
 
 use crate::bot_runtime::BotRuntimeConfig;
 use crate::config::Config;
 use crate::detectors::{Finding, Findings};
 use std::fmt::Write;
 
-/// Severity badge — monospace chips, no emoji noise.
-pub fn severity_badge(severity: &str) -> &'static str {
+/// shields.io badge (flat-square) — safe for GitHub PR markdown.
+fn shield(label: &str, message: &str, color: &str) -> String {
+    let label = urlencoding_lite(label);
+    let message = urlencoding_lite(message);
+    format!(
+        "<img src=\"https://img.shields.io/badge/{label}-{message}-{color}?style=flat-square\" alt=\"{label}: {message}\" />"
+    )
+}
+
+/// Minimal path-segment encoder for shields.io (`-` → `--`, `_` → `__`, space → `_`).
+fn urlencoding_lite(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '-' => "--".to_string(),
+            '_' => "__".to_string(),
+            ' ' => "_".to_string(),
+            '/' => "%2F".to_string(),
+            '?' => "%3F".to_string(),
+            '#' => "%23".to_string(),
+            '&' => "%26".to_string(),
+            c if c.is_ascii_alphanumeric() => c.to_string(),
+            _ => format!("%{:02X}", c as u8),
+        })
+        .collect()
+}
+
+/// Severity badge — shields for the summary table; monospace in tight lists.
+pub fn severity_badge(severity: &str) -> String {
     match severity {
-        "blocking" => "`blocking`",
-        "warning" => "`warning`",
-        _ => "`info`",
+        "blocking" => shield("sev", "blocking", "e11d48"),
+        "warning" => shield("sev", "warning", "f59e0b"),
+        _ => shield("sev", "info", "64748b"),
     }
+}
+
+pub fn ask_header() -> String {
+    format!(
+        "### {} Codasaurus ask\n",
+        shield("codasaurus", "ask", "0ea5e9")
+    )
 }
 
 /// Short fingerprint for display (first 12 hex chars).
@@ -22,7 +58,7 @@ pub fn short_fp(finding: &Finding) -> String {
 
 /// Shared compact commands footer for review / describe comments.
 pub fn commands_details() -> String {
-    "<details>\n<summary><strong>Commands</strong></summary>\n\n\
+    "<details>\n<summary><strong>Commands</strong> · type as plain text (GitHub Apps are not @-mentionable)</summary>\n\n\
      | Command | Action |\n\
      | --- | --- |\n\
      | `@codasaurus review` | Re-run review |\n\
@@ -40,6 +76,7 @@ pub fn commands_details() -> String {
      | `@codasaurus ask …` | Ask about this PR |\n\
      | `@codasaurus ignore <fp>` | Dismiss a finding |\n\
      | `@codasaurus help` | Full command list |\n\n\
+     <sub>Tip: type <code>@codasaurus ask …</code> or <code>codasaurus ask …</code> — no autocomplete user needed.</sub>\n\n\
      </details>\n"
         .into()
 }
@@ -59,12 +96,12 @@ pub fn inline_finding_comment(f: &Finding) -> String {
         String::new()
     };
     let mut body = format!(
-        "**{title}** · {badge}\n\n\
+        "{badge} **{title}**\n\n\
          {why}\n\n\
          **Fix:** {action}\n\n\
          <details>\n<summary>Provenance</summary>\n\n{provenance}\n\n</details>\n\n\
          ---\n\
-         <sub>`fingerprint: {fp}` · `@codasaurus ignore {fp}`{fix_cta} · 👎 to dismiss</sub>"
+         <sub><code>fingerprint: {fp}</code> · <code>@codasaurus ignore {fp}</code>{fix_cta} · 👎 to dismiss</sub>"
     );
 
     if let Some(ref code) = f.codemod {
@@ -226,41 +263,61 @@ pub fn walkthrough_body_ext(
     let info = *counts.get("info").unwrap_or(&0);
     let total = findings.findings.len();
 
-    let (verdict_label, verdict_detail) = if findings.is_empty() {
-        ("ship", "No findings — ready to merge.")
+    let (verdict_label, verdict_color, verdict_detail) = if findings.is_empty() {
+        ("ship", "22c55e", "No findings — ready to merge.")
     } else if has_blocking {
-        ("hold", "Blocking findings must be fixed or dismissed.")
+        (
+            "hold",
+            "e11d48",
+            "Blocking findings must be fixed or dismissed.",
+        )
     } else {
         (
-            "fix-before-ship",
+            "review",
+            "f59e0b",
             "Non-blocking findings remain — review before merge.",
         )
     };
 
-    let mut body = String::with_capacity(2048);
+    let mut body = String::with_capacity(3072);
 
+    let brand = shield("codasaurus", "review", "111827");
+    let verdict_badge = shield("verdict", verdict_label, verdict_color);
+    let block_badge = shield(
+        "blocking",
+        &blocking.to_string(),
+        if blocking > 0 { "e11d48" } else { "22c55e" },
+    );
+    let warn_badge = shield(
+        "warning",
+        &warning.to_string(),
+        if warning > 0 { "f59e0b" } else { "94a3b8" },
+    );
+    let info_badge = shield("info", &info.to_string(), "64748b");
+    let total_badge = shield("findings", &total.to_string(), "0ea5e9");
+
+    let _ = writeln!(body, "### {brand} Codasaurus Review\n");
+    let _ = writeln!(
+        body,
+        "{verdict_badge} {block_badge} {warn_badge} {info_badge} {total_badge}\n"
+    );
     if include_brand_gif && runtime.max_inline_comments > 0 {
-        let _ = writeln!(body, "<sub>Codasaurus · self-hosted PR review</sub>\n");
+        let _ = writeln!(
+            body,
+            "<sub>Self-hosted · BYOK · fail-closed offline mode</sub>\n"
+        );
     }
-
-    let _ = writeln!(body, "### Codasaurus review\n");
     if let Some(badge) = extras.agent_badge {
         let _ = writeln!(body, "{badge}\n");
     }
-    let _ = writeln!(
-        body,
-        "> **Verdict:** `{verdict_label}` — {verdict_detail}\n"
-    );
-    let _ = writeln!(
-        body,
-        "| | Blocking | Warning | Info | Total |\n\
-         | --- | ---: | ---: | ---: | ---: |\n\
-         | Findings | **{blocking}** | {warning} | {info} | {total} |\n"
-    );
+    let _ = writeln!(body, "> **{verdict_detail}**\n");
 
     let _ = writeln!(body, "<details open>");
-    let _ = writeln!(body, "<summary><strong>Walkthrough</strong></summary>\n");
-    let _ = writeln!(body, "**PR:** {}\n", escape_md(pr_title));
+    let _ = writeln!(
+        body,
+        "<summary><strong>Walkthrough</strong> — {}</summary>\n",
+        escape_md(pr_title)
+    );
 
     if include_mermaid {
         if let Some(diagram) = mermaid_change_flow(files) {
@@ -317,7 +374,7 @@ pub fn walkthrough_body_ext(
                 body,
                 "- {} **{}** — {loc} · `{fp}`",
                 severity_badge(f.severity),
-                finding_title(f),
+                finding_title(f)
             );
         }
         if findings.findings.len() > 30 {
@@ -373,10 +430,15 @@ pub fn clean_approve_body_ext(
     blast_md: &str,
     dep_delta_md: &str,
 ) -> String {
-    let mut body = String::from(
-        "### Codasaurus review\n\n\
-         > **Verdict:** `ship` — No findings.\n\n\
-         Tier-1 detectors found nothing to block. You're clear to merge.\n\n",
+    let mut body = String::new();
+    let brand = shield("codasaurus", "review", "111827");
+    let verdict = shield("verdict", "ship", "22c55e");
+    let findings = shield("findings", "0", "22c55e");
+    let _ = writeln!(body, "### {brand} Codasaurus Review\n");
+    let _ = writeln!(body, "{verdict} {findings}\n");
+    let _ = writeln!(
+        body,
+        "> **No findings — ready to merge.** Tier-1 detectors found nothing to block.\n"
     );
     if let Some(badge) = agent_badge.filter(|s| !s.is_empty()) {
         body.push_str(badge);
@@ -399,28 +461,34 @@ pub fn clean_approve_body_ext(
 }
 
 pub fn help_body() -> String {
-    "### Codasaurus commands\n\n\
-     Mention `@codasaurus` on a PR comment:\n\n\
-     | Command | What it does |\n\
-     | --- | --- |\n\
-     | `review` | Static (+ optional LLM) review |\n\
-     | `describe` | Walkthrough / PR summary |\n\
-     | `summarize` | Short executive summary |\n\
-     | `improve` | Actionable improvement suggestions |\n\
-     | `security` | Secrets / vuln-focused scan |\n\
-     | `labels` | Suggest and apply PR labels |\n\
-     | `changelog` / `update_changelog` | Keep a Changelog draft |\n\
-     | `add_docs` | README / docs stubs |\n\
-     | `similar` | Related PRs by path history |\n\
-     | `impact` | Blast-radius estimate |\n\
-     | `fix` / `fix <fp>` | Apply available codemods (opt-in) |\n\
-     | `digest` | Weekly review rollup |\n\
-     | `ask …` | Answer a question about this PR |\n\
-     | `ignore <fp>` | Dismiss a finding by fingerprint |\n\
-     | 👎 / `-1` on a finding | Learn dismiss (reaction) |\n\
-     | `help` | Show this help |\n\n\
-     <sub>Self-hosted · BYOK · fail-closed offline mode</sub>\n"
-        .into()
+    let brand = shield("codasaurus", "commands", "8b5cf6");
+    format!(
+        "### {brand} Codasaurus commands\n\n\
+         GitHub Apps **cannot be @-mentioned** like a user. Type the text literally:\n\n\
+         ```text\n\
+         @codasaurus ask why is this flaky?\n\
+         codasaurus review\n\
+         ```\n\n\
+         | Command | What it does |\n\
+         | --- | --- |\n\
+         | `review` | Static (+ optional LLM) review |\n\
+         | `describe` | Walkthrough / PR summary |\n\
+         | `summarize` | Short executive summary |\n\
+         | `improve` | Actionable improvement suggestions |\n\
+         | `security` | Secrets / vuln-focused scan |\n\
+         | `labels` | Suggest and apply PR labels |\n\
+         | `changelog` / `update_changelog` | Keep a Changelog draft |\n\
+         | `add_docs` | README / docs stubs |\n\
+         | `similar` | Related PRs by path history |\n\
+         | `impact` | Blast-radius estimate |\n\
+         | `fix` / `fix <fp>` | Apply available codemods (opt-in) |\n\
+         | `digest` | Weekly review rollup |\n\
+         | `ask …` | Answer a question about this PR |\n\
+         | `ignore <fp>` | Dismiss a finding by fingerprint |\n\
+         | 👎 / `-1` on a finding | Learn dismiss (reaction) |\n\
+         | `help` | Show this help |\n\n\
+         <sub>Self-hosted · BYOK · fail-closed offline mode</sub>\n"
+    )
 }
 
 fn escape_md(s: &str) -> String {
