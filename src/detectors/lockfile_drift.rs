@@ -178,6 +178,7 @@ fn lockfile_finding(manifest_path: &str, dep: &str, lockfile: &str) -> Finding {
         codemod: None,
         confidence: None,
         judge_rationale: None,
+            reachability: None,
     }
 }
 

@@ -90,6 +90,7 @@ mod tests {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         }
     }
 

@@ -57,6 +57,7 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                         codemod: None,
                         confidence: None,
                         judge_rationale: None,
+            reachability: None,
                         evidence: None,
                     });
                 }
@@ -79,6 +80,7 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                             codemod: None,
                             confidence: None,
                             judge_rationale: None,
+            reachability: None,
                         });
                     }
                 }

@@ -9,7 +9,8 @@ use crate::detectors::Finding;
 ///
 /// - 5: registry / manifest ground truth (imports, deps, licenses, secrets, IaC)
 /// - 3: heuristic detectors (style, slop, stale APIs, guidelines, graph)
-/// - 3: vulnerabilities (manifest-only; Phase 2 reachability uplifts to 5)
+/// - 3: vulnerabilities (manifest-only; reachable imports are set to 5 by the
+///   vulnerabilities detector)
 /// - 4: everything else (LLM-authored prose findings)
 pub fn base_confidence(detector: &str) -> u8 {
     match detector {
@@ -58,6 +59,7 @@ mod tests {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         }
     }
 

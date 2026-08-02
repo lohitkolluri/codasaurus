@@ -40,6 +40,7 @@ fn scan_terraform(file: &ParsedFile) -> Vec<Finding> {
                 codemod: None,
                 confidence: None,
                 judge_rationale: None,
+                reachability: None,
             });
         }
         if lower.contains("password")
@@ -60,6 +61,7 @@ fn scan_terraform(file: &ParsedFile) -> Vec<Finding> {
                 codemod: None,
                 confidence: None,
                 judge_rationale: None,
+                reachability: None,
             });
         }
         if lower.contains("resource \"aws_security_group\"") {
@@ -75,6 +77,7 @@ fn scan_terraform(file: &ParsedFile) -> Vec<Finding> {
                 codemod: None,
                 confidence: None,
                 judge_rationale: None,
+                reachability: None,
             });
         }
     }
@@ -105,6 +108,7 @@ fn scan_k8s(file: &ParsedFile) -> Vec<Finding> {
                 codemod: None,
                 confidence: None,
                 judge_rationale: None,
+                reachability: None,
             });
         }
         if trimmed == "hostnetwork: true" {
@@ -120,6 +124,7 @@ fn scan_k8s(file: &ParsedFile) -> Vec<Finding> {
                 codemod: None,
                 confidence: None,
                 judge_rationale: None,
+                reachability: None,
             });
         }
         if trimmed.starts_with("value:")
@@ -140,6 +145,7 @@ fn scan_k8s(file: &ParsedFile) -> Vec<Finding> {
                 codemod: None,
                 confidence: None,
                 judge_rationale: None,
+                reachability: None,
             });
         }
     }

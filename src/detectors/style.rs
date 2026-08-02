@@ -65,6 +65,7 @@ pub fn detect_boilerplate(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                     codemod: None,
                     confidence: None,
                     judge_rationale: None,
+            reachability: None,
                 });
             }
         }
@@ -120,6 +121,7 @@ fn check_single_impl_interface(path: &str, lines: &[&str]) -> Option<Finding> {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         });
     }
 
@@ -171,6 +173,7 @@ fn check_deep_nesting(path: &str, lines: &[&str]) -> Option<Finding> {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         })
     } else {
         None
@@ -210,6 +213,7 @@ fn check_unnecessary_factory(path: &str, content: &str) -> Option<Finding> {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         })
     } else {
         None
@@ -250,6 +254,7 @@ fn check_abstraction_overload(path: &str, content: &str) -> Option<Finding> {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         })
     } else {
         None
@@ -325,6 +330,7 @@ fn check_long_functions(path: &str, content: &str) -> Option<Finding> {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         })
     } else {
         None
@@ -368,6 +374,7 @@ fn check_repeated_code(path: &str, lines: &[&str]) -> Option<Finding> {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         })
     } else {
         None
@@ -417,6 +424,7 @@ fn check_boilerplate_getters_setters(path: &str, content: &str) -> Option<Findin
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         })
     } else {
         None

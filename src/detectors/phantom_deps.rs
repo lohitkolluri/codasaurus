@@ -80,6 +80,7 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                     codemod,
                     confidence: None,
                     judge_rationale: None,
+                    reachability: None,
                 });
             }
         }

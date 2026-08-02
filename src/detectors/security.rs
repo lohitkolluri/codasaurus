@@ -101,6 +101,7 @@ pub fn detect_secrets(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                         codemod: None,
                         confidence: None,
                         judge_rationale: None,
+                        reachability: None,
                     });
                 }
             }
@@ -176,6 +177,7 @@ pub fn detect_todos(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                     codemod: None,
                     confidence: None,
                     judge_rationale: None,
+                    reachability: None,
                 });
             }
         }

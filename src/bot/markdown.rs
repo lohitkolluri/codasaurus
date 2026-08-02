@@ -331,6 +331,7 @@ pub fn guide_label_parts(detector: &str, message: &str, file: &str, line: Option
         codemod: None,
         confidence: None,
         judge_rationale: None,
+        reachability: None,
     };
     guide_label(&stub)
 }
@@ -1170,6 +1171,7 @@ mod tests {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         };
         assert_eq!(short_fp(&f).len(), 12);
     }
@@ -1188,6 +1190,7 @@ mod tests {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         };
         let body = inline_finding_comment(&f);
         assert!(body.contains("<details>"));
@@ -1217,6 +1220,7 @@ mod tests {
                 codemod: None,
                 confidence: None,
                 judge_rationale: None,
+                reachability: None,
             }],
         };
         let files = vec![
@@ -1406,6 +1410,7 @@ mod tests {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         }];
         let prompt = agent_fix_prompt(&findings, "Add webhook retries").expect("prompt");
         assert!(prompt.contains("## Findings (priority order)"));
@@ -1432,6 +1437,7 @@ mod tests {
                 codemod: None,
                 confidence: None,
                 judge_rationale: None,
+                reachability: None,
             },
             Finding {
                 detector: "policy".into(),
@@ -1445,6 +1451,7 @@ mod tests {
                 codemod: None,
                 confidence: None,
                 judge_rationale: None,
+                reachability: None,
             },
             Finding {
                 detector: "todo-leaks".into(),
@@ -1458,6 +1465,7 @@ mod tests {
                 codemod: None,
                 confidence: None,
                 judge_rationale: None,
+                reachability: None,
             },
         ];
         let prompt = agent_fix_prompt(&findings, "Fix todos").expect("prompt");
@@ -1480,6 +1488,7 @@ mod tests {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         };
         let b = Finding {
             detector: "todo-leaks".into(),
@@ -1493,6 +1502,7 @@ mod tests {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         };
         let prior = vec![
             (
@@ -1528,6 +1538,7 @@ mod tests {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         };
         let body = inline_finding_comment(&f);
         assert!(body.contains("**Do this:**"));

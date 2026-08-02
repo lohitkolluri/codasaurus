@@ -958,7 +958,7 @@ async fn spawn_security(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) 
             crate::bot::offline::offline_mode_from_env_and_db(None)
         };
         if !offline {
-            findings.extend(crate::detectors::vulnerabilities::detect(&parsed));
+            findings.extend(crate::detectors::vulnerabilities::detect(&parsed, true));
         }
         findings.retain(|f| {
             matches!(

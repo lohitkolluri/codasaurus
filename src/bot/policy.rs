@@ -201,6 +201,7 @@ pub fn forbidden_path_findings(changed_paths: &[String], forbidden: &[String]) -
                     codemod: None,
                     confidence: None,
                     judge_rationale: None,
+                    reachability: None,
                 });
                 break;
             }
@@ -230,6 +231,7 @@ pub fn enforce_count_caps(findings: &mut Vec<Finding>, pack: &PolicyPack) {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         });
     }
     if warning > pack.max_warnings {
@@ -248,6 +250,7 @@ pub fn enforce_count_caps(findings: &mut Vec<Finding>, pack: &PolicyPack) {
             codemod: None,
             confidence: None,
             judge_rationale: None,
+            reachability: None,
         });
     }
 }
@@ -291,6 +294,7 @@ mod tests {
                 codemod: None,
                 confidence: None,
                 judge_rationale: None,
+                reachability: None,
             };
             3
         ];
