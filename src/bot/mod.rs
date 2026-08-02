@@ -226,6 +226,43 @@ fn comment_author_association(payload: &WebhookPayload) -> &str {
         .unwrap_or("")
 }
 
+/// True when the comment was written by a GitHub App / bot (including ourselves).
+///
+/// Our own review comments mention `@codasaurus …` in the Commands footer; without
+/// this filter, `issue_comment.created` re-parses those as commands and the bot
+/// ACL-denies itself (`association: NONE`).
+fn comment_from_bot(payload: &WebhookPayload) -> bool {
+    let comment = match payload.comment.as_ref() {
+        Some(c) => c,
+        None => return false,
+    };
+    if comment
+        .pointer("/user/type")
+        .and_then(|v| v.as_str())
+        .is_some_and(|t| t.eq_ignore_ascii_case("Bot"))
+    {
+        return true;
+    }
+    let login = comment
+        .pointer("/user/login")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if login.is_empty() {
+        return false;
+    }
+    let login_l = login.to_ascii_lowercase();
+    if login_l.ends_with("[bot]") {
+        return true;
+    }
+    if let Ok(slug) = std::env::var("GITHUB_APP_SLUG") {
+        let slug = slug.trim().to_ascii_lowercase();
+        if !slug.is_empty() && (login_l == slug || login_l == format!("{slug}[bot]")) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Who may run `@codasaurus …` commands on a PR.
 ///
 /// GitHub associations vary (personal repos vs orgs vs forks). Allow owners,
@@ -416,6 +453,13 @@ pub(crate) async fn handle_webhook(
             });
         }
     } else if event == "issue_comment" && payload.action == "created" {
+        // Ignore our own (and other bots') comments — review footers mention
+        // `@codasaurus help` / command names and must not re-trigger ACL denials.
+        if comment_from_bot(&payload) {
+            return Ok(Json(
+                serde_json::json!({"status": "ok", "ignored": "bot_comment"}),
+            ));
+        }
         let comment_body = payload
             .comment
             .as_ref()
@@ -746,6 +790,24 @@ mod author_acl_tests {
             repositories: None,
             repositories_added: None,
         }
+    }
+
+    #[test]
+    fn ignores_bot_commenters() {
+        let mut p = payload("NONE", "codasaurus-e0a6[bot]", "alice", "bob");
+        if let Some(c) = p.comment.as_mut() {
+            c["user"]["type"] = serde_json::json!("Bot");
+        }
+        assert!(comment_from_bot(&p));
+        assert!(comment_from_bot(&payload(
+            "NONE",
+            "dependabot[bot]",
+            "alice",
+            "bob"
+        )));
+        assert!(!comment_from_bot(&payload(
+            "OWNER", "alice", "alice", "bob"
+        )));
     }
 
     #[test]

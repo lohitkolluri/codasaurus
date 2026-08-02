@@ -54,6 +54,7 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - Settings → System clarifies that Offline mode is a kill-switch (not tied to LLM keys) and shows when `CODASAURUS_OFFLINE` env forces it.
 - Settings tabs sync to the URL (`/app/settings/llm|review|…`) so deep links stay accurate.
 - Softened third-party branding in comments and operator copy: competitor review-bot names removed; host/LLM references use generic terms where a specific vendor is not required for configuration.
+- Ignore `issue_comment` events from GitHub Apps/bots so review footers that mention `@codasaurus …` no longer trigger a self ACL-denial notice.
 - `.env.example` documents the full dashboard ↔ env mirror set (timeouts, cookies, model cheap, etc.).
 - Jira / Linear ticket context is taken from the PR **title and body**; Linear issues resolve via `issue(id:)` (supports bare `ENG-123` when Linear is configured).
 - Jira Cloud ADF descriptions are flattened into text for review context.
