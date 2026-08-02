@@ -30,7 +30,13 @@ pub struct Config {
     pub index: IndexConfig,
 
     #[serde(default)]
+    pub readiness: ReadinessConfig,
+
+    #[serde(default)]
     pub reachability: ReachabilityConfig,
+
+    #[serde(default)]
+    pub learning: LearningConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -141,6 +147,26 @@ pub struct PreMergeConfig {
     /// Maximum number of warnings allowed
     #[serde(default = "default_ten")]
     pub max_warnings: usize,
+    /// Natural-language pre-merge checks (LLM-judged), from `[[pre_merge_checks]]`.
+    #[serde(default)]
+    pub checks: Vec<PreMergeCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreMergeCheck {
+    /// Check name, shown in the PR comment (<=50 chars).
+    pub name: String,
+    /// `off` | `warning` | `error`. `error` + failed blocks merge.
+    #[serde(default = "default_premerge_mode")]
+    pub mode: String,
+    /// Optional glob filter; check only applies to matching changed files.
+    pub scope: Option<String>,
+    /// Natural-language instructions the LLM evaluates against the diff.
+    pub instructions: String,
+}
+
+fn default_premerge_mode() -> String {
+    "warning".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,6 +252,58 @@ impl Default for ReachabilityConfig {
 
 fn default_false() -> bool {
     false
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReadinessConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_require_approvals")]
+    pub require_approvals: usize,
+    /// When true, any hard blocker sets the readiness score to 0.
+    #[serde(default = "default_true")]
+    pub block_on_blockers: bool,
+}
+
+impl Default for ReadinessConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            require_approvals: default_require_approvals(),
+            block_on_blockers: true,
+        }
+    }
+}
+
+fn default_require_approvals() -> usize {
+    1
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LearningConfig {
+    /// Auto-approve mined rules without the `@codasaurus approve-rule` gate.
+    #[serde(default)]
+    pub auto_approve_rules: bool,
+    /// Reserved: write `CODASAURUS_RULES.md` into the repo via a bot PR.
+    #[serde(default)]
+    pub publish_wiki: bool,
+    /// Dismissals (or distinct PRs) needed before a finding becomes a rule candidate.
+    #[serde(default = "default_min_dismissals_for_rule")]
+    pub min_dismissals_for_rule: usize,
+}
+
+impl Default for LearningConfig {
+    fn default() -> Self {
+        Self {
+            auto_approve_rules: false,
+            publish_wiki: false,
+            min_dismissals_for_rule: default_min_dismissals_for_rule(),
+        }
+    }
+}
+
+fn default_min_dismissals_for_rule() -> usize {
+    3
 }
 
 fn default_gate_name() -> String {
@@ -323,7 +401,9 @@ impl Default for Config {
             quality_gate: QualityGateConfig::default(),
             confidence: ConfidenceConfig::default(),
             index: IndexConfig::default(),
+            readiness: ReadinessConfig::default(),
             reachability: ReachabilityConfig::default(),
+            learning: LearningConfig::default(),
         }
     }
 }

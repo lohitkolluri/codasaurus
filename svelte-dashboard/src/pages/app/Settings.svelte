@@ -622,6 +622,19 @@
     }
   }
 
+  async function setRuleStatus(id, status) {
+    rulesMsg = "";
+    try {
+      await api.post(`/api/learning/rules/${id}/${status}`, {});
+      learnedRules = learnedRules.map((r) =>
+        r.id === id ? { ...r, status: status === "approve" ? "approved" : "archived" } : r,
+      );
+      rulesMsg = status === "approve" ? "Rule approved" : "Rule archived";
+    } catch (err) {
+      rulesMsg = err.message || "Update failed";
+    }
+  }
+
   async function openInstallUrl() {
     githubMsg = "";
     try {
@@ -1537,6 +1550,13 @@
                     {#if rule.file_pattern} · <code>{rule.file_pattern}</code>{/if}
                     <br /><span class="muted">{rule.reason || rule.action}</span>
                   </span>
+                  <span class="rule-status {rule.status || 'approved'}">{rule.status || 'approved'}</span>
+                  {#if (rule.status || "approved") === "suggested"}
+                    <button type="button" class="quiet sm" onclick={() => setRuleStatus(rule.id, "approve")} disabled={!$isMaintainer}>Approve</button>
+                  {/if}
+                  {#if (rule.status || "approved") !== "archived"}
+                    <button type="button" class="quiet sm" onclick={() => setRuleStatus(rule.id, "archive")} disabled={!$isMaintainer}>Archive</button>
+                  {/if}
                   <button type="button" class="quiet sm" onclick={() => deleteRule(rule.id)} disabled={!$isMaintainer}>Delete</button>
                 </div>
               {/each}
@@ -1768,6 +1788,28 @@
     padding: 12px 0;
     border-bottom: 1px solid var(--border-light);
     font-size: 14px;
+  }
+
+  .rule-status {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--surface-raised, #1f2937);
+    color: var(--text-muted, #9ca3af);
+  }
+
+  .rule-status.approved {
+    color: #34d399;
+  }
+
+  .rule-status.suggested {
+    color: #fbbf24;
+  }
+
+  .rule-status.archived {
+    color: #6b7280;
   }
 
   .detector-row:last-child {

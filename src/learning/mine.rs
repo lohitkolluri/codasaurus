@@ -67,14 +67,29 @@ pub async fn promote_dismissal_to_rule(
         .count_distinct_prs_for_detector(detector, repo_full_name)
         .await?;
 
+    // Decay: a dismissal that matches an active rule weakens it → archive.
+    if let Some(id) = store
+        .find_approved_rule_for_detector(detector, file, repo_full_name)
+        .await?
+    {
+        store.archive_rule(&id).await?;
+        return Ok(());
+    }
+
+    let threshold = crate::config::load(None)
+        .map(|c| c.learning.min_dismissals_for_rule)
+        .unwrap_or(MIN_DISTINCT_PRS as usize) as i64;
     let allow = if is_security_detector(detector) {
         maintainer_hit >= 1
     } else {
-        maintainer_hit >= 1 || distinct_prs >= MIN_DISTINCT_PRS
+        maintainer_hit >= 1 || distinct_prs >= threshold
     };
     if !allow {
         return Ok(());
     }
+    let auto_approve = crate::config::load(None)
+        .map(|c| c.learning.auto_approve_rules)
+        .unwrap_or(false);
 
     let file_stem = file_pattern_from_path(file);
     let msg_pat = message_pattern_hint(message);
@@ -92,6 +107,13 @@ pub async fn promote_dismissal_to_rule(
         reason,
         created_at: chrono::Utc::now(),
         repo_full_name: repo_full_name.filter(|r| !r.is_empty()).map(str::to_string),
+        status: if auto_approve {
+            "approved"
+        } else {
+            "suggested"
+        }
+        .into(),
+        source_count: maintainer_hit.max(distinct_prs).max(1),
     };
     store.add_rule_async(&rule).await?;
     Ok(())
@@ -201,6 +223,8 @@ pub async fn mine_pr_comment_feedback(
                     reason: format!("mined pushback signal on PR #{pr_number}"),
                     created_at: chrono::Utc::now(),
                     repo_full_name: Some(repo.to_string()),
+                    status: "approved".into(),
+                    source_count: 1,
                 };
                 store.add_rule_async(&rule).await?;
                 learned += 1;

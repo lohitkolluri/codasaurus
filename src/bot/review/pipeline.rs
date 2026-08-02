@@ -1150,6 +1150,97 @@ pub async fn review_pr_with_options(
     )
     .await;
 
+    let mut premerge_md = String::new();
+    let mut premerge_blockers: Vec<String> = Vec::new();
+    if !offline_mode && !config.pre_merge.checks.is_empty() {
+        let mut diff = String::new();
+        for f in files.iter().take(20) {
+            let name = f["filename"].as_str().unwrap_or("?");
+            let patch = f["patch"].as_str().unwrap_or("");
+            if patch.is_empty() {
+                continue;
+            }
+            use std::fmt::Write as _;
+            let _ = write!(diff, "--- a/{name}\n+++ b/{name}\n{patch}\n");
+            if diff.len() > 20_000 {
+                break;
+            }
+        }
+        let results = crate::bot::premerge::run_pre_merge_checks(
+            pool,
+            repo_name,
+            pr_number,
+            &diff,
+            &changed_paths,
+            &config.pre_merge.checks,
+            offline_mode,
+        )
+        .await;
+        for r in &results {
+            if r.status == "failed" && r.mode == "error" {
+                premerge_blockers.push(format!("pre-merge check \"{}\" failed", r.name));
+            }
+        }
+        premerge_md = crate::bot::premerge::premerge_markdown(&results);
+        if !premerge_md.is_empty() {
+            let _ = post_or_update_comment(
+                client,
+                &auth_header,
+                repo_name,
+                pr_number,
+                &premerge_md,
+                &state,
+                "premerge",
+            )
+            .await;
+        }
+    }
+
+    let readiness_md = if config.readiness.enabled && !head_sha.is_empty() {
+        let mut report = crate::bot::readiness::evaluate(
+            client,
+            &headers,
+            repo_name,
+            pr_number,
+            head_sha,
+            pr,
+            &findings.findings,
+            gate_result.passed,
+            &config.readiness,
+        )
+        .await;
+        if !premerge_blockers.is_empty() {
+            for b in &premerge_blockers {
+                report.blockers.push(b.clone());
+            }
+            report.score = 0;
+        }
+        let md = report.markdown();
+        let _ = post_or_update_comment(
+            client,
+            &auth_header,
+            repo_name,
+            pr_number,
+            &format!("### Codasaurus readiness\n\n{md}"),
+            &state,
+            "readiness",
+        )
+        .await;
+        md
+    } else {
+        String::new()
+    };
+    let summary_extra = match (readiness_md.is_empty(), premerge_md.is_empty()) {
+        (true, true) => dep_delta_md.clone(),
+        (true, false) => format!("{dep_delta_md}\n\n{premerge_md}"),
+        (false, _) => format!("{dep_delta_md}\n\n{readiness_md}\n\n{premerge_md}"),
+    };
+    let effective_gate = crate::gates::GateResult {
+        passed: gate_result.passed && premerge_blockers.is_empty(),
+        failed_conditions: gate_result.failed_conditions.clone(),
+    };
+    let check_run_gate = Some((&effective_gate, config.quality_gate.block_on_fail));
+
     if policy_pack.create_check_run {
         if let Err(e) = crate::bot::github_extra::create_findings_check_run(
             client,
@@ -1157,8 +1248,8 @@ pub async fn review_pr_with_options(
             repo_name,
             head_sha,
             &findings.findings,
-            &dep_delta_md,
-            Some((&gate_result, config.quality_gate.block_on_fail)),
+            &summary_extra,
+            check_run_gate,
         )
         .await
         {

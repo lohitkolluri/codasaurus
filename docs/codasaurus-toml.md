@@ -46,6 +46,16 @@ require_title_convention = false
 max_blocking = 0
 max_warnings = 20
 
+# Optional natural-language pre-merge checks. Each runs the LLM against the
+# PR diff. mode: off | warning | error (error + failed blocks merge).
+# scope: optional glob filter over changed paths (tests/** or *.rs).
+# Requires an LLM; disabled when offline_mode is on.
+# [[pre_merge.checks]]
+# name = "No secrets in tests"
+# mode = "error"
+# scope = "tests/**"
+# instructions = "Fail if any test file contains hardcoded credentials or API keys."
+
 [quality_gate]
 name = "codasaurus way"
 block_on_fail = true
@@ -75,6 +85,18 @@ max_files = 50000
 
 [reachability]
 enabled = true
+
+[readiness]
+enabled = true
+require_approvals = 1
+block_on_blockers = true
+
+[learning]
+# Dismissals mine candidate rules; approve them with @codasaurus approve-rule <id>.
+auto_approve_rules = false
+# Reserved: write CODASAURUS_RULES.md into the repo via a bot PR (not implemented).
+publish_wiki = false
+min_dismissals_for_rule = 3
 ```
 
 ## Sections
@@ -90,6 +112,8 @@ enabled = true
 | `[confidence]` | Per-finding confidence 0-5: optional LLM judge + grounding filter |
 | `[index]` | Whole-repo symbol index: enabled, languages, max_files |
 | `[reachability]` | OSV reachability: upgrade import-hit vulns to OSV severity, tag manifest-only as info |
+| `[readiness]` | Merge-readiness score 0-5: hard blockers zero it, soft signals weight it |
+| `[learning]` | Dismissal → rule mining: approval gate, wiki publication (reserved), threshold |
 
 ## `review_strictness`
 

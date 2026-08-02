@@ -40,4 +40,8 @@ pub struct LearnedRule {
     pub created_at: chrono::DateTime<chrono::Utc>,
     /// When set, the rule only applies to this repo. `None` = legacy/global.
     pub repo_full_name: Option<String>,
+    /// `suggested` | `approved` | `archived` — only `approved` rules apply.
+    pub status: String,
+    /// Number of dismissals behind the rule.
+    pub source_count: i64,
 }
