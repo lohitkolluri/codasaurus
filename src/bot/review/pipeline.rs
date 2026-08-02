@@ -879,15 +879,15 @@ pub async fn review_pr_with_options(
         };
         let summary = if has_blocking {
             format!(
-                "Review for `{sha_short}` — start with **What to do next** in the overview, \
-                 then the {} inline thread{}.",
+                "Commit `{sha_short}`: please fix the items in **What to do next**, \
+                 then check the {} inline comment{}.",
                 review_comments.len(),
                 if review_comments.len() == 1 { "" } else { "s" }
             )
         } else {
             format!(
-                "Review for `{sha_short}` — optional notes on the diff; overview has the checklist \
-                 ({} inline).",
+                "Commit `{sha_short}`: a few optional notes on the Files tab \
+                 ({} inline). Overview has the checklist.",
                 review_comments.len()
             )
         };

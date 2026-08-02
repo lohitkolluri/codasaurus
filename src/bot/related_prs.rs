@@ -20,7 +20,7 @@ use tokio::sync::Semaphore;
 const USER_AGENT: &str = concat!("codasaurus/", env!("CARGO_PKG_VERSION"));
 const MAX_PATHS: usize = 5;
 const MAX_COMMITS_PER_PATH: usize = 4;
-const MAX_RELATED: usize = 5;
+const MAX_RELATED: usize = 3;
 /// Max concurrent GitHub GETs for commit→pulls fan-out (no `futures` dep).
 const MAX_CONCURRENT_FETCHES: usize = 4;
 
@@ -376,17 +376,19 @@ fn format_ranked(mut candidates: Vec<RelatedCandidate>) -> Vec<String> {
         .into_iter()
         .take(MAX_RELATED)
         .map(|c| {
-            let title: String = c.title.chars().take(80).collect();
+            let title: String = c.title.chars().take(72).collect();
+            // Prefer `#N` alone for the number so GitHub can auto-link without
+            // repeating the PR title (GitHub UI already shows it on hover).
             if title.is_empty() {
                 if c.path_hits > 1 {
-                    format!("#{} · {} shared paths", c.number, c.path_hits)
+                    format!("#{} ({} shared files)", c.number, c.path_hits)
                 } else {
                     format!("#{}", c.number)
                 }
             } else if c.path_hits > 1 {
-                format!("#{} · {} shared paths · {title}", c.number, c.path_hits)
+                format!("#{}: {title} ({} shared files)", c.number, c.path_hits)
             } else {
-                format!("#{} {title}", c.number)
+                format!("#{}: {title}", c.number)
             }
         })
         .collect()
@@ -537,9 +539,9 @@ mod tests {
             },
         ]);
         assert!(ranked[0].starts_with("#5"));
-        assert!(ranked[0].contains("3 shared paths"));
+        assert!(ranked[0].contains("3 shared files"));
         assert!(ranked[1].starts_with("#7"));
         assert!(ranked[2].starts_with("#8"));
-        assert!(!ranked[2].contains("shared paths"));
+        assert!(!ranked[2].contains("shared files"));
     }
 }

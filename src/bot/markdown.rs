@@ -114,19 +114,19 @@ pub fn inline_finding_comment(f: &Finding) -> String {
 
 fn finding_title(f: &Finding) -> String {
     match f.detector.as_str() {
-        "hallucinated-imports" => format!("Package does not exist — `{}`", pkg(f)),
-        "secrets" => "Credential in source".into(),
-        "phantom-deps" => format!("Undeclared dependency — `{}`", pkg(f)),
-        "todo-leaks" => "Incomplete code marker".into(),
-        "vulnerabilities" => format!("Known vulnerability — `{}`", pkg_from_suggestion(f)),
-        "over-engineering" => "Unnecessary abstraction".into(),
-        "boilerplate" => "Boilerplate code".into(),
-        "stale-api" => "Deprecated API".into(),
-        "graph" => "Unused code".into(),
-        "guidelines" => "Guideline violation".into(),
-        "slop" => "AI-generated PR signals".into(),
-        "iac" => "Infrastructure risk".into(),
-        "policy" => "Policy pack violation".into(),
+        "hallucinated-imports" => format!("Missing package `{}`", pkg(f)),
+        "secrets" => "Secret in the code".into(),
+        "phantom-deps" => format!("Import not listed in the project (`{}`)", pkg(f)),
+        "todo-leaks" => "Unfinished TODO left in".into(),
+        "vulnerabilities" => format!("Known vulnerability in `{}`", pkg_from_suggestion(f)),
+        "over-engineering" => "Extra abstraction that may not be needed".into(),
+        "boilerplate" => "Repeated code".into(),
+        "stale-api" => "Older API still in use".into(),
+        "graph" => "Code that looks unused".into(),
+        "guidelines" => "Project guideline".into(),
+        "slop" => "Signs of AI-generated filler".into(),
+        "iac" => "Infra config risk".into(),
+        "policy" => "Repo policy check".into(),
         other => other.replace('-', " "),
     }
 }
@@ -317,9 +317,9 @@ pub fn compute_finding_progress(
 fn guide_label(f: &Finding) -> String {
     let title = finding_title(f);
     if f.line > 0 {
-        format!("{title} — `{}:{}`", f.file, f.line)
+        format!("{title} in `{}:{}`", f.file, f.line)
     } else {
-        format!("{title} — `{}`", f.file)
+        format!("{title} in `{}`", f.file)
     }
 }
 
@@ -428,16 +428,16 @@ fn write_next_actions(body: &mut String, findings: &[Finding]) {
     let _ = writeln!(body, "## What to do next\n");
     for (i, f) in ordered.iter().take(5).enumerate() {
         let cue = match f.severity {
-            "blocking" => "fix",
-            "warning" => "note",
-            _ => "fyi",
+            "blocking" => "Please fix",
+            "warning" => "Please check",
+            _ => "Worth a look",
         };
-        let _ = writeln!(body, "{}. **{cue}** — {}", i + 1, guide_label(f));
+        let _ = writeln!(body, "{}. **{cue}:** {}", i + 1, guide_label(f));
     }
     if ordered.len() > 5 {
         let _ = writeln!(
             body,
-            "\n_{} more on the diff — see inline comments._",
+            "\n_{} more on the Files tab (inline comments)._",
             ordered.len() - 5
         );
     }
@@ -515,7 +515,7 @@ pub fn context_comment_body(
         body.push_str("\n\n");
     }
     if has_related {
-        let _ = writeln!(body, "## Related PRs\n");
+        let _ = writeln!(body, "## Related pull requests\n");
         for r in extras.related_prs.iter().take(3) {
             let _ = writeln!(body, "- {r}");
         }
@@ -557,7 +557,7 @@ pub fn checks_comment_body(
     if all_clear {
         let _ = writeln!(
             body,
-            "All clear — nothing to fix before merge from automated checks.\n"
+            "All clear. Automated checks did not find anything to fix before merge.\n"
         );
         if !reviewers.is_empty() {
             let _ = writeln!(
@@ -581,7 +581,7 @@ pub fn checks_comment_body(
     let _ = writeln!(body, "## Before merge\n");
 
     let warn_hint = format!(
-        "At most {} warning{} allowed — address notes on the diff or ask a reviewer.",
+        "At most {} warning{} allowed. Clear the notes on the Files tab, or ask a teammate.",
         config.pre_merge.max_warnings,
         if config.pre_merge.max_warnings == 1 {
             ""
@@ -593,7 +593,7 @@ pub fn checks_comment_body(
         (
             "No blocking findings",
             !has_blocking,
-            "Work through **What to do next** (items marked **fix**), then push.",
+            "Work through **What to do next** (items marked **Please fix**), then push again.",
         ),
         (
             "Warning budget within limit",
@@ -603,7 +603,7 @@ pub fn checks_comment_body(
         (
             "PR has a title",
             title_ok,
-            "Add a short PR title that says what changed.",
+            "Add a short title that says what this PR changes.",
         ),
     ];
     for (label, ok, hint) in checks {
@@ -799,40 +799,41 @@ fn walkthrough_prose(
 
     let mut s = String::new();
     if !title.is_empty() {
-        s.push_str(&format!("{} — ", escape_md(title)));
+        s.push_str(&format!("**{}**\n\n", escape_md(title)));
     }
     if files.is_empty() {
-        s.push_str("No file changes in the diff.");
+        s.push_str("No file changes showed up in this review.");
     } else if top.len() <= 1 {
         s.push_str(&format!(
-            "Updates {} ({} file{}).",
-            top.first().map(String::as_str).unwrap_or("the repo"),
+            "This PR updates {} file{} (mostly {}).",
             files.len(),
-            if files.len() == 1 { "" } else { "s" }
+            if files.len() == 1 { "" } else { "s" },
+            top.first().map(String::as_str).unwrap_or("the repo")
         ));
     } else {
         s.push_str(&format!(
-            "Touches {} across {} files.",
-            top.join(", "),
-            files.len()
+            "This PR updates {} files across {}.",
+            files.len(),
+            top.join(", ")
         ));
     }
     if total == 0 {
-        s.push_str(" Nothing to fix from automated checks.");
+        s.push_str(" Automated checks look clear.");
     } else if has_blocking || blocking > 0 {
         s.push_str(&format!(
-            " Start with the {blocking} fix{} below — details are on the diff.",
-            if blocking == 1 { "" } else { "es" }
+            " I found {} thing{} to fix before merge. Start with the list below.",
+            blocking,
+            if blocking == 1 { "" } else { "s" }
         ));
     } else if warning > 0 {
         s.push_str(&format!(
-            " {warning} optional note{} below — worth a look before merge.",
+            " I spotted {} thing{} worth a quick look (not blockers). See the list below.",
+            warning,
             if warning == 1 { "" } else { "s" }
         ));
     } else {
-        s.push_str(" See the checklist below.");
+        s.push_str(" A few small notes are listed below.");
     }
-    // Hard cap verbosity.
     if s.chars().count() > 280 {
         s = s.chars().take(277).collect::<String>() + "…";
     }
@@ -1081,11 +1082,11 @@ mod tests {
 
         let progress = FindingProgress {
             resolved: vec![ProgressItem {
-                label: "Old issue — `a.rs:1`".into(),
+                label: "Old issue in `a.rs:1`".into(),
                 severity: "blocking".into(),
             }],
             still_open: vec![ProgressItem {
-                label: "Boilerplate code — `src/bot/commands.rs:10`".into(),
+                label: "Repeated code in `src/bot/commands.rs:10`".into(),
                 severity: "warning".into(),
             }],
             newly_found: vec![],
@@ -1105,14 +1106,17 @@ mod tests {
 
         let ctx = context_comment_body(
             &WalkthroughExtras {
-                related_prs: &["#1".into()],
+                related_prs: &["#1: Example (2 shared files)".into()],
+                issue_assessment_md: "## Linked issues\n\n- #2: Login timeout (looks covered)\n",
                 blast_md: "blast",
                 ..Default::default()
             },
             &runtime,
         )
         .expect("context");
-        assert!(ctx.contains("## Related PRs"));
+        assert!(ctx.contains("## Related pull requests"));
+        assert!(ctx.contains("## Linked issues"));
+        assert!(ctx.contains("#2: Login timeout"));
         assert!(ctx.contains("## Blast radius"));
         assert!(context_comment_body(&WalkthroughExtras::default(), &runtime).is_none());
     }
@@ -1156,7 +1160,7 @@ mod tests {
         let current = vec![b.clone()];
         let p = compute_finding_progress(&current, &prior).expect("progress");
         assert_eq!(p.resolved.len(), 1);
-        assert!(p.resolved[0].label.contains("Credential"));
+        assert!(p.resolved[0].label.contains("Secret"));
         assert_eq!(p.still_open.len(), 1);
         assert!(p.newly_found.is_empty());
     }
