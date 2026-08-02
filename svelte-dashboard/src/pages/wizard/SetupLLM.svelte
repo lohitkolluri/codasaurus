@@ -140,7 +140,7 @@
     <select id="provider" bind:value={provider} onchange={(e) => handleProviderChange(e.target.value)}>
       <option value="openrouter">OpenRouter (BYOK cloud models)</option>
       <option value="ollama">Ollama (local models)</option>
-      <option value="custom">Custom OpenAI-compatible endpoint</option>
+      <option value="custom">Custom chat-completions endpoint</option>
       <option value="disabled">Skip (Tier-1 only)</option>
     </select>
   </div>

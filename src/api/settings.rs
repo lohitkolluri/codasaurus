@@ -194,13 +194,13 @@ async fn get_settings(
     let (effective, source) = crate::bot::offline::offline_mode_source(db_off.as_deref());
     map.insert("offline_mode_effective".into(), json!(effective));
     map.insert("offline_mode_source".into(), json!(source));
-    // Help operators who never set Render env: DB true is mirrored into process env
-    // at boot, so "env" here after `apply_db_to_env` still usually means the DB row.
+    // Prefer DB when the kill-switch is on in app_config; process env alone can
+    // look like a platform setting the operator never chose after `apply_db_to_env`.
     if effective {
         map.insert(
             "offline_mode_hint".into(),
             json!(
-                "Offline mode is on in app_config (Settings → System). It is independent of your OpenRouter key — turn the toggle off and Save."
+                "Offline mode is on in app_config (Settings → System). It is independent of your LLM API key — turn the toggle off and Save."
             ),
         );
     }
@@ -370,7 +370,7 @@ async fn set_setting(
         crate::registry::set_offline_mode(on);
         // Clearing the kill-switch: drop process env so a stale CODASAURUS_OFFLINE=1
         // from an earlier mirror does not keep LLM disabled until restart.
-        // (Render dashboard env vars still win on the next deploy — remove them there.)
+        // Platform dashboard env vars still win on the next deploy — remove them there.
         if !on {
             std::env::remove_var("CODASAURUS_OFFLINE");
         }

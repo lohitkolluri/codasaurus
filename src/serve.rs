@@ -57,7 +57,7 @@ pub async fn serve(
     let pool = crate::db::create_pool(database_url).await?;
 
     // Sync env vars → DB config so the setup wizard detects them even
-    // after ephemeral storage is wiped (Render free tier, Docker restarts).
+    // after ephemeral storage is wiped (free-tier hosts, Docker restarts).
     sync_env_to_db(&pool).await;
     // Then apply dashboard-stored mirrors into process env when unset,
     // so env-only readers (OIDC, Jira, runtime caps, etc.) pick them up.
@@ -81,7 +81,7 @@ pub async fn serve(
     // Apply offline mode before accepting traffic so slash commands honor the DB flag.
     // Prefer the raw DB row for the log source — `apply_db_to_env` may already have
     // mirrored `offline_mode=true` into process env, which would otherwise look like
-    // a Render `CODASAURUS_OFFLINE` setting the operator never added.
+    // a host `CODASAURUS_OFFLINE` setting the operator never added.
     {
         let db_off = crate::db::config::get_config(&pool, "offline_mode")
             .await
@@ -91,15 +91,15 @@ pub async fn serve(
             .as_deref()
             .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
             .unwrap_or(false);
-        let render_env_on = std::env::var_os("CODASAURUS_OFFLINE").is_some_and(|v| {
+        let host_env_on = std::env::var_os("CODASAURUS_OFFLINE").is_some_and(|v| {
             matches!(
                 v.to_string_lossy().to_ascii_lowercase().as_str(),
                 "1" | "true" | "yes" | "on"
             )
         });
         // Resolve before we rewrite env from DB for a clearer operator message.
-        let offline = db_on || render_env_on;
-        let source = if render_env_on && !db_on {
+        let offline = db_on || host_env_on;
+        let source = if host_env_on && !db_on {
             "env"
         } else if db_on {
             "db"
@@ -505,11 +505,9 @@ async fn shutdown_signal() {
 }
 
 /// On startup, copy well-known env vars into the database config table.
-/// This is idempotent — if the DB already has a value and the env var isn't
-/// set, it leaves the DB value alone.  Purpose: Render's free tier has no
-/// persistent disk, so when the container restarts from scratch we still get
-/// the config the wizard wrote last time (because the *next* startup will
-/// have the same env vars the user originally set).
+/// Idempotent: if the DB already has a value and the env var is unset, leave DB alone.
+/// Needed on hosts without persistent disk so a fresh container still sees the same
+/// env the operator configured (wizard values survive via the next boot's env).
 async fn sync_env_to_db(pool: &db::DbPool) {
     for (env_key, config_key) in SYNC_KEYS {
         if let Ok(val) = std::env::var(env_key) {

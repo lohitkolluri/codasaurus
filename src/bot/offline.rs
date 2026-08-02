@@ -48,8 +48,8 @@ pub fn offline_mode_from_env_and_db(db_offline: Option<&str>) -> bool {
 /// Returns `(enabled, source)` where source is `env`, `db`, or `off`.
 ///
 /// Prefer `db` when the row is on — `apply_db_to_env` mirrors that into
-/// `CODASAURUS_OFFLINE`, which would otherwise look like a Render env var the
-/// operator never set.
+/// `CODASAURUS_OFFLINE`, which would otherwise look like a host-platform env
+/// var the operator never set.
 pub fn offline_mode_source(db_offline: Option<&str>) -> (bool, &'static str) {
     let db_on = db_offline
         .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))

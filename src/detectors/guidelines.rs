@@ -15,11 +15,6 @@ static CONVENTIONAL_COMMIT_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("invalid conventional commit regex")
 });
 
-/// Deprecated local-FS path — always empty. Bot uses [`detect_remote`].
-pub fn detect(_config: &crate::config::Config) -> Vec<Finding> {
-    Vec::new()
-}
-
 /// Runs guidelines checks against in-memory guideline files (bot / remote path).
 ///
 /// Uses PR branch + commit messages instead of local `git`.
@@ -225,14 +220,6 @@ fn check_conventional_remote(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
-
-    #[test]
-    fn test_detect_local_is_noop() {
-        let mut config = Config::default();
-        config.checks.guidelines = true;
-        assert!(detect(&config).is_empty());
-    }
 
     #[test]
     fn test_detect_remote_branch_and_commits() {

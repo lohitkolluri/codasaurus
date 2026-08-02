@@ -1,7 +1,7 @@
 //! Readable PR comment markdown for GitHub review threads.
 //!
-//! Prefer native GFM (headings, lists, details). Hosted images/badges are
-//! secondary; keep the above-the-fold walkthrough short.
+//! Prefer native GFM (headings, lists, `<details>`). Hosted images/badges are
+//! secondary; keep the above-the-fold walkthrough short and finding-free.
 
 use crate::bot_runtime::BotRuntimeConfig;
 use crate::config::Config;
@@ -236,33 +236,6 @@ fn write_review_header(
 }
 
 /// Build the main walkthrough / summary comment body.
-#[allow(clippy::too_many_arguments, dead_code)]
-pub fn walkthrough_body(
-    findings: &Findings,
-    has_blocking: bool,
-    pr_title: &str,
-    files: &[serde_json::Value],
-    reviewers: &[String],
-    config: &Config,
-    runtime: &BotRuntimeConfig,
-    include_brand_gif: bool,
-    include_mermaid: bool,
-) -> String {
-    walkthrough_body_ext(
-        findings,
-        has_blocking,
-        pr_title,
-        files,
-        reviewers,
-        config,
-        runtime,
-        include_brand_gif,
-        include_mermaid,
-        WalkthroughExtras::default(),
-    )
-}
-
-/// Extended walkthrough with related PRs + novelty sections.
 ///
 /// Shape: short prose Walkthrough, Changes list, estimated effort.
 /// Findings stay on inline review comments — not duplicated here.

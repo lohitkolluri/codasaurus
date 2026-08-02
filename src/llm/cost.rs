@@ -106,15 +106,15 @@ pub fn filter_llm_files(files: &[serde_json::Value]) -> Vec<&serde_json::Value> 
 }
 
 /// Rough USD microdollar estimate (1_000_000 = $1) from prompt size + output budget.
-/// Uses OpenRouter-ish list prices for strong vs cheap tiers — observability only.
+/// Indicative rates for strong vs cheap tiers — metrics only, not billing.
 pub fn estimate_spend_microdollars(prompt_chars: usize, max_out_tokens: u32, strong: bool) -> u64 {
     let in_tokens = (prompt_chars as f64 / 4.0).max(1.0);
-    // Assume ~40% of the output budget is used on average.
+    // Typical completions use a fraction of max_tokens; 40% is a stable heuristic.
     let out_tokens = max_out_tokens as f64 * 0.4;
     let (in_per_m, out_per_m) = if strong {
-        (3.0_f64, 15.0_f64) // Sonnet-class
+        (3.0_f64, 15.0_f64) // strong / frontier tier
     } else {
-        (0.15_f64, 0.60_f64) // mini / flash class
+        (0.15_f64, 0.60_f64) // cheap / flash tier
     };
     let usd = (in_tokens / 1_000_000.0) * in_per_m + (out_tokens / 1_000_000.0) * out_per_m;
     (usd * 1_000_000.0).round().max(1.0) as u64

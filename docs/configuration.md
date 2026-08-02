@@ -26,20 +26,20 @@ codasaurus version
 
 ### Core
 
-| Variable                             | Required            | Description                                                                                                                                                     |
-| ------------------------------------ | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                       | recommended         | Postgres URL (default `postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus`)                                                                             |
-| `CODASAURUS_DB_MAX_CONNECTIONS`      | no                  | Pool size (default `16`, or `3` on free/Render/Neon hosts)                                                                                                      |
-| `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS` | no                  | Wait for a free connection (default `30`, or `60` on free hosts)                                                                                                |
-| `CODASAURUS_CONFIG_CACHE_TTL_SECS`   | no                  | In-process `app_config` cache TTL (default `60`). `0` disables. Write-through on this process; TTL covers multi-replica lag                                     |
-| `CODASAURUS_FREE_TIER`               | no                  | `1` forces free-tier pool + concurrency defaults                                                                                                                |
-| `CODASAURUS_DATA_DIR`                | no                  | Data directory (Docker: `/data`)                                                                                                                                |
-| `PORT` / `--port`                    | no                  | Listen port (default `3000`)                                                                                                                                    |
-| `PUBLIC_URL`                         | recommended in prod | Canonical HTTPS origin for GitHub manifest callbacks                                                                                                            |
+| Variable                             | Required            | Description                                                                                                                                                  |
+| ------------------------------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DATABASE_URL`                       | recommended         | Postgres URL (default `postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus`)                                                                          |
+| `CODASAURUS_DB_MAX_CONNECTIONS`      | no                  | Pool size (default `16`, or `3` on free/Render/Neon hosts)                                                                                                   |
+| `CODASAURUS_DB_ACQUIRE_TIMEOUT_SECS` | no                  | Wait for a free connection (default `30`, or `60` on free hosts)                                                                                             |
+| `CODASAURUS_CONFIG_CACHE_TTL_SECS`   | no                  | In-process `app_config` cache TTL (default `60`). `0` disables. Write-through on this process; TTL covers multi-replica lag                                  |
+| `CODASAURUS_FREE_TIER`               | no                  | `1` forces free-tier pool + concurrency defaults                                                                                                             |
+| `CODASAURUS_DATA_DIR`                | no                  | Data directory (Docker: `/data`)                                                                                                                             |
+| `PORT` / `--port`                    | no                  | Listen port (default `3000`)                                                                                                                                 |
+| `PUBLIC_URL`                         | recommended in prod | Canonical HTTPS origin for GitHub manifest callbacks                                                                                                         |
 | `CODASAURUS_HSTS`                    | no                  | `1` forces `Strict-Transport-Security` even if `PUBLIC_URL` is unset (auto-on when `PUBLIC_URL` is `https://…`). Dashboard: **Settings → System → Advanced** |
-| `CODASAURUS_QUEUE_WORKERS`           | no                  | Durable review queue workers (1–8; default min of review permits / 4). Dashboard: **Settings → System → Advanced** (restart)                                              |
-| `CODASAURUS_METRICS_TOKEN`           | no                  | If set, enables `/metrics` (Bearer token required). Dashboard: **Settings → System → Advanced**                                                                           |
-| `CODASAURUS_AUDIT_RETENTION_DAYS`    | no                  | Days to keep audit log entries before automatic deletion (default `90`, clamped 7–730). Dashboard: **Settings → System**                                       |
+| `CODASAURUS_QUEUE_WORKERS`           | no                  | Durable review queue workers (1–8; default min of review permits / 4). Dashboard: **Settings → System → Advanced** (restart)                                 |
+| `CODASAURUS_METRICS_TOKEN`           | no                  | If set, enables `/metrics` (Bearer token required). Dashboard: **Settings → System → Advanced**                                                              |
+| `CODASAURUS_AUDIT_RETENTION_DAYS`    | no                  | Days to keep audit log entries before automatic deletion (default `90`, clamped 7–730). Dashboard: **Settings → System**                                     |
 
 ### GitHub App
 
@@ -76,18 +76,18 @@ Dashboard **Settings → Connections** covers GitHub App, OIDC (`OIDC_*`), and J
 
 ### LLM cost controls
 
-| Knob                                        | Default             | Effect                                                              |
-| ------------------------------------------- | ------------------- | ------------------------------------------------------------------- |
-| Repo `config_json.auto_review_diff`         | **off (opt-in)**    | Webhook auto `review_diff` (largest cost)                           |
-| Skip when Tier-1 blocks                     | always              | No auto improve if review already holds                             |
-| Skip lockfile / vendor / generated-only PRs | always              | No auto improve on low-signal paths                                 |
-| Hunk filter                                 | always              | Lockfiles, `vendor/`, `dist/`, maps, binaries stripped before LLM   |
-| Two-tier models                             | on                  | Strong for `review_diff`; cheap for text helpers                    |
-| Prompt caching                              | Claude / OpenRouter | `cache_control` on stable system prefixes when supported            |
-| Confidence gate                             | always              | Drop `low` confidence LLM issues; downgrade critical without `high` |
-| Citation / rationale                        | always              | Short description required; non-info needs a line citation          |
-| Daily BudgetGuard                           | off (`0`)           | Hard-block LLM when estimated last-day spend ≥ cap                  |
-| `agent_events` spine                        | on                  | LLM call rows (model, tokens, cost est, latency) for audit/cost     |
+| Knob                                        | Default          | Effect                                                              |
+| ------------------------------------------- | ---------------- | ------------------------------------------------------------------- |
+| Repo `config_json.auto_review_diff`         | **off (opt-in)** | Webhook auto `review_diff` (largest cost)                           |
+| Skip when Tier-1 blocks                     | always           | No auto improve if review already holds                             |
+| Skip lockfile / vendor / generated-only PRs | always           | No auto improve on low-signal paths                                 |
+| Hunk filter                                 | always           | Lockfiles, `vendor/`, `dist/`, maps, binaries stripped before LLM   |
+| Two-tier models                             | on               | Strong for `review_diff`; cheap for text helpers                    |
+| Prompt caching                              | when supported   | `cache_control` on stable system prefixes (gateway/model dependent) |
+| Confidence gate                             | always           | Drop `low` confidence LLM issues; downgrade critical without `high` |
+| Citation / rationale                        | always           | Short description required; non-info needs a line citation          |
+| Daily BudgetGuard                           | off (`0`)        | Hard-block LLM when estimated last-day spend ≥ cap                  |
+| `agent_events` spine                        | on               | LLM call rows (model, tokens, cost est, latency) for audit/cost     |
 
 `/metrics` exposes `codasaurus_llm_spend_usd_estimate`. Dashboard **stats** includes `llm.spend_usd_last_day` and `llm.daily_budget_usd`.
 
@@ -131,7 +131,7 @@ Owners create a link under **Team → Invite member**. Optional email lock. Link
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Registry / OSV   | In-process HashMap, default TTL **3600s** (`[registry] cache_ttl_secs`). Soft-fail cache **120s** on network errors. Prefetch up to 200 packages/PR. Metrics: `codasaurus_registry_cache_*`, `codasaurus_osv_cache_*`. |
 | GitHub Contents  | In-process ETag + body cache (1h, 2k entries) with `If-None-Match` so 304s spare primary rate limit. Metrics: `codasaurus_github_cache_*`.                                                                             |
-| LLM prompt cache | Provider-side `cache_control: ephemeral` on stable system prompts (Claude / OpenRouter).                                                                                                                               |
+| LLM prompt cache | Provider-side `cache_control: ephemeral` on stable system prompts when the gateway/model supports it.                                                                                                                  |
 | Webhook dedup    | `webhook_deliveries` PK; rows pruned after **14 days**.                                                                                                                                                                |
 | Sessions         | **7 days**; purged on lookup and by worker maintenance.                                                                                                                                                                |
 | Review jobs      | Terminal `done`/`failed` purged after **30 days**.                                                                                                                                                                     |

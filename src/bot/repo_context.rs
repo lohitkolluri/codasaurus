@@ -396,12 +396,11 @@ pub async fn fetch_external_tickets(pr_title: &str, pr_body: &str) -> Vec<IssueC
             }
         }
     } else if !keys.is_empty() && !jira_configured && !linear_configured {
-        // Don't stub tickets into the walkthrough — a "configure …" placeholder
-        // looks like a linked issue and scores as "unclear". Operators enable
-        // Jira/Linear under Settings → Connections when they want this context.
+        // Ticket keys without a configured integration stay silent — placeholders
+        // looked like linked issues and scored as "unclear" in assessments.
         tracing::debug!(
             count = keys.len(),
-            "ticket keys in PR but Jira/Linear not configured; skipping"
+            "ticket keys in PR but issue tracker not configured; skipping"
         );
     }
 

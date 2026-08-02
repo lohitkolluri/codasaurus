@@ -178,9 +178,14 @@ pub fn forbidden_path_findings(changed_paths: &[String], forbidden: &[String]) -
                 continue;
             }
             let path_norm = path.trim_start_matches('/');
-            let hit = path_norm == rule
-                || path_norm.starts_with(&format!("{rule}/"))
-                || path_norm.contains(rule);
+            // Path-boundary match only — substring would false-positive (`src` ⊂ `source`).
+            let hit = if rule.ends_with('/') {
+                path_norm.starts_with(rule) || path_norm == rule.trim_end_matches('/')
+            } else {
+                path_norm == rule
+                    || path_norm.starts_with(&format!("{rule}/"))
+                    || path_norm.rsplit('/').next() == Some(rule)
+            };
             if hit {
                 out.push(Finding {
                     detector: "policy".to_string(),
@@ -253,6 +258,16 @@ mod tests {
         );
         assert_eq!(f.len(), 1);
         assert_eq!(f[0].file, "secrets/prod.key");
+    }
+
+    #[test]
+    fn forbidden_does_not_substring_match() {
+        let f = forbidden_path_findings(
+            &["tests/source.rs".into(), "src/main.rs".into()],
+            &["src".into()],
+        );
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].file, "src/main.rs");
     }
 
     #[test]

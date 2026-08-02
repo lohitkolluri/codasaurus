@@ -20,7 +20,7 @@ impl Default for BotRuntimeConfig {
             max_inline_comments: env_usize("CODASAURUS_MAX_INLINE_COMMENTS", 8),
             max_reviewer_files: env_usize("CODASAURUS_MAX_REVIEWER_FILES", 8),
             max_comment_bytes: env_usize("CODASAURUS_MAX_COMMENT_BYTES", 64000),
-            max_llm_diff_chars: env_usize("CODASAURUS_MAX_LLM_DIFF_CHARS", 8000),
+            max_llm_diff_chars: env_usize("CODASAURUS_MAX_LLM_DIFF_CHARS", 24_000),
             auto_improve_max_files: env_usize("CODASAURUS_AUTO_IMPROVE_MAX_FILES", 40),
             auto_improve_max_diff_chars: env_usize("CODASAURUS_AUTO_IMPROVE_MAX_DIFF", 24_000),
         }

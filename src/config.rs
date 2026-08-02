@@ -288,20 +288,6 @@ impl Config {
         config
     }
 
-    pub async fn bot_policy(pool: Option<&crate::db::DbPool>) -> BotPolicy {
-        let mut policy = BotPolicy {
-            min_severity: "info".into(),
-        };
-        if let Some(pool) = pool {
-            if let Ok(Some(v)) = crate::db::config::get_config(pool, "default_severity").await {
-                if matches!(v.as_str(), "blocking" | "warning" | "info") {
-                    policy.min_severity = v;
-                }
-            }
-        }
-        policy
-    }
-
     /// Overlay per-repo `config_json` from the dashboard.
     /// Shape: `{ "detectors": {...}, "llm_enabled": bool, "auto_describe": bool,
     /// "auto_review_diff": bool, "auto_labels": bool, "update_pr_description": bool,
