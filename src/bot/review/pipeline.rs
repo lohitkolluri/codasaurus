@@ -147,10 +147,7 @@ pub async fn review_pr_with_options(
         // Global Settings toggle for auto-approve (repo config_json wins when true).
         if !repo_flags.auto_approve {
             if let Ok(Some(v)) = crate::db::config::get_config(pool, "auto_approve").await {
-                if matches!(
-                    v.to_ascii_lowercase().as_str(),
-                    "true" | "1" | "yes" | "on"
-                ) {
+                if matches!(v.to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on") {
                     repo_flags.auto_approve = true;
                 }
             }

@@ -175,7 +175,11 @@ async fn setup_status(
         .ok()
         .flatten()
         .map(|slug| format!("https://github.com/apps/{slug}/installations/new"));
-    if owner_exists && super::rbac::current_user(&state.pool, &headers).await.is_err() {
+    if owner_exists
+        && super::rbac::current_user(&state.pool, &headers)
+            .await
+            .is_err()
+    {
         github_install_url = None;
     }
 

@@ -81,11 +81,10 @@ pub async fn update_repo(
 
 pub async fn delete_repo(pool: &DbPool, id: i64) -> Result<(), sqlx::Error> {
     let mut tx = pool.as_pg().begin().await?;
-    let full_name: Option<(String,)> =
-        sqlx::query_as("SELECT full_name FROM repos WHERE id = $1")
-            .bind(id)
-            .fetch_optional(&mut *tx)
-            .await?;
+    let full_name: Option<(String,)> = sqlx::query_as("SELECT full_name FROM repos WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
     if let Some((ref name,)) = full_name {
         let like = format!("{name}/%");
         let _ = sqlx::query("DELETE FROM review_jobs WHERE repo = $1")

@@ -91,9 +91,7 @@ pub async fn promote_dismissal_to_rule(
         action: RuleAction::Ignore,
         reason,
         created_at: chrono::Utc::now(),
-        repo_full_name: repo_full_name
-            .filter(|r| !r.is_empty())
-            .map(str::to_string),
+        repo_full_name: repo_full_name.filter(|r| !r.is_empty()).map(str::to_string),
     };
     store.add_rule_async(&rule).await?;
     Ok(())

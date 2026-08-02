@@ -264,9 +264,8 @@ pub(crate) async fn review_exists_for_commit(
     if head_sha.is_empty() {
         return Ok(false);
     }
-    let url = format!(
-        "https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews?per_page=100"
-    );
+    let url =
+        format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews?per_page=100");
     let reviews: Vec<serde_json::Value> = retry_async(
         &RetryConfig::quick(),
         "list_pr_reviews",

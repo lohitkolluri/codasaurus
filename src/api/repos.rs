@@ -74,8 +74,8 @@ async fn sync_repos(
         .as_ref()
         .ok_or_else(|| ApiError::internal("GitHub API client not available"))?;
     let jwt_auth = format!("Bearer {jwt}");
-    let jwt_headers = github_api_headers(&jwt_auth)
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let jwt_headers =
+        github_api_headers(&jwt_auth).map_err(|e| ApiError::internal(e.to_string()))?;
 
     let installations: Vec<serde_json::Value> = retry_async(
         &RetryConfig::api_default(),
@@ -130,8 +130,8 @@ async fn sync_repos(
             None => continue,
         };
         let token_auth = format!("Bearer {token}");
-        let token_headers = github_api_headers(&token_auth)
-            .map_err(|e| ApiError::internal(e.to_string()))?;
+        let token_headers =
+            github_api_headers(&token_auth).map_err(|e| ApiError::internal(e.to_string()))?;
 
         let mut all_repos: Vec<serde_json::Value> = Vec::new();
         let mut page_url: Option<String> =
