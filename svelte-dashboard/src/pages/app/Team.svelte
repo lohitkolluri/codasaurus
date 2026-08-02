@@ -268,8 +268,8 @@
       </section>
     {/if}
 
-    <section class="team-roster">
-      <div class="team-toolbar">
+    <section class="team-roster page-panel">
+      <div class="team-toolbar page-panel-toolbar">
         <div class="team-filters" role="tablist" aria-label="Filter by role">
           {#each ROLE_FILTERS as f}
             <button
@@ -576,6 +576,13 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
+  }
+
+  .team-filter:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    transform: none;
+    box-shadow: none;
   }
 
   .team-filter.active {
