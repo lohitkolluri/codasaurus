@@ -83,24 +83,31 @@ fn is_high_fan_in_path(path: &str) -> bool {
 }
 
 pub fn blast_markdown(report: &BlastReport) -> String {
+    // Skip noise when there is nothing meaningful to say.
     if report.score == 0 && report.fan_in.is_empty() && report.high_risk_paths.is_empty() {
         return String::new();
     }
-    let level = match report.score {
-        0..=24 => "low",
-        25..=59 => "moderate",
-        60..=84 => "high",
-        _ => "critical",
-    };
-    let mut out = format!("**Blast radius:** `{level}` ({}/100)", report.score);
+
+    let show_details =
+        report.high_risk_paths.len() > 1 || report.fan_in.iter().any(|(_, n)| *n >= 2);
+
+    // Low score with no notable fan-in / multi-path signal: stay silent.
+    if report.score < 25 && !show_details && report.high_risk_paths.is_empty() {
+        return String::new();
+    }
+
+    let mut out = crate::bot::markdown::blast_radius_badges(report.score);
+    out.push('\n');
+
     if let Some(path) = report.high_risk_paths.first() {
-        out.push_str(&format!(" · sensitive: `{path}`"));
+        out.push_str(&format!("Sensitive path: `{path}`"));
         if report.high_risk_paths.len() > 1 {
             out.push_str(&format!(" (+{})", report.high_risk_paths.len() - 1));
         }
+        out.push_str("\n\n");
     }
-    out.push_str("\n\n");
-    if !report.fan_in.is_empty() || report.high_risk_paths.len() > 1 {
+
+    if show_details {
         out.push_str("<details>\n<summary>Blast details</summary>\n\n");
         if report.high_risk_paths.len() > 1 {
             out.push_str("High-sensitivity paths:\n\n");
@@ -109,11 +116,17 @@ pub fn blast_markdown(report: &BlastReport) -> String {
             }
             out.push('\n');
         }
-        if !report.fan_in.is_empty() {
+        let notable: Vec<_> = report
+            .fan_in
+            .iter()
+            .filter(|(_, n)| *n >= 2)
+            .take(6)
+            .collect();
+        if !notable.is_empty() {
             out.push_str("Top imports in this PR:\n");
-            for (name, n) in report.fan_in.iter().take(6) {
+            for (name, n) in notable {
                 out.push_str(&format!(
-                    "- `{name}` · {n} importer{}\n",
+                    "- `{name}` ({n} importer{})\n",
                     if *n == 1 { "" } else { "s" }
                 ));
             }
@@ -145,5 +158,29 @@ mod tests {
         let report = estimate_blast_radius(&files, &["src/auth/middleware.ts".into()]);
         assert!(!report.high_risk_paths.is_empty());
         assert!(report.score > 0);
+    }
+
+    #[test]
+    fn blast_markdown_uses_badges() {
+        let md = blast_markdown(&BlastReport {
+            high_risk_paths: vec!["src/auth/mod.rs".into()],
+            fan_in: vec![("auth".into(), 3)],
+            score: 55,
+        });
+        assert!(md.contains("shields.io"));
+        assert!(md.contains("BLAST") || md.contains("blast"));
+        assert!(md.contains("SCORE") || md.contains("score"));
+        assert!(md.contains("MODERATE") || md.contains("alt=\"BLAST RADIUS: MODERATE\""));
+        assert!(!md.contains("**Blast radius:**"));
+    }
+
+    #[test]
+    fn blast_markdown_hides_empty_low() {
+        let md = blast_markdown(&BlastReport {
+            high_risk_paths: vec![],
+            fan_in: vec![("foo".into(), 1)],
+            score: 0,
+        });
+        assert!(md.is_empty());
     }
 }

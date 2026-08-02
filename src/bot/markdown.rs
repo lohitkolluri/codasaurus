@@ -344,6 +344,25 @@ fn write_slot_header(body: &mut String, marker: &str, title: &str) {
     let _ = writeln!(body, "### {title}\n");
 }
 
+/// Caps shields strip for blast radius (same style as overview severity badges).
+pub fn blast_radius_badges(score: u8) -> String {
+    let (level, color) = match score {
+        0..=24 => ("LOW", COLOR_SHIP),
+        25..=59 => ("MODERATE", COLOR_REVIEW),
+        60..=84 => ("HIGH", COLOR_HOLD),
+        _ => ("CRITICAL", COLOR_HOLD),
+    };
+    format!(
+        "{} {}\n",
+        shield("BLAST RADIUS", level, color),
+        shield(
+            "SCORE",
+            &score.to_string(),
+            if score == 0 { COLOR_MUTED } else { color }
+        ),
+    )
+}
+
 /// Top-of-overview status strip: severity counts + ready-to-merge.
 fn status_badge_strip(blocking: usize, warning: usize, info: usize, ready: bool) -> String {
     let blocking_color = if blocking > 0 {
@@ -406,6 +425,7 @@ pub fn overview_comment_body(
     }
 
     write_next_actions(&mut body, &findings.findings);
+    write_agent_fix_prompt(&mut body, &findings.findings, pr_title);
 
     let _ = writeln!(body, "## Changes\n");
     write_changed_files_table(&mut body, files);
@@ -419,12 +439,7 @@ fn write_next_actions(body: &mut String, findings: &[Finding]) {
     if findings.is_empty() {
         return;
     }
-    let mut ordered: Vec<&Finding> = findings.iter().collect();
-    ordered.sort_by_key(|f| match f.severity {
-        "blocking" => 0,
-        "warning" => 1,
-        _ => 2,
-    });
+    let ordered = ordered_checklist_findings(findings);
     let _ = writeln!(body, "## What to do next\n");
     for (i, f) in ordered.iter().take(5).enumerate() {
         let cue = match f.severity {
@@ -442,6 +457,85 @@ fn write_next_actions(body: &mut String, findings: &[Finding]) {
         );
     }
     body.push('\n');
+}
+
+/// Ordered findings for checklist / agent prompt (blocking first, max 5).
+fn ordered_checklist_findings(findings: &[Finding]) -> Vec<&Finding> {
+    let mut ordered: Vec<&Finding> = findings.iter().collect();
+    ordered.sort_by_key(|f| match f.severity {
+        "blocking" => 0,
+        "warning" => 1,
+        _ => 2,
+    });
+    ordered
+}
+
+/// Deterministic copy-paste brief for an AI coding agent. `None` when clean.
+pub fn agent_fix_prompt(findings: &[Finding], pr_title: &str) -> Option<String> {
+    if findings.is_empty() {
+        return None;
+    }
+    let ordered = ordered_checklist_findings(findings);
+    let shown = ordered.iter().take(5).copied().collect::<Vec<_>>();
+    if shown.is_empty() {
+        return None;
+    }
+
+    let mut prompt = String::with_capacity(1024);
+    prompt.push_str(
+        "You are fixing review findings on this pull request. Change only what is needed. \
+Do not refactor unrelated code. Do not invent new features. Prefer the smallest diff. \
+If a finding looks wrong, say so instead of changing code. After edits, summarize what you changed.\n\n\
+Findings to fix:\n",
+    );
+
+    for (i, f) in shown.iter().enumerate() {
+        let action = redact_secrets(&finding_action(f));
+        let _ = writeln!(
+            prompt,
+            "{}. [{}] {}\n   Do this: {}",
+            i + 1,
+            f.severity,
+            guide_label(f),
+            action
+        );
+    }
+    if ordered.len() > 5 {
+        let _ = writeln!(
+            prompt,
+            "\n({} more findings are on the PR Files tab; fix the list above first.)",
+            ordered.len() - 5
+        );
+    }
+
+    let title = pr_title.trim();
+    if !title.is_empty() {
+        let _ = write!(
+            prompt,
+            "\nPR title: {}",
+            redact_secrets(&title.chars().take(200).collect::<String>())
+        );
+    }
+
+    // Keep the overview comment lean.
+    const MAX_CHARS: usize = 2800;
+    if prompt.chars().count() > MAX_CHARS {
+        prompt = prompt.chars().take(MAX_CHARS.saturating_sub(1)).collect();
+        prompt.push('…');
+    }
+    Some(prompt)
+}
+
+fn write_agent_fix_prompt(body: &mut String, findings: &[Finding], pr_title: &str) {
+    let Some(prompt) = agent_fix_prompt(findings, pr_title) else {
+        return;
+    };
+    let _ = writeln!(
+        body,
+        "<details>\n<summary>Copy this into your AI coding agent</summary>\n\n\
+         Paste into your AI coding agent to apply the fixes:\n\n\
+         ```text\n{prompt}\n```\n\n</details>\n"
+    );
 }
 
 fn write_progress_section(body: &mut String, progress: &FindingProgress) {
@@ -1055,6 +1149,10 @@ mod tests {
         assert!(!body.contains("## Review effort"));
         assert!(!body.contains("Pre-merge"));
         assert!(!body.contains("flowchart TB"));
+        assert!(body.contains("Copy this into your AI coding agent"));
+        assert!(body.contains("```text"));
+        assert!(body.contains("Findings to fix:"));
+        assert!(body.contains("Do this:"));
 
         let checks = checks_comment_body(
             &findings,
@@ -1079,6 +1177,18 @@ mod tests {
         );
         assert!(clean.contains("All clear"));
         assert!(!clean.contains("## Before merge"));
+
+        let clean_overview = overview_comment_body(
+            &Findings::default(),
+            false,
+            "Clean PR",
+            &files,
+            &runtime,
+            None,
+            None,
+        );
+        assert!(!clean_overview.contains("Copy this into your AI coding agent"));
+        assert!(!clean_overview.contains("Findings to fix:"));
 
         let progress = FindingProgress {
             resolved: vec![ProgressItem {
@@ -1119,6 +1229,31 @@ mod tests {
         assert!(ctx.contains("#2: Login timeout"));
         assert!(ctx.contains("## Blast radius"));
         assert!(context_comment_body(&WalkthroughExtras::default(), &runtime).is_none());
+    }
+
+    #[test]
+    fn agent_fix_prompt_redacts_and_skips_clean() {
+        assert!(agent_fix_prompt(&[], "x").is_none());
+
+        let findings = vec![Finding {
+            detector: "secrets".into(),
+            severity: "blocking",
+            file: "src/serve.rs".into(),
+            line: 88,
+            column: 0,
+            message: "API key".into(),
+            suggestion: Some("Rotate abcdefghijklmnopqrstuvwxyz0123456789 and use env".into()),
+            evidence: None,
+            codemod: None,
+        }];
+        let prompt = agent_fix_prompt(&findings, "Add webhook retries").expect("prompt");
+        assert!(prompt.contains("Findings to fix:"));
+        assert!(prompt.contains("src/serve.rs:88"));
+        assert!(prompt.contains("[blocking]"));
+        assert!(prompt.contains("PR title: Add webhook retries"));
+        assert!(prompt.contains("redacted") || prompt.contains("…[redacted]"));
+        assert!(!prompt.contains("abcdefghijklmnopqrstuvwxyz0123456789"));
+        assert!(!prompt.contains(" — "));
     }
 
     #[test]
