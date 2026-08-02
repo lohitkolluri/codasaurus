@@ -168,6 +168,25 @@ pub async fn get_findings_for_review(
     )
 }
 
+/// Most recent completed review for a PR (any SHA). Used for resolve / still-open / new deltas.
+pub async fn get_latest_completed_review_for_pr(
+    pool: &DbPool,
+    repo_id: i64,
+    pr_number: i64,
+) -> Result<Option<Review>, sqlx::Error> {
+    db_fetch_optional!(
+        pool,
+        Review,
+        "SELECT * FROM reviews
+         WHERE repo_id = ? AND pr_number = ?
+           AND status IN ('passed', 'failed')
+         ORDER BY completed_at DESC NULLS LAST, created_at DESC
+         LIMIT 1",
+        repo_id,
+        pr_number
+    )
+}
+
 pub async fn create_findings_batch(
     pool: &DbPool,
     findings: &[FindingCreate],

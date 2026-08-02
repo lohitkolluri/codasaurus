@@ -26,10 +26,9 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - Repository detail: **Remove from Codasaurus** (cascades local review history; does not uninstall the GitHub App).
 - Settings → Connections: **Test connection** for GitHub App, OIDC discovery, Jira, and Linear; **Clear** for SSO and ticket credentials.
 - GitHub App manifest now requests `installation` and `installation_repositories` events so installs sync without a manual Sync.
-- PR review comments use shields.io verdict / severity badges and a structured walkthrough.
-- Walkthrough sections: estimated effort, Mermaid change map, grouped file summary, linked-issue assessment, pre-merge checks.
+- PR reviews post three lean issue-comment slots: overview (prose + Changes table), optional context (gated Mermaid sequence diagram, blast, related PRs, deps), and pre-merge checks / effort / reviewers.
 - `GET /branding/logo.png` serves the bundled App mark for post-wizard badge upload.
-- `GET /branding/review-banner.svg` for walkthrough headers when `PUBLIC_URL` / dashboard public URL is set.
+- `GET /branding/review-banner.svg` for dashboard branding when `PUBLIC_URL` is set.
 - Review detail page: KPI strip, detector chips, severity filters, full file paths, suggestions, and richer metadata.
 
 ### Changed
@@ -39,8 +38,11 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - PR title/description/issues in LLM context are wrapped in `<<<UNTRUSTED_*>>>` markers; default LLM diff budget raised to 24k chars (aligned with auto-improve).
 - Finding filter order: slop + forbidden paths → severity floor → count caps → signal budget (policy no longer bypasses floors/budgets incorrectly).
 - Forbidden path matching is exact/prefix/basename only (no substring false positives).
-- Review walkthrough uses short prose + Changes list + effort line; findings only as inline comments (no table dump).
-- Walkthrough overview uses a stable HTML marker and themed badges; Mermaid change map only when 2+ path areas.
+- Overview opens with shields status strip (`blocking|N` `warning|N` `info|N` `ready to merge|yes/no`), then short prose + **What to do next** checklist + Changes table.
+- Re-reviews show **Since last review** (resolved / still open / new) by diffing against the previous completed PR review in the DB.
+- Checks stay quiet when green (“All clear”); when not, unchecked items include how to pass.
+- Inline findings lead with **Do this**; severity shields removed; fingerprints / ignore / fix tucked under details.
+- Context sequence diagrams are LLM-gated (cheap model), sanitized, and abstain when useless — no folder flowchart fallback.
 - Inline findings use Impact / Action / Evidence (collapsed) instead of long free-form dumps.
 - Advisory bots no longer auto-`APPROVE` clean PRs — walkthrough + COMMENT/REQUEST_CHANGES reviews only.
 - Signal budget drops advisory (`info`) inlines by default (high-signal blocking/warning only).
@@ -58,12 +60,11 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - Automatic reviews no longer post a duplicate “describe” comment (walkthrough stays on the review).
 - Reviews list layout: title + status on one row, cleaner filters alignment.
 - Bot commands accept plain `codasaurus …` / `/codasaurus …` (GitHub Apps are not @-mentionable).
-- Mermaid change map always included in review walkthroughs (not gated on LLM).
 - GitHub App manifest includes a description; wizard documents manual icon upload (manifest cannot set logos).
 
 ### Removed
 
-- Dead `markdown::walkthrough_body` wrapper, retired `guidelines::detect` stub, and unused `Config::bot_policy` helper.
+- Dead `markdown::walkthrough_body` / `clean_approve_body_ext` wrappers, folder Mermaid change-map, retired `guidelines::detect` stub, and unused `Config::bot_policy` helper.
 - Placeholder “configure JIRA\_\*” linked-issue stubs from walkthroughs (only real tickets when integrations are configured).
 
 ### Fixed

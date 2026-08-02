@@ -172,8 +172,9 @@ mod tests {
         assert!(body.contains("Package does not exist"));
         assert!(body.contains("fakelib"));
         assert!(body.contains("fingerprint:"));
-        // Severity is a shields.io badge (alt/src includes "blocking").
-        assert!(body.contains("blocking"));
+        assert!(
+            body.contains("Needs fix") || body.contains("blocking") || body.contains("Do this")
+        );
     }
 
     #[test]
