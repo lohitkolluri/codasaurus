@@ -118,7 +118,31 @@
     if (secs < 60) return `${secs}s`;
     const m = Math.floor(secs / 60);
     const s = secs % 60;
-    return `${m}m ${s}s`;
+    return s ? `${m}m ${s}s` : `${m}m`;
+  }
+
+  /** GitHub blob URL for the finding location (helps decide dismiss vs fix). */
+  function githubPermalink(finding) {
+    const repo = review?.repo_full_name;
+    const sha = review?.pr_head_sha;
+    const path = finding?.file_path ?? finding?.file;
+    if (!repo || !path) return null;
+    const line = finding?.line_start;
+    if (sha) {
+      const base = `https://github.com/${repo}/blob/${sha}/${path}`;
+      return line ? `${base}#L${line}` : base;
+    }
+    if (review?.pr_number) {
+      return `https://github.com/${repo}/pull/${review.pr_number}/files`;
+    }
+    return null;
+  }
+
+  function githubPrFilesUrl() {
+    const repo = review?.repo_full_name;
+    const n = review?.pr_number;
+    if (!repo || !n) return null;
+    return `https://github.com/${repo}/pull/${n}/files`;
   }
 
   async function dismissFinding(finding) {
@@ -282,10 +306,10 @@
         </div>
 
         <div class="page-with-sidebar rd-split">
-          <aside class="file-tree rd-files">
+          <aside class="file-tree rd-files scroll-thin">
             <button
               type="button"
-              class="file-tree-item"
+              class="file-tree-item quiet"
               class:active={selectedFile == null}
               onclick={() => (selectedFile = null)}
             >
@@ -295,7 +319,7 @@
             {#each files as f}
               <button
                 type="button"
-                class="file-tree-item"
+                class="file-tree-item quiet"
                 class:active={selectedFile === f.path}
                 onclick={() => selectFile(f.path)}
                 title={f.path}
@@ -303,28 +327,44 @@
                 <span class="rd-file-name">{f.path}</span>
                 <div class="severity-counts">
                   {#if f.blocking > 0}<span style="color:var(--error)">{f.blocking}</span>{/if}
-                  {#if f.warning > 0}<span style="color:var(--text-primary)">{f.warning}</span>{/if}
+                  {#if f.warning > 0}<span style="color:var(--warning)">{f.warning}</span>{/if}
                   {#if f.info > 0}<span class="rd-muted">{f.info}</span>{/if}
                 </div>
               </button>
             {/each}
           </aside>
 
-          <div class="content-area rd-findings">
+          <div class="content-area rd-findings scroll-thin">
             {#if fileFindings.length === 0}
               <p class="rd-muted">No findings match these filters.</p>
             {:else}
+              <p class="rd-nav-hint rd-muted">
+                Open the line on GitHub to judge a dismiss — dashboard findings are summaries, not the full diff.
+                {#if githubPrFilesUrl()}
+                  <a href={githubPrFilesUrl()} target="_blank" rel="noopener noreferrer">PR files ↗</a>
+                {/if}
+              </p>
               {#each fileFindings as finding}
                 <article class="finding-item rd-finding">
                   <div class="finding-location">
-                    <span class="rd-finding-path">{finding.file_path ?? finding.file}{#if finding.line_start}:{finding.line_start}{/if}</span>
+                    {#if githubPermalink(finding)}
+                      <a
+                        class="rd-finding-path"
+                        href={githubPermalink(finding)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open this line on GitHub"
+                      >{finding.file_path ?? finding.file}{#if finding.line_start}:{finding.line_start}{/if} ↗</a>
+                    {:else}
+                      <span class="rd-finding-path">{finding.file_path ?? finding.file}{#if finding.line_start}:{finding.line_start}{/if}</span>
+                    {/if}
                     <SeverityBadge severity={finding.severity ?? "info"} />
                     <span class="rd-chip quiet">{finding.detector}</span>
                     {#if finding.fingerprint}
                       <span class="rd-mono rd-fp">{shortFp(finding)}</span>
                     {/if}
                     {#if canDismiss}
-                      <button type="button" class="rd-dismiss" onclick={() => dismissFinding(finding)}>Dismiss</button>
+                      <button type="button" class="rd-dismiss quiet" onclick={() => dismissFinding(finding)}>Dismiss</button>
                     {/if}
                   </div>
                   <div class="finding-message">{finding.message}</div>
@@ -464,6 +504,9 @@
   .rd-chip:hover {
     border-color: color-mix(in srgb, var(--accent-soft) 50%, var(--border));
     color: var(--text-primary);
+    background: var(--bg-secondary);
+    transform: none;
+    box-shadow: none;
   }
 
   .rd-chip.quiet {
@@ -481,15 +524,16 @@
   }
 
   .rd-split {
-    min-height: 480px;
-    height: auto;
+    min-height: 420px;
+    height: min(70vh, 720px);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     overflow: hidden;
   }
 
   .rd-files {
-    max-height: none;
+    max-height: 100%;
+    overflow-y: auto;
   }
 
   .rd-files .file-tree-item {
@@ -500,6 +544,18 @@
     border-bottom: 1px solid var(--border);
     border-radius: 0;
     cursor: pointer;
+    color: var(--text-primary);
+  }
+
+  .rd-files .file-tree-item:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    transform: none;
+    box-shadow: none;
+  }
+
+  .rd-files .file-tree-item.active {
+    background: var(--bg-tertiary);
   }
 
   .rd-file-name {
@@ -519,6 +575,26 @@
 
   .rd-findings {
     padding: var(--space-4) var(--space-5);
+    max-height: 100%;
+    overflow-y: auto;
+  }
+
+  .rd-nav-hint {
+    margin: 0 0 var(--space-4);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .rd-nav-hint a {
+    color: var(--text-secondary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .rd-nav-hint a:hover {
+    color: var(--text-primary);
   }
 
   .rd-finding {
@@ -528,6 +604,13 @@
   .rd-finding-path {
     font-family: var(--font-mono, ui-monospace, monospace);
     font-size: 12px;
+    color: var(--text-primary);
+    text-decoration: none;
+  }
+
+  a.rd-finding-path:hover {
+    color: var(--accent-soft);
+    text-decoration: underline;
   }
 
   .rd-fp {
@@ -537,6 +620,13 @@
   .rd-dismiss {
     margin-left: auto;
     font-size: 12px;
+  }
+
+  .rd-dismiss:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+    transform: none;
+    box-shadow: none;
   }
 
   .rd-suggestion {

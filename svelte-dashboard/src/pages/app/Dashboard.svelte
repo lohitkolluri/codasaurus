@@ -83,8 +83,8 @@
           onAction={() => push("/app/repos")}
         />
       {:else}
-        <div class="activity-list">
-          {#each recentReviews.slice(0, 8) as review, i}
+        <div class="activity-list scroll-thin dashboard-activity-scroll">
+          {#each recentReviews.slice(0, 20) as review, i}
             <div
               class="review-card"
               style="--stagger: {Math.min(i, 8)}"
