@@ -21,6 +21,7 @@ const PREFETCH_CONCURRENCY: usize = 12;
 const SOFT_FAIL_TTL_SECS: u64 = 120;
 
 mod crates_io;
+mod go;
 mod npm;
 mod pypi;
 
@@ -56,6 +57,18 @@ type OsvCacheEntry = (Vec<OsvVulnerability>, Instant);
 type OsvCacheMap = HashMap<String, OsvCacheEntry>;
 
 static OSV_CACHE: LazyLock<RwLock<OsvCacheMap>> = LazyLock::new(|| RwLock::new(HashMap::new()));
+
+#[derive(Debug, Clone)]
+pub struct Metadata {
+    pub name: String,
+    pub license: Option<String>,
+}
+
+type MetadataCacheEntry = (Option<Metadata>, Instant);
+type MetadataCacheMap = HashMap<String, MetadataCacheEntry>;
+
+static METADATA_CACHE: LazyLock<RwLock<MetadataCacheMap>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
 
 /// Shared async HTTP client used by all registry lookups (npm, PyPI, crates.io, OSV).
 static ASYNC_CLIENT: LazyLock<Option<reqwest::Client>> = LazyLock::new(|| {
@@ -146,6 +159,7 @@ pub async fn check_package_async(registry: &str, package: &str) -> Result<Option
         "npm" => npm::check_async(package).await,
         "pypi" => pypi::check_async(package).await,
         "crates.io" => crates_io::check_async(package).await,
+        "go" => go::check_async(package).await,
         _ => return Ok(None),
     };
 
@@ -173,6 +187,51 @@ pub fn check_vulnerabilities(registry: &str, package: &str) -> Result<Vec<OsvVul
     block_on(check_vulnerabilities_async(registry, package))
 }
 
+pub fn get_metadata(registry: &str, package: &str) -> Result<Option<Metadata>> {
+    block_on(get_metadata_async(registry, package))
+}
+
+pub async fn get_metadata_async(registry: &str, package: &str) -> Result<Option<Metadata>> {
+    if offline_mode() {
+        return Ok(None);
+    }
+    let cache_key = format!("{registry}:{package}");
+    let ttl_secs = get_cache_ttl();
+    {
+        let cache = METADATA_CACHE.read().unwrap_or_else(|e| e.into_inner());
+        if let Some((meta, time)) = cache.get(&cache_key) {
+            if time.elapsed() < Duration::from_secs(ttl_secs) {
+                return Ok(meta.clone());
+            }
+        }
+    }
+    let meta = match registry {
+        "npm" => npm::metadata_async(package).await,
+        "pypi" => pypi::metadata_async(package).await,
+        "crates.io" => crates_io::metadata_async(package).await,
+        "go" => go::metadata_async(package).await,
+        _ => Ok(None),
+    };
+    if let Ok(ref m) = meta {
+        let mut cache = METADATA_CACHE.write().unwrap_or_else(|e| e.into_inner());
+        cache.insert(cache_key, (m.clone(), Instant::now()));
+        if cache.len() > CACHE_MAX_SIZE {
+            let now = Instant::now();
+            cache.retain(|_, (_, time)| now.duration_since(*time) < Duration::from_secs(ttl_secs));
+            if cache.len() > CACHE_MAX_SIZE {
+                let target = CACHE_MAX_SIZE / 2;
+                let mut keys: Vec<(String, Instant)> =
+                    cache.iter().map(|(k, (_, t))| (k.clone(), *t)).collect();
+                keys.sort_unstable_by_key(|(_, t)| *t);
+                for (k, _) in keys.into_iter().take(cache.len().saturating_sub(target)) {
+                    cache.remove(&k);
+                }
+            }
+        }
+    }
+    meta
+}
+
 pub async fn check_vulnerabilities_async(
     registry: &str,
     package: &str,
@@ -181,6 +240,7 @@ pub async fn check_vulnerabilities_async(
         "npm" => "npm",
         "pypi" => "PyPI",
         "crates.io" => "crates.io",
+        "go" => "Go",
         _ => return Ok(vec![]),
     };
     check_osv_async(ecosystem, package).await

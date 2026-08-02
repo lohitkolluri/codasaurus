@@ -31,6 +31,7 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
             "javascript" | "typescript" | "tsx" | "jsx" => "npm",
             "python" => "pypi",
             "rust" => "crates.io",
+            "go" => "go",
             _ => continue,
         };
 
@@ -60,6 +61,7 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                     "npm" => Some(format!("npm install {package}")),
                     "pypi" => Some(format!("pip install {package}")),
                     "crates.io" => Some(format!("cargo add {package}")),
+                    "go" => Some(format!("go get {package}")),
                     _ => None,
                 };
                 findings.push(Finding {
