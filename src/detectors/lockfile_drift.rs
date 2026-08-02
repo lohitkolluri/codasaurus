@@ -7,39 +7,12 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     let manifests = collect_manifests(parsed_files);
 
     for (dir, manifest) in manifests {
-        match manifest.kind {
-            ManifestKind::Npm => {
-                if let Some(lockfile) = find_lockfile(parsed_files, &dir, "package-lock.json") {
-                    let locked = extract_npm_lock_deps(&lockfile.raw_content);
-                    for dep in &manifest.deps {
-                        if !locked.contains(dep) {
-                            findings.push(lockfile_finding(
-                                &manifest.path,
-                                dep,
-                                "package-lock.json",
-                            ));
-                        }
-                    }
-                }
-            }
-            ManifestKind::Cargo => {
-                if let Some(lockfile) = find_lockfile(parsed_files, &dir, "Cargo.lock") {
-                    let locked = extract_cargo_lock_deps(&lockfile.raw_content);
-                    for dep in &manifest.deps {
-                        if !locked.contains(dep) {
-                            findings.push(lockfile_finding(&manifest.path, dep, "Cargo.lock"));
-                        }
-                    }
-                }
-            }
-            ManifestKind::Go => {
-                if let Some(lockfile) = find_lockfile(parsed_files, &dir, "go.sum") {
-                    let locked = extract_go_sum_deps(&lockfile.raw_content);
-                    for dep in &manifest.deps {
-                        if !locked.contains(dep) {
-                            findings.push(lockfile_finding(&manifest.path, dep, "go.sum"));
-                        }
-                    }
+        let spec = manifest.kind.lockfile();
+        if let Some(lockfile) = find_lockfile(parsed_files, &dir, spec.name) {
+            let locked = (spec.extract)(&lockfile.raw_content);
+            for dep in &manifest.deps {
+                if !locked.contains(dep) {
+                    findings.push(lockfile_finding(&manifest.path, dep, spec.name));
                 }
             }
         }
@@ -52,6 +25,30 @@ enum ManifestKind {
     Npm,
     Cargo,
     Go,
+}
+
+struct LockfileSpec {
+    name: &'static str,
+    extract: fn(&str) -> HashSet<String>,
+}
+
+impl ManifestKind {
+    fn lockfile(self) -> LockfileSpec {
+        match self {
+            ManifestKind::Npm => LockfileSpec {
+                name: "package-lock.json",
+                extract: extract_npm_lock_deps,
+            },
+            ManifestKind::Cargo => LockfileSpec {
+                name: "Cargo.lock",
+                extract: extract_cargo_lock_deps,
+            },
+            ManifestKind::Go => LockfileSpec {
+                name: "go.sum",
+                extract: extract_go_sum_deps,
+            },
+        }
+    }
 }
 
 struct Manifest {
