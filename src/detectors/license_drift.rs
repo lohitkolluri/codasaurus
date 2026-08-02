@@ -84,6 +84,8 @@ fn check_dep(findings: &mut Vec<Finding>, file: &ParsedFile, registry: &str, dep
                         ),
                         evidence: Some(license),
                         codemod: None,
+                        confidence: None,
+                        judge_rationale: None,
                     });
                 }
             }

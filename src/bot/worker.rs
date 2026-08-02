@@ -151,6 +151,8 @@ async fn process_queued_review(
             sender: None,
             repositories: None,
             repositories_added: None,
+            after: None,
+            commits: None,
         };
         review_pr_with_options(&token, repo, &wrapped, opts).await
     })
@@ -228,6 +230,8 @@ pub(crate) async fn run_webhook_review_inline(
             sender: None,
             repositories: None,
             repositories_added: None,
+            after: None,
+            commits: None,
         };
         review_pr_with_options(&token, &repo_full_name, &wrapped, opts).await
     })

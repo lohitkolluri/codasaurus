@@ -176,6 +176,8 @@ fn lockfile_finding(manifest_path: &str, dep: &str, lockfile: &str) -> Finding {
         ),
         evidence: Some(dep.to_string()),
         codemod: None,
+        confidence: None,
+        judge_rationale: None,
     }
 }
 

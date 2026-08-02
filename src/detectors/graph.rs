@@ -152,6 +152,8 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                     ),
                     evidence: None,
                     codemod: None,
+                    confidence: None,
+                    judge_rationale: None,
                 });
                 bfs_done += 1;
                 continue;
@@ -176,6 +178,8 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                     ),
                     evidence: None,
                     codemod: None,
+                    confidence: None,
+                    judge_rationale: None,
                 });
             }
         }

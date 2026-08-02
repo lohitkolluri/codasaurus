@@ -692,6 +692,28 @@ pub async fn review_pr_with_options(
         }
     }
 
+    crate::confidence::apply_base(&mut findings.findings);
+
+    if repo_llm_enabled {
+        if let Some(llm_cfg) = crate::llm::LlmConfig::from_db_or_env(pool).await {
+            match crate::llm::judge_findings(&llm_cfg, &findings.findings).await {
+                Ok(verdicts) => {
+                    for v in verdicts {
+                        if let Some(f) = findings.findings.get_mut(v.index) {
+                            f.confidence = Some(v.confidence);
+                            f.judge_rationale = Some(v.rationale);
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "LLM judge failed; keeping base confidence"),
+            }
+        }
+    }
+
+    if config.confidence.drop_ungrounded {
+        crate::confidence::retain_grounded(&mut findings.findings);
+    }
+
     let mut gate = crate::gates::QualityGate::from(config.quality_gate.clone());
     if let Some(raw) = repo_config_json.as_deref() {
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) {
@@ -716,6 +738,16 @@ pub async fn review_pr_with_options(
     let blast_report =
         crate::bot::blast::estimate_blast_radius(&parsed_files_collected, &changed_paths);
     let blast_md = crate::bot::blast::blast_markdown(&blast_report);
+    let index_callers_md = if let Some(pool) = crate::bot::CONFIG_POOL.get() {
+        crate::index::callers_markdown(pool, repo_name, &changed_paths).await
+    } else {
+        String::new()
+    };
+    let blast_md = if index_callers_md.is_empty() {
+        blast_md
+    } else {
+        format!("{blast_md}\n{index_callers_md}")
+    };
     let vuln_pkgs: Vec<String> = findings
         .findings
         .iter()

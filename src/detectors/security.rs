@@ -99,6 +99,8 @@ pub fn detect_secrets(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                         )),
                         evidence: Some(format!("`{masked}`")),
                         codemod: None,
+                        confidence: None,
+                        judge_rationale: None,
                     });
                 }
             }
@@ -172,6 +174,8 @@ pub fn detect_todos(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                     ),
                     evidence: Some(trimmed.chars().take(120).collect()),
                     codemod: None,
+                    confidence: None,
+                    judge_rationale: None,
                 });
             }
         }

@@ -364,6 +364,12 @@
                     {/if}
                     <SeverityBadge severity={finding.severity ?? "info"} />
                     <span class="rd-chip quiet">{finding.detector}</span>
+                    {#if finding.confidence != null}
+                      <span
+                        class="rd-chip conf conf-{finding.confidence}"
+                        title={finding.judge_rationale ? `Judge: ${finding.judge_rationale}` : `Confidence ${finding.confidence}/5`}
+                      >c{finding.confidence}</span>
+                    {/if}
                     {#if finding.fingerprint}
                       <span class="rd-mono rd-fp">{shortFp(finding)}</span>
                     {/if}
@@ -517,6 +523,14 @@
     cursor: default;
     background: transparent;
   }
+
+  .rd-chip.conf {
+    cursor: help;
+    font-variant-numeric: tabular-nums;
+  }
+  .rd-chip.conf-0, .rd-chip.conf-1 { color: var(--danger, #ef4444); border-color: color-mix(in srgb, var(--danger, #ef4444) 40%, var(--border)); }
+  .rd-chip.conf-2, .rd-chip.conf-3 { color: var(--warning, #f59e0b); border-color: color-mix(in srgb, var(--warning, #f59e0b) 40%, var(--border)); }
+  .rd-chip.conf-4, .rd-chip.conf-5 { color: var(--success, #22c55e); border-color: color-mix(in srgb, var(--success, #22c55e) 40%, var(--border)); }
 
   .rd-filters {
     margin: 0;

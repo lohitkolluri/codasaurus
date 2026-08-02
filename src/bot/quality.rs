@@ -88,6 +88,8 @@ mod tests {
             suggestion: None,
             evidence: None,
             codemod: None,
+            confidence: None,
+            judge_rationale: None,
         }
     }
 

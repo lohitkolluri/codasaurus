@@ -55,6 +55,8 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                             package_registry_url(registry_name, &package)
                         )),
                         codemod: None,
+                        confidence: None,
+                        judge_rationale: None,
                         evidence: None,
                     });
                 }
@@ -75,6 +77,8 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                             )),
                             evidence: None,
                             codemod: None,
+                            confidence: None,
+                            judge_rationale: None,
                         });
                     }
                 }

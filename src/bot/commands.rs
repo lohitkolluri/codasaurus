@@ -1038,6 +1038,8 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
             sender: None,
             repositories: None,
             repositories_added: None,
+            after: None,
+            commits: None,
         };
         review_pr_with_options(
             &token,
@@ -1259,6 +1261,14 @@ async fn spawn_impact(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
             );
         } else {
             text.push_str(&card);
+        }
+        if let Some(pool) = crate::bot::bot_db_pool() {
+            let index_md =
+                crate::index::callers_markdown(pool, &ctx.repo_full_name, &changed_paths).await;
+            if !index_md.is_empty() {
+                text.push('\n');
+                text.push_str(&index_md);
+            }
         }
         text.push_str("\n---\n");
         text.push_str(&crate::bot::markdown::commands_details());

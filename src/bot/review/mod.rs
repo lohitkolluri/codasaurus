@@ -1,7 +1,7 @@
 //! PR review pipeline: GitHub fetch, detectors, comments, and persistence.
 
 mod findings;
-mod github;
+pub(crate) mod github;
 mod llm;
 mod persist;
 mod pipeline;

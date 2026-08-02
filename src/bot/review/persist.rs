@@ -86,6 +86,8 @@ pub(crate) async fn save_review_to_db(
                 .map(|s| crate::bot::markdown::redact_secrets(s)),
             context: None,
             category: None,
+            confidence: f.confidence.map(|c| c as i32),
+            judge_rationale: f.judge_rationale.clone(),
         })
         .collect();
     if let Err(e) = crate::db::reviews::create_findings_batch(pool, &batch).await {
