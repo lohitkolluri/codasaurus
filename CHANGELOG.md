@@ -24,8 +24,8 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 
 - Settings → Connections: **Test connection** for GitHub App, OIDC discovery, Jira, and Linear; **Clear** for SSO and ticket credentials.
 - GitHub App manifest now requests `installation` and `installation_repositories` events so installs sync without a manual Sync.
-- PR review comments use shields.io verdict / severity badges (CodeRabbit / Greptile–style walkthrough).
-- Walkthrough sections aligned with CodeRabbit: estimated effort, Mermaid change map, grouped file summary, linked-issue assessment, pre-merge checks.
+- PR review comments use shields.io verdict / severity badges and a structured walkthrough.
+- Walkthrough sections: estimated effort, Mermaid change map, grouped file summary, linked-issue assessment, pre-merge checks.
 - `GET /branding/logo.png` serves the bundled App mark for post-wizard badge upload.
 
 ### Changed
