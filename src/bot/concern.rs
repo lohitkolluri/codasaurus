@@ -10,35 +10,6 @@ pub fn concern_for_detector(detector: &str) -> &'static str {
     }
 }
 
-/// Prefer path signal for tests/docs when the detector is generic quality.
-pub fn concern_for_finding(detector: &str, file: &str) -> &'static str {
-    let base = concern_for_detector(detector);
-    let l = file.to_ascii_lowercase();
-    if base == "quality" {
-        if l.contains("/test/")
-            || l.starts_with("tests/")
-            || l.starts_with("test/")
-            || l.contains("/tests/")
-            || l.ends_with("_test.rs")
-            || l.ends_with(".test.ts")
-            || l.ends_with(".spec.ts")
-            || l.ends_with("_test.go")
-            || l.ends_with("_test.py")
-        {
-            return "tests";
-        }
-        if l.starts_with("docs/")
-            || l.contains("/docs/")
-            || l.ends_with(".md")
-            || l == "readme.md"
-            || l == "changelog.md"
-        {
-            return "docs";
-        }
-    }
-    base
-}
-
 /// Tier-1 findings that should be able to drive REQUEST_CHANGES / hard merge posture.
 pub fn is_hard_tier1(detector: &str, severity: &str) -> bool {
     if severity == "blocking" {
@@ -137,14 +108,6 @@ mod tests {
             evidence: None,
             codemod: None,
         }
-    }
-
-    #[test]
-    fn maps_security_and_tests() {
-        assert_eq!(concern_for_finding("secrets", "src/a.rs"), "security");
-        assert_eq!(concern_for_finding("boilerplate", "tests/a.rs"), "tests");
-        assert_eq!(concern_for_finding("boilerplate", "docs/x.md"), "docs");
-        assert_eq!(concern_for_finding("stale-api", "src/a.rs"), "quality");
     }
 
     #[test]
