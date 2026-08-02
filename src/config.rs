@@ -30,6 +30,9 @@ pub struct Config {
     pub index: IndexConfig,
 
     #[serde(default)]
+    pub readiness: ReadinessConfig,
+
+    #[serde(default)]
     pub reachability: ReachabilityConfig,
 }
 
@@ -228,6 +231,31 @@ fn default_false() -> bool {
     false
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReadinessConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_require_approvals")]
+    pub require_approvals: usize,
+    /// When true, any hard blocker sets the readiness score to 0.
+    #[serde(default = "default_true")]
+    pub block_on_blockers: bool,
+}
+
+impl Default for ReadinessConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            require_approvals: default_require_approvals(),
+            block_on_blockers: true,
+        }
+    }
+}
+
+fn default_require_approvals() -> usize {
+    1
+}
+
 fn default_gate_name() -> String {
     "codasaurus way".into()
 }
@@ -323,6 +351,7 @@ impl Default for Config {
             quality_gate: QualityGateConfig::default(),
             confidence: ConfidenceConfig::default(),
             index: IndexConfig::default(),
+            readiness: ReadinessConfig::default(),
             reachability: ReachabilityConfig::default(),
         }
     }

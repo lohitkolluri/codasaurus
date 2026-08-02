@@ -1150,6 +1150,40 @@ pub async fn review_pr_with_options(
     )
     .await;
 
+    let readiness_md = if config.readiness.enabled && !head_sha.is_empty() {
+        let report = crate::bot::readiness::evaluate(
+            client,
+            &headers,
+            repo_name,
+            pr_number,
+            head_sha,
+            pr,
+            &findings.findings,
+            gate_result.passed,
+            &config.readiness,
+        )
+        .await;
+        let md = report.markdown();
+        let _ = post_or_update_comment(
+            client,
+            &auth_header,
+            repo_name,
+            pr_number,
+            &format!("### Codasaurus readiness\n\n{md}"),
+            &state,
+            "readiness",
+        )
+        .await;
+        md
+    } else {
+        String::new()
+    };
+    let summary_extra = if readiness_md.is_empty() {
+        dep_delta_md.clone()
+    } else {
+        format!("{dep_delta_md}\n\n{readiness_md}")
+    };
+
     if policy_pack.create_check_run {
         if let Err(e) = crate::bot::github_extra::create_findings_check_run(
             client,
@@ -1157,7 +1191,7 @@ pub async fn review_pr_with_options(
             repo_name,
             head_sha,
             &findings.findings,
-            &dep_delta_md,
+            &summary_extra,
             Some((&gate_result, config.quality_gate.block_on_fail)),
         )
         .await

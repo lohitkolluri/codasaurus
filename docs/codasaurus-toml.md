@@ -75,6 +75,11 @@ max_files = 50000
 
 [reachability]
 enabled = true
+
+[readiness]
+enabled = true
+require_approvals = 1
+block_on_blockers = true
 ```
 
 ## Sections
@@ -90,6 +95,7 @@ enabled = true
 | `[confidence]` | Per-finding confidence 0-5: optional LLM judge + grounding filter |
 | `[index]` | Whole-repo symbol index: enabled, languages, max_files |
 | `[reachability]` | OSV reachability: upgrade import-hit vulns to OSV severity, tag manifest-only as info |
+| `[readiness]` | Merge-readiness score 0-5: hard blockers zero it, soft signals weight it |
 
 ## `review_strictness`
 
