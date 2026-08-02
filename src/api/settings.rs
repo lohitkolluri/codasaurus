@@ -191,21 +191,19 @@ async fn get_settings(
         .get("offline_mode")
         .and_then(|v| v.as_str())
         .map(str::to_string);
-    let env_forces = std::env::var("CODASAURUS_OFFLINE")
-        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-        .unwrap_or(false);
-    let effective = crate::bot::offline::offline_mode_from_env_and_db(db_off.as_deref());
+    let (effective, source) = crate::bot::offline::offline_mode_source(db_off.as_deref());
     map.insert("offline_mode_effective".into(), json!(effective));
-    map.insert(
-        "offline_mode_source".into(),
-        json!(if env_forces {
-            "env"
-        } else if effective {
-            "db"
-        } else {
-            "off"
-        }),
-    );
+    map.insert("offline_mode_source".into(), json!(source));
+    // Help operators who never set Render env: DB true is mirrored into process env
+    // at boot, so "env" here after `apply_db_to_env` still usually means the DB row.
+    if effective {
+        map.insert(
+            "offline_mode_hint".into(),
+            json!(
+                "Offline mode is on in app_config (Settings → System). It is independent of your OpenRouter key — turn the toggle off and Save."
+            ),
+        );
+    }
 
     Ok(Json(serde_json::Value::Object(map)))
 }

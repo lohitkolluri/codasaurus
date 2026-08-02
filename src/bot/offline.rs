@@ -42,15 +42,28 @@ pub fn resolve_egress_profile(
 }
 
 pub fn offline_mode_from_env_and_db(db_offline: Option<&str>) -> bool {
-    if std::env::var("CODASAURUS_OFFLINE")
+    offline_mode_source(db_offline).0
+}
+
+/// Returns `(enabled, source)` where source is `env`, `db`, or `off`.
+///
+/// Prefer `db` when the row is on — `apply_db_to_env` mirrors that into
+/// `CODASAURUS_OFFLINE`, which would otherwise look like a Render env var the
+/// operator never set.
+pub fn offline_mode_source(db_offline: Option<&str>) -> (bool, &'static str) {
+    let db_on = db_offline
         .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-        .unwrap_or(false)
-    {
-        return true;
+        .unwrap_or(false);
+    if db_on {
+        return (true, "db");
     }
-    db_offline
+    let env_on = std::env::var("CODASAURUS_OFFLINE")
         .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-        .unwrap_or(false)
+        .unwrap_or(false);
+    if env_on {
+        return (true, "env");
+    }
+    (false, "off")
 }
 
 pub fn health_json(profile: EgressProfile, offline: bool, llm_allowed: bool) -> serde_json::Value {

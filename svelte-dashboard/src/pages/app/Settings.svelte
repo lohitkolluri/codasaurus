@@ -1356,11 +1356,12 @@
           </div>
           <p class="field-hint">
             Independent of your OpenRouter key — when on, LLM and live registry/OSV calls are blocked.
-            {#if offlineModeSource === "env"}
-              Currently forced by the <code>CODASAURUS_OFFLINE</code> environment variable (e.g. Render).
-              Remove that env var and redeploy, or turn this off and Save (clears the in-process flag until the next deploy).
+            {#if offlineMode && offlineModeSource === "db"}
+              Currently on in the database (<code>app_config.offline_mode</code>). Turn this off and Save.
+            {:else if offlineMode && offlineModeSource === "env"}
+              Currently forced by <code>CODASAURUS_OFFLINE</code> in the process environment. Remove it in Render and redeploy.
             {:else if offlineMode}
-              Turn off and Save under System to re-enable LLM reviews.
+              Turn off and Save to re-enable LLM reviews.
             {/if}
           </p>
 
