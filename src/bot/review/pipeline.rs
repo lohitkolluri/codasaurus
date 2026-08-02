@@ -56,7 +56,7 @@ pub async fn review_pr_with_options(
     }
 
     let pr_number = pr["number"].as_i64().unwrap_or(0);
-    let pr_title = pr["title"].as_str().unwrap_or("").to_string();
+    let mut pr_title = pr["title"].as_str().unwrap_or("").to_string();
     let pr_body = pr["body"].as_str().unwrap_or("").to_string();
     let head_sha = pr["head"]["sha"].as_str().unwrap_or("");
 
@@ -144,6 +144,19 @@ pub async fn review_pr_with_options(
                 repo_flags.auto_labels = false;
             }
         }
+        let repo_had_title_key = repo_config_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .is_some_and(|v| v.get("pr_title_fix").is_some());
+        let global_title = crate::db::config::get_config(pool, "pr_title_fix")
+            .await
+            .ok()
+            .flatten();
+        repo_flags.pr_title_fix = crate::bot::title_fix::resolve_mode(
+            repo_flags.pr_title_fix,
+            global_title.as_deref(),
+            repo_had_title_key,
+        );
     }
     let mut options = options;
     if !repo_flags.auto_describe {
@@ -554,6 +567,7 @@ pub async fn review_pr_with_options(
             &commit_messages,
             &changed_paths,
             &present_paths,
+            &pr_title,
         );
         findings.findings.extend(g);
     }
@@ -749,6 +763,19 @@ pub async fn review_pr_with_options(
     // Load prior findings before save_review_to_db so same-SHA re-reviews can delta.
     let progress = load_finding_progress(repo_name, pr_number, &findings).await;
 
+    let title_fix_note = maybe_fix_pr_title(
+        client,
+        &headers,
+        repo_name,
+        pr_number,
+        &mut pr_title,
+        &commit_messages,
+        &changed_paths,
+        &remote_ctx.guidelines,
+        repo_flags.pr_title_fix,
+    )
+    .await;
+
     // Only ship walkthrough when there are genuinely no findings (no APPROVE).
     if findings.is_empty() {
         let sequence = maybe_sequence_diagram(
@@ -779,6 +806,7 @@ pub async fn review_pr_with_options(
             &dep_delta_md,
             sequence.as_deref(),
             progress.as_ref(),
+            title_fix_note.as_ref(),
         )
         .await?;
         if !head_sha.is_empty() {
@@ -864,6 +892,7 @@ pub async fn review_pr_with_options(
         &dep_delta_md,
         sequence.as_deref(),
         progress.as_ref(),
+        title_fix_note.as_ref(),
     )
     .await?;
 
@@ -1123,6 +1152,71 @@ async fn maybe_sequence_diagram(
 }
 
 #[allow(clippy::too_many_arguments)]
+async fn maybe_fix_pr_title(
+    client: &reqwest::Client,
+    headers: &reqwest::header::HeaderMap,
+    repo_name: &str,
+    pr_number: i64,
+    pr_title: &mut String,
+    commit_messages: &[String],
+    changed_paths: &[String],
+    guidelines: &[crate::context::guidelines::GuidelineFile],
+    mode: crate::config::PrTitleFixMode,
+) -> Option<crate::bot::markdown::TitleFixNote> {
+    use crate::config::PrTitleFixMode;
+    if matches!(mode, PrTitleFixMode::Off) {
+        return None;
+    }
+    let want_conventional = crate::bot::title_fix::guidelines_want_conventional(guidelines);
+    let proposed = crate::bot::title_fix::propose_pr_title(
+        pr_title,
+        commit_messages,
+        changed_paths,
+        want_conventional,
+    )?;
+    match mode {
+        PrTitleFixMode::Off => None,
+        PrTitleFixMode::Suggest => Some(crate::bot::markdown::TitleFixNote {
+            proposed: proposed.title,
+            applied: false,
+        }),
+        PrTitleFixMode::Auto => {
+            if !proposed.auto_safe {
+                return Some(crate::bot::markdown::TitleFixNote {
+                    proposed: proposed.title,
+                    applied: false,
+                });
+            }
+            match crate::bot::github_extra::patch_pull_request(
+                client,
+                headers,
+                repo_name,
+                pr_number,
+                Some(&proposed.title),
+                None,
+            )
+            .await
+            {
+                Ok(true) => {
+                    *pr_title = proposed.title.clone();
+                    Some(crate::bot::markdown::TitleFixNote {
+                        proposed: proposed.title,
+                        applied: true,
+                    })
+                }
+                Ok(false) | Err(_) => {
+                    tracing::warn!(repo = repo_name, pr_number, "PR title auto-update failed");
+                    Some(crate::bot::markdown::TitleFixNote {
+                        proposed: proposed.title,
+                        applied: false,
+                    })
+                }
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn post_split_review_comments(
     client: &reqwest::Client,
     auth_header: &str,
@@ -1143,6 +1237,7 @@ async fn post_split_review_comments(
     dep_delta_md: &str,
     sequence_mermaid: Option<&str>,
     progress: Option<&crate::bot::markdown::FindingProgress>,
+    title_fix: Option<&crate::bot::markdown::TitleFixNote>,
 ) -> Result<()> {
     let overview = crate::bot::markdown::overview_comment_body(
         findings,
@@ -1152,6 +1247,7 @@ async fn post_split_review_comments(
         runtime,
         agent_badge,
         progress,
+        title_fix,
     );
     post_or_update_comment(
         client,

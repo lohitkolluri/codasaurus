@@ -26,6 +26,7 @@ pub(crate) mod related_prs;
 pub(crate) mod repo_context;
 mod review;
 pub(crate) mod strictness;
+pub(crate) mod title_fix;
 mod verify;
 mod worker;
 pub use worker::start_review_worker;

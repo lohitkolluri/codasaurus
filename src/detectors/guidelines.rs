@@ -25,6 +25,7 @@ pub fn detect_remote(
     changed_paths: &[String],
     // Paths known to exist at the review ref (for FileRequired rules).
     present_paths: &[String],
+    pr_title: &str,
 ) -> Vec<Finding> {
     if files.is_empty() {
         return Vec::new();
@@ -46,7 +47,7 @@ pub fn detect_remote(
                     } else if desc_lower.contains("conventional")
                         || desc_lower.contains("type(scope)")
                     {
-                        check_conventional_remote(gf, commit_messages, &mut findings);
+                        check_conventional_remote(gf, commit_messages, pr_title, &mut findings);
                     }
                 }
                 ExtractedRule::ChecklistItem { text, .. } => {
@@ -186,8 +187,28 @@ fn check_sign_off_remote(
 fn check_conventional_remote(
     gf: &GuidelineFile,
     commit_messages: &[String],
+    pr_title: &str,
     findings: &mut Vec<Finding>,
 ) {
+    let title = pr_title.trim();
+    if !title.is_empty() && !CONVENTIONAL_COMMIT_RE.is_match(title) {
+        findings.push(Finding {
+            detector: "guidelines".to_string(),
+            severity: "info",
+            file: gf.path.to_string_lossy().to_string(),
+            line: 0,
+            column: 0,
+            message: "PR title does not match conventional `type(scope): description` required by guidelines"
+                .into(),
+            suggestion: Some(
+                "Rename the PR title to feat|fix|chore|docs|refactor|test(scope): description"
+                    .into(),
+            ),
+            evidence: Some(title.to_string()),
+            codemod: None,
+        });
+    }
+
     if commit_messages.is_empty() {
         return;
     }
@@ -244,6 +265,7 @@ mod tests {
             &["wip stuff".into()],
             &["src/a.rs".into()],
             &[],
+            "Fix typo",
         );
         assert!(findings.iter().any(|f| f.message.contains("doesn't match")));
         assert!(findings.iter().any(|f| f.message.contains("checklist")));
@@ -260,9 +282,33 @@ mod tests {
         gf.rules = vec![ExtractedRule::FileRequired {
             path: "CHANGELOG.md".into(),
         }];
-        let findings = detect_remote(&[gf], "feat/x", &[], &[], &["src/a.rs".into()]);
+        let findings = detect_remote(&[gf], "feat/x", &[], &[], &["src/a.rs".into()], "feat: x");
         assert!(findings
             .iter()
             .any(|f| { f.severity == "blocking" && f.message.contains("CHANGELOG.md") }));
+    }
+
+    #[test]
+    fn conventional_flags_non_conventional_pr_title() {
+        let mut gf = GuidelineFile::from_content(
+            "CONTRIBUTING.md",
+            "CONTRIBUTING.md",
+            "# Contributing\n".into(),
+        )
+        .unwrap();
+        gf.rules = vec![ExtractedRule::CommitRule {
+            description: "Use conventional commits".into(),
+        }];
+        let findings = detect_remote(
+            &[gf],
+            "feat/x",
+            &["feat: ok".into()],
+            &[],
+            &[],
+            "Update stuff",
+        );
+        assert!(findings
+            .iter()
+            .any(|f| f.message.contains("PR title") && f.severity == "info"));
     }
 }

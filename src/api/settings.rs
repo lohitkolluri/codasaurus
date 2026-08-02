@@ -89,6 +89,7 @@ const ALLOWED_KEYS: &[&str] = &[
     "update_pr_description",
     "custom_instructions",
     "allow_auto_fix",
+    "pr_title_fix",
     "offline_mode",
     // Runtime / ops (env mirrors)
     "audit_retention_days",

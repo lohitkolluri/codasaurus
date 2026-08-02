@@ -31,6 +31,49 @@ pub fn split_reviewers(owners: &[String]) -> (Vec<String>, Vec<String>) {
     (users, teams)
 }
 
+/// PATCH a pull request's title and/or body. Returns Ok(true) on success.
+pub async fn patch_pull_request(
+    client: &reqwest::Client,
+    headers: &HeaderMap,
+    repo: &str,
+    pr_number: i64,
+    title: Option<&str>,
+    body: Option<&str>,
+) -> Result<bool> {
+    if title.is_none() && body.is_none() {
+        return Ok(false);
+    }
+    let url = format!("https://api.github.com/repos/{repo}/pulls/{pr_number}");
+    let mut payload = serde_json::Map::new();
+    if let Some(t) = title {
+        payload.insert("title".into(), serde_json::Value::String(t.to_string()));
+    }
+    if let Some(b) = body {
+        payload.insert("body".into(), serde_json::Value::String(b.to_string()));
+    }
+    let resp = retry_async(
+        &RetryConfig::api_default(),
+        "patch_pull_request",
+        &is_reqwest_error_retryable,
+        || async {
+            client
+                .patch(&url)
+                .headers(headers.clone())
+                .header("User-Agent", USER_AGENT)
+                .json(&serde_json::Value::Object(payload.clone()))
+                .send()
+                .await
+                .map_err(Into::into)
+        },
+    )
+    .await?;
+    if !resp.status().is_success() {
+        tracing::warn!(status = %resp.status(), repo, pr_number, "patch_pull_request failed");
+        return Ok(false);
+    }
+    Ok(true)
+}
+
 /// Request PR reviewers (users + teams). Best-effort; ignores permission errors.
 pub async fn request_pull_reviewers(
     client: &reqwest::Client,
