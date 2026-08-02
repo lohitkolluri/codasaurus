@@ -37,11 +37,10 @@ fn init_tracing() {
 
 const SYNC_KEYS: &[(&str, &str)] = &[
     ("GITHUB_APP_ID", "github_app_id"),
-    // Private key is NOT synced here — the env var GITHUB_APP_PRIVATE_KEY_B64
-    // uses base64 STANDARD encoding, while the DB stores raw PEM (from the
-    // manifest flow or from decode-then-store). Syncing the base64 string
-    // directly would corrupt the PEM field. The env var is read at runtime
-    // as a fallback in resolve_bot_config().
+    // Private key is NOT synced here — env may hold raw PEM (`GITHUB_APP_PRIVATE_KEY`)
+    // or base64 (`GITHUB_APP_PRIVATE_KEY_B64`), while the DB stores raw PEM.
+    // Syncing base64 into the PEM column would corrupt it; runtime fallback uses
+    // `github_jwt::resolve_private_key_from_env()`.
     ("GITHUB_WEBHOOK_SECRET", "github_webhook_secret"),
     ("OPENROUTER_API_KEY", "openrouter_api_key"),
 ];
@@ -298,19 +297,8 @@ async fn resolve_bot_config(
         .or_else(|| std::env::var("GITHUB_APP_ID").ok())?;
 
     let private_key = match db::config::get_config(pool, "github_private_key").await {
-        Ok(Some(key)) => key,
-        _ => {
-            // Fall back to base64-encoded env var
-            std::env::var("GITHUB_APP_PRIVATE_KEY_B64")
-                .ok()
-                .and_then(|b64| {
-                    use base64::Engine;
-                    base64::engine::general_purpose::STANDARD
-                        .decode(&b64)
-                        .ok()
-                        .and_then(|bytes| String::from_utf8(bytes).ok())
-                })?
-        }
+        Ok(Some(key)) if !key.trim().is_empty() => key,
+        _ => crate::github_jwt::resolve_private_key_from_env()?,
     };
 
     let webhook_secret = db::config::get_config(pool, "github_webhook_secret")

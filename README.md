@@ -71,7 +71,7 @@ export DATABASE_URL="postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus"
 Prebuilt Linux binary: [GitHub Releases](https://github.com/lohitkolluri/codasaurus/releases) (`codasaurus-v*-x86_64-unknown-linux-gnu.tar.gz`).
 
 ```text
-codasaurus serve | health | version
+codasaurus serve | health | version | reset-password
 ```
 
 ---

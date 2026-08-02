@@ -28,7 +28,7 @@ pub fn router() -> Router<AppState> {
 // Handlers
 // ---------------------------------------------------------------------------
 
-/// GET /api/v1/stats
+/// GET /api/stats
 async fn stats(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
     if let Ok(guard) = STATS_CACHE.lock() {
         if let Some(ref cached) = guard.1 {

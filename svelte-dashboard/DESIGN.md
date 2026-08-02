@@ -2,7 +2,7 @@
 
 ## 1. Brand Essence
 
-Developer tool for AI-generated code review. Clean, technical, confident. Inspired by Linear, Vercel, and Stripe — precise spacing, restrained color, functional beauty. The interface should feel fast before it loads.
+Developer tool for AI-generated code review. Clean, technical, confident — precise spacing, restrained color, functional beauty. The interface should feel fast before it loads.
 
 ## 2. Color Palette
 

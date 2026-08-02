@@ -34,7 +34,7 @@ pub fn router() -> Router<AppState> {
 // Handlers
 // ---------------------------------------------------------------------------
 
-/// GET /api/v1/audit
+/// GET /api/audit
 async fn list_audit(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

@@ -163,15 +163,8 @@ async fn reload_bot_config() -> Option<BotConfig> {
         .await
         .ok()
         .flatten()
-        .or_else(|| {
-            std::env::var("GITHUB_APP_PRIVATE_KEY_B64")
-                .ok()
-                .and_then(|b64| {
-                    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64)
-                        .ok()
-                        .and_then(|bytes| String::from_utf8(bytes).ok())
-                })
-        })?;
+        .filter(|k| !k.trim().is_empty())
+        .or_else(crate::github_jwt::resolve_private_key_from_env)?;
     let webhook_secret = db::config::get_config(pool, "github_webhook_secret")
         .await
         .ok()

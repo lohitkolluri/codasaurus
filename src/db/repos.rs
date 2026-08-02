@@ -80,6 +80,43 @@ pub async fn update_repo(
 }
 
 pub async fn delete_repo(pool: &DbPool, id: i64) -> Result<(), sqlx::Error> {
+    let full_name: Option<String> = crate::db::db_scalar_optional!(
+        pool,
+        String,
+        "SELECT full_name FROM repos WHERE id = ?",
+        id
+    )?;
+    if let Some(ref name) = full_name {
+        let like = format!("{name}/%");
+        let _ = db_execute!(pool, "DELETE FROM review_jobs WHERE repo = ?", name);
+        let _ = db_execute!(
+            pool,
+            "DELETE FROM review_comments WHERE repo_pr LIKE ?",
+            &like
+        );
+        let _ = db_execute!(
+            pool,
+            "DELETE FROM reviewed_commits WHERE repo_pr LIKE ?",
+            &like
+        );
+        let _ = db_execute!(
+            pool,
+            "DELETE FROM dismissed_findings WHERE repo_full_name = ?",
+            name
+        );
+        let _ = db_execute!(
+            pool,
+            "DELETE FROM learned_rules WHERE repo_full_name = ?",
+            name
+        );
+    }
+    // Prefer explicit cleanup so installs without ON DELETE CASCADE still succeed.
+    let _ = db_execute!(
+        pool,
+        "DELETE FROM findings WHERE review_id IN (SELECT id FROM reviews WHERE repo_id = ?)",
+        id
+    );
+    let _ = db_execute!(pool, "DELETE FROM reviews WHERE repo_id = ?", id);
     db_execute!(pool, "DELETE FROM repos WHERE id = ?", id)?;
     Ok(())
 }

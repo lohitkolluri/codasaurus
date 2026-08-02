@@ -257,6 +257,9 @@
 
     <section class="section-block">
       <h2 class="stats-section-title">Finding quality</h2>
+      <p class="stats-section-note">
+        Accept rate and FP proxy are dismissal-based heuristics (not billing). LLM spend is an estimate from event logs.
+      </p>
       <div class="stats-row">
         <StatsCard
           label="Accept rate"
@@ -368,6 +371,13 @@
 <style>
   .stats-hero {
     align-items: flex-end;
+  }
+  .stats-section-note {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0 0 12px;
+    max-width: 52rem;
+    line-height: 1.45;
   }
   .stats-section-title {
     margin: 0 0 var(--space-4);

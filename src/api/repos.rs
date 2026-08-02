@@ -36,13 +36,13 @@ pub fn router() -> Router<AppState> {
 // Handlers
 // ---------------------------------------------------------------------------
 
-/// GET /api/v1/repos
+/// GET /api/repos
 async fn list_repos(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
     let repos = db::repos::list_repos(&state.pool).await?;
     Ok(Json(json!(repos)))
 }
 
-/// POST /api/v1/repos/sync — fetch all installations + repos from GitHub and
+/// POST /api/repos/sync — fetch all installations + repos from GitHub and
 /// store them in the local database.  Returns the number of repos synced.
 async fn sync_repos(
     State(state): State<AppState>,
@@ -62,14 +62,8 @@ async fn sync_repos(
         .await
         .ok()
         .flatten()
-        .or_else(|| {
-            std::env::var("GITHUB_APP_PRIVATE_KEY_B64")
-                .ok()
-                .and_then(|b64| {
-                    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64).ok()
-                })
-                .and_then(|bytes| String::from_utf8(bytes).ok())
-        })
+        .filter(|k| !k.trim().is_empty())
+        .or_else(crate::github_jwt::resolve_private_key_from_env)
         .ok_or_else(|| ApiError::bad_request("No GitHub App private key configured"))?;
 
     let jwt = create_jwt(&app_id, &private_key)?;
@@ -224,7 +218,7 @@ fn next_github_link(headers: &axum::http::HeaderMap) -> Option<String> {
     None
 }
 
-/// GET /api/v1/repos/:id
+/// GET /api/repos/:id
 async fn get_repo(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -235,7 +229,7 @@ async fn get_repo(
     Ok(Json(json!(repo)))
 }
 
-/// PUT /api/v1/repos/:id
+/// PUT /api/repos/:id
 async fn update_repo(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -247,7 +241,7 @@ async fn update_repo(
     Ok(Json(json!({ "status": "ok" })))
 }
 
-/// DELETE /api/v1/repos/:id
+/// DELETE /api/repos/:id
 async fn delete_repo(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,

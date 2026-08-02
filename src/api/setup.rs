@@ -124,7 +124,7 @@ pub struct SetupStatus {
     pub github_install_url: Option<String>,
 }
 
-/// GET /api/v1/setup/status — check which setup steps have been completed.
+/// GET /api/setup/status — check which setup steps have been completed.
 async fn setup_status(State(state): State<AppState>) -> Result<Json<SetupStatus>, ApiError> {
     use db::config::get_config;
 
@@ -174,7 +174,7 @@ async fn setup_status(State(state): State<AppState>) -> Result<Json<SetupStatus>
     }))
 }
 
-/// GET /api/v1/setup/database — live Postgres connection summary for the wizard.
+/// GET /api/setup/database — live Postgres connection summary for the wizard.
 async fn get_database_status(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
@@ -231,7 +231,7 @@ fn redact_pg_url(raw: &str) -> (String, String) {
     (host, database)
 }
 
-/// POST /api/v1/setup/database
+/// POST /api/setup/database
 async fn setup_database(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -337,7 +337,7 @@ async fn get_llm_config(
     })))
 }
 
-/// POST /api/v1/setup/llm?test=true
+/// POST /api/setup/llm?test=true
 async fn setup_llm(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -590,7 +590,7 @@ async fn github_manifest_url(
     Ok(Json(build_manifest(&public_url)))
 }
 
-/// POST /api/v1/setup/github
+/// POST /api/setup/github
 async fn setup_github(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -649,7 +649,7 @@ async fn setup_github(
     }))
 }
 
-/// GET /api/v1/setup/github/callback — lightweight HTML page that exchanges
+/// GET /api/setup/github/callback — lightweight HTML page that exchanges
 /// the manifest code with GitHub, then redirects to the SPA entry point.
 /// This avoids SPA routing issues (hash vs path) because the exchange happens
 /// in a plain page before handing control back to the SPA.
@@ -771,7 +771,7 @@ async fn github_callback_page(
     )
 }
 
-/// POST /api/v1/setup/github/callback
+/// POST /api/setup/github/callback
 async fn github_callback(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -861,7 +861,7 @@ async fn github_callback(
     }))
 }
 
-/// POST /api/v1/setup/admin
+/// POST /api/setup/admin
 async fn setup_admin(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
