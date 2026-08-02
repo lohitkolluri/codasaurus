@@ -107,7 +107,14 @@
       } catch {
         parsedGate = null;
       }
+      let existingCfg = {};
+      try {
+        existingCfg = repo?.config_json ? JSON.parse(repo.config_json) : {};
+      } catch {
+        existingCfg = {};
+      }
       const config_json = {
+        ...existingCfg,
         detectors,
         llm_enabled: llmEnabled,
         // auto_describe removed: walkthrough issue-comment covers open/push.
