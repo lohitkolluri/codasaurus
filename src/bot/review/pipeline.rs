@@ -956,7 +956,7 @@ pub async fn review_pr_with_options(
         let review_event = crate::bot::concern::review_event(has_blocking, false, false);
         let summary = if has_blocking {
             format!(
-                "Commit `{sha_short}`: please fix the items in **What to do next**, \
+                "Commit `{sha_short}`: please fix the items in the **Findings** list, \
                  then check the {} inline comment{}.",
                 review_comments.len(),
                 if review_comments.len() == 1 { "" } else { "s" }

@@ -229,12 +229,6 @@ pub struct FindingProgress {
     pub newly_found: Vec<ProgressItem>,
 }
 
-impl FindingProgress {
-    pub fn is_empty(&self) -> bool {
-        self.resolved.is_empty() && self.still_open.is_empty() && self.newly_found.is_empty()
-    }
-}
-
 /// Strip `{review_id}:` prefix from persisted fingerprints.
 pub fn raw_fingerprint(stored: &str) -> &str {
     if let Some((prefix, rest)) = stored.split_once(':') {
@@ -433,14 +427,10 @@ pub fn overview_comment_body(
     let _ = writeln!(
         body,
         "{}\n",
-        walkthrough_prose(pr_title, files, total, blocking, warning, has_blocking)
+        walkthrough_prose(files, total, blocking, warning, has_blocking)
     );
 
-    if let Some(p) = progress.filter(|p| !p.is_empty()) {
-        write_progress_section(&mut body, p);
-    }
-
-    write_next_actions(&mut body, &findings.findings);
+    write_findings_table(&mut body, &findings.findings, progress);
     write_title_fix_note(&mut body, title_fix);
     write_agent_fix_prompt(&mut body, &findings.findings, pr_title);
 
@@ -470,38 +460,89 @@ fn write_title_fix_note(body: &mut String, note: Option<&TitleFixNote>) {
     }
 }
 
-fn write_next_actions(body: &mut String, findings: &[Finding]) {
-    if findings.is_empty() {
+fn write_findings_table(
+    body: &mut String,
+    findings: &[Finding],
+    progress: Option<&FindingProgress>,
+) {
+    struct Row {
+        status: Option<&'static str>,
+        severity: String,
+        label: String,
+    }
+    let mut rows: Vec<Row> = Vec::new();
+    if let Some(p) = progress {
+        for item in &p.newly_found {
+            rows.push(Row {
+                status: Some("new"),
+                severity: item.severity.clone(),
+                label: escape_md(&item.label),
+            });
+        }
+        for item in &p.still_open {
+            rows.push(Row {
+                status: Some("open"),
+                severity: item.severity.clone(),
+                label: escape_md(&item.label),
+            });
+        }
+        for item in &p.resolved {
+            rows.push(Row {
+                status: Some("resolved"),
+                severity: item.severity.clone(),
+                label: format!("~~{}~~", escape_md(&item.label)),
+            });
+        }
+    } else {
+        for f in ordered_checklist_findings(findings) {
+            rows.push(Row {
+                status: None,
+                severity: f.severity.to_string(),
+                label: escape_md(&guide_label(f)),
+            });
+        }
+    }
+    if rows.is_empty() {
         return;
     }
-    let ordered = ordered_checklist_findings(findings);
-    let actionable: Vec<&&Finding> = ordered
-        .iter()
-        .filter(|f| should_surface_in_checklist(f))
-        .collect();
-    if actionable.is_empty() {
-        return;
+    let rank = |s: &str| match s {
+        "blocking" => 0,
+        "warning" => 1,
+        _ => 2,
+    };
+    rows.sort_by(|a, b| {
+        let ar = a.status == Some("resolved");
+        let br = b.status == Some("resolved");
+        ar.cmp(&br)
+            .then(rank(&a.severity).cmp(&rank(&b.severity)))
+            .then(a.label.cmp(&b.label))
+    });
+    let shown = rows.len().min(8);
+    let show_status = progress.is_some();
+    let _ = writeln!(body, "## Findings\n");
+    if show_status {
+        let _ = writeln!(body, "| Status | Severity | Finding |\n| --- | --- | --- |");
+    } else {
+        let _ = writeln!(body, "| Severity | Finding |\n| --- | --- |");
     }
-    let _ = writeln!(body, "## What to do next\n");
-    for (i, f) in actionable.iter().take(5).enumerate() {
-        let cue = match f.severity {
-            "blocking" => "Please fix",
-            "warning" => "Please check",
-            _ => "Worth a look",
-        };
-        let concern = crate::bot::concern::concern_for_finding(&f.detector, &f.file);
-        let _ = writeln!(
-            body,
-            "{}. **{cue}** [`{concern}`]: {}",
-            i + 1,
-            guide_label(f)
-        );
+    for row in rows.iter().take(shown) {
+        if show_status {
+            let _ = writeln!(
+                body,
+                "| {} | {} | {} |",
+                row.status.unwrap_or("new"),
+                row.severity,
+                row.label
+            );
+        } else {
+            let _ = writeln!(body, "| {} | {} |", row.severity, row.label);
+        }
     }
-    if actionable.len() > 5 {
+    if rows.len() > shown {
         let _ = writeln!(
             body,
             "\n_{} more on the Files tab (inline comments)._",
-            actionable.len() - 5
+            rows.len() - shown
         );
     }
     body.push('\n');
@@ -615,31 +656,6 @@ fn write_agent_fix_prompt(body: &mut String, findings: &[Finding], pr_title: &st
          Paste this prompt into Cursor, Copilot, or another coding agent:\n\n\
          ```text\n{prompt}\n```\n\n</details>\n"
     );
-}
-
-fn write_progress_section(body: &mut String, progress: &FindingProgress) {
-    let _ = writeln!(body, "## Since last review\n");
-    if !progress.resolved.is_empty() {
-        let _ = writeln!(body, "**Resolved**");
-        for item in progress.resolved.iter().take(5) {
-            let _ = writeln!(body, "- ~~{}~~", escape_md(&item.label));
-        }
-        body.push('\n');
-    }
-    if !progress.still_open.is_empty() {
-        let _ = writeln!(body, "**Still open**");
-        for item in progress.still_open.iter().take(5) {
-            let _ = writeln!(body, "- {}", escape_md(&item.label));
-        }
-        body.push('\n');
-    }
-    if !progress.newly_found.is_empty() {
-        let _ = writeln!(body, "**New**");
-        for item in progress.newly_found.iter().take(5) {
-            let _ = writeln!(body, "- {}", escape_md(&item.label));
-        }
-        body.push('\n');
-    }
 }
 
 /// Message 2: sequence diagram + blast / related / deps. `None` when empty.
@@ -766,7 +782,7 @@ pub fn checks_comment_body(
         (
             "No blocking findings",
             !has_blocking,
-            "Work through **What to do next** (items marked **Please fix**), then push again.",
+            "Work through the **Findings** list (items marked **blocking**), then push again.",
         ),
         (
             "Warning budget within limit",
@@ -942,7 +958,6 @@ pub fn should_attempt_sequence_diagram(paths: &[String]) -> bool {
 
 /// One or two short sentences summarizing the PR (≤~280 chars).
 fn walkthrough_prose(
-    pr_title: &str,
     files: &[serde_json::Value],
     total: usize,
     blocking: usize,
@@ -950,7 +965,6 @@ fn walkthrough_prose(
     has_blocking: bool,
 ) -> String {
     use std::collections::BTreeMap;
-    let title = pr_title.trim();
     let mut by_area: BTreeMap<String, usize> = BTreeMap::new();
     for file in files {
         let name = file["filename"].as_str().unwrap_or("?");
@@ -971,9 +985,6 @@ fn walkthrough_prose(
         .collect();
 
     let mut s = String::new();
-    if !title.is_empty() {
-        s.push_str(&format!("**{}**\n\n", escape_md(title)));
-    }
     if files.is_empty() {
         s.push_str("No file changes showed up in this review.");
     } else if top.len() <= 1 {
@@ -1217,9 +1228,11 @@ mod tests {
             None,
         );
         assert!(body.contains("<!-- codasaurus:overview:v1 -->"));
-        assert!(body.contains("## What to do next"));
-        assert!(body.contains("[`quality`]"));
+        assert!(body.contains("## Findings"));
+        assert!(body.contains("| warning |"));
         assert!(body.contains("src/bot/commands.rs"));
+        assert!(!body.contains("| Status |"));
+        assert!(!body.contains("**Stop stacking comments**"));
         assert!(body.contains("## Changes"));
         assert!(body.contains("| Path | What changed |"));
         assert!(body.contains("shields.io"));
@@ -1297,9 +1310,11 @@ mod tests {
             false,
             None,
         );
-        assert!(with_progress.contains("## Since last review"));
-        assert!(with_progress.contains("**Resolved**"));
-        assert!(with_progress.contains("**Still open**"));
+        assert!(with_progress.contains("## Findings"));
+        assert!(with_progress.contains("| Status |"));
+        assert!(with_progress.contains("| open |"));
+        assert!(with_progress.contains("| resolved |"));
+        assert!(with_progress.contains("~~Old issue in `a.rs:1`~~"));
 
         let advisory = overview_comment_body(
             &findings,

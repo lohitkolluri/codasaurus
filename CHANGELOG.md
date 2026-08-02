@@ -55,6 +55,7 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 
 ### Changed
 
+- Review overview merges "Since last review" and "What to do next" into a single **Findings** table (status / severity / finding), so each finding is listed once; resolved rows are struck through. The status column appears only on re-reviews. PR title is no longer repeated in the overview prose.
 - LLM `review_diff` prompts use a scoped 5-part framework (role, priority scope, do-not-report noise list, confidence/severity rules, structured output) to cut style false positives.
 - Review JSON schema constrains `verdict` enum, requires `rationale` + `suggestion`, and caps issues at 8.
 - PR title/description/issues in LLM context are wrapped in `<<<UNTRUSTED_*>>>` markers; default LLM diff budget raised to 24k chars (aligned with auto-improve).
