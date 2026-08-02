@@ -390,6 +390,13 @@ fn status_badge_strip(blocking: usize, warning: usize, info: usize, ready: bool)
     )
 }
 
+/// Note shown in the overview when a PR title was suggested or auto-updated.
+#[derive(Debug, Clone)]
+pub struct TitleFixNote {
+    pub proposed: String,
+    pub applied: bool,
+}
+
 /// Message 1: status badges + prose + what-to-do checklist + progress + Changes.
 #[allow(clippy::too_many_arguments)]
 pub fn overview_comment_body(
@@ -401,6 +408,7 @@ pub fn overview_comment_body(
     agent_badge: Option<&str>,
     progress: Option<&FindingProgress>,
     advisory_draft: bool,
+    title_fix: Option<&TitleFixNote>,
 ) -> String {
     let counts = findings.count_by_severity();
     let blocking = *counts.get("blocking").unwrap_or(&0);
@@ -433,6 +441,7 @@ pub fn overview_comment_body(
     }
 
     write_next_actions(&mut body, &findings.findings);
+    write_title_fix_note(&mut body, title_fix);
     write_agent_fix_prompt(&mut body, &findings.findings, pr_title);
 
     let _ = writeln!(body, "## Changes\n");
@@ -443,13 +452,38 @@ pub fn overview_comment_body(
     body
 }
 
+fn write_title_fix_note(body: &mut String, note: Option<&TitleFixNote>) {
+    let Some(note) = note else {
+        return;
+    };
+    let title = redact_secrets(&note.proposed);
+    if note.applied {
+        let _ = writeln!(
+            body,
+            "> Updated PR title to `{title}` (high-confidence title fix).\n"
+        );
+    } else {
+        let _ = writeln!(
+            body,
+            "> Suggested title: `{title}` — rename the PR if this looks right.\n"
+        );
+    }
+}
+
 fn write_next_actions(body: &mut String, findings: &[Finding]) {
     if findings.is_empty() {
         return;
     }
     let ordered = ordered_checklist_findings(findings);
+    let actionable: Vec<&&Finding> = ordered
+        .iter()
+        .filter(|f| should_surface_in_checklist(f))
+        .collect();
+    if actionable.is_empty() {
+        return;
+    }
     let _ = writeln!(body, "## What to do next\n");
-    for (i, f) in ordered.iter().take(5).enumerate() {
+    for (i, f) in actionable.iter().take(5).enumerate() {
         let cue = match f.severity {
             "blocking" => "Please fix",
             "warning" => "Please check",
@@ -463,19 +497,33 @@ fn write_next_actions(body: &mut String, findings: &[Finding]) {
             guide_label(f)
         );
     }
-    if ordered.len() > 5 {
+    if actionable.len() > 5 {
         let _ = writeln!(
             body,
             "\n_{} more on the Files tab (inline comments)._",
-            ordered.len() - 5
+            actionable.len() - 5
         );
     }
     body.push('\n');
 }
 
-/// Ordered findings for checklist / agent prompt (blocking first, max 5).
+/// User-facing checklist / agent prompt: skip meta policy rows and intentional fixtures.
+fn should_surface_in_checklist(f: &Finding) -> bool {
+    if crate::detectors::is_golden_fixture_path(&f.file) {
+        return false;
+    }
+    if f.detector == "policy" && f.file == "POLICY" {
+        return false;
+    }
+    true
+}
+
+/// Ordered findings for checklist / agent prompt (blocking first).
 fn ordered_checklist_findings(findings: &[Finding]) -> Vec<&Finding> {
-    let mut ordered: Vec<&Finding> = findings.iter().collect();
+    let mut ordered: Vec<&Finding> = findings
+        .iter()
+        .filter(|f| should_surface_in_checklist(f))
+        .collect();
     ordered.sort_by_key(|f| match f.severity {
         "blocking" => 0,
         "warning" => 1,
@@ -486,53 +534,70 @@ fn ordered_checklist_findings(findings: &[Finding]) -> Vec<&Finding> {
 
 /// Deterministic copy-paste brief for an AI coding agent. `None` when clean.
 pub fn agent_fix_prompt(findings: &[Finding], pr_title: &str) -> Option<String> {
-    if findings.is_empty() {
-        return None;
-    }
     let ordered = ordered_checklist_findings(findings);
-    let shown = ordered.iter().take(5).copied().collect::<Vec<_>>();
-    if shown.is_empty() {
+    if ordered.is_empty() {
         return None;
     }
+    let shown: Vec<&&Finding> = ordered.iter().take(8).collect();
 
-    let mut prompt = String::with_capacity(1024);
+    let mut prompt = String::with_capacity(2048);
     prompt.push_str(
-        "You are fixing review findings on this pull request. Change only what is needed. \
-Do not refactor unrelated code. Do not invent new features. Prefer the smallest diff. \
-If a finding looks wrong, say so instead of changing code. After edits, summarize what you changed.\n\n\
-Findings to fix:\n",
+        "You are fixing Codasaurus review findings on a GitHub pull request.\n\n\
+## Rules\n\
+- Change only what is required to resolve the findings below.\n\
+- Do not refactor unrelated code or add features.\n\
+- Prefer the smallest correct diff.\n\
+- `tests/fixtures/golden/` and `golden/*/input.*` files intentionally contain sample secrets/TODOs for detector tests — do not \"fix\" those unless the PR is explicitly changing the fixture contract.\n\
+- Workspace crate imports in `tests/` (e.g. `use codasaurus::…`) are expected — do not add them to Cargo.toml.\n\
+- If a finding is a false positive, say so instead of changing code.\n\
+- After edits, summarize what you changed and why.\n\n\
+## Findings (priority order)\n",
     );
 
     for (i, f) in shown.iter().enumerate() {
-        let action = redact_secrets(&finding_action(f));
+        let loc = if f.line > 0 {
+            format!("`{}`:{}", f.file, f.line)
+        } else {
+            format!("`{}`", f.file)
+        };
         let _ = writeln!(
             prompt,
-            "{}. [{}] {}\n   Do this: {}",
+            "### {}. [{}] {}\n\
+- **Location:** {loc}\n\
+- **Detector:** `{}`\n\
+- **Issue:** {}\n\
+- **Fix:** {}\n",
             i + 1,
             f.severity,
-            guide_label(f),
-            action
+            finding_title(f),
+            f.detector,
+            redact_secrets(&finding_why(f)),
+            redact_secrets(&finding_action(f)),
         );
+        if let Some(ev) = f.evidence.as_deref().filter(|e| !e.trim().is_empty()) {
+            let _ = writeln!(prompt, "- **Evidence:** {}", redact_secrets(ev));
+        }
+        prompt.push('\n');
     }
-    if ordered.len() > 5 {
+
+    if ordered.len() > shown.len() {
         let _ = writeln!(
             prompt,
-            "\n({} more findings are on the PR Files tab; fix the list above first.)",
-            ordered.len() - 5
+            "_{} more findings are on the PR Files tab — fix the list above first._\n",
+            ordered.len() - shown.len()
         );
     }
 
     let title = pr_title.trim();
     if !title.is_empty() {
-        let _ = write!(
+        let _ = writeln!(
             prompt,
-            "\nPR title: {}",
+            "## PR context\nTitle: {}",
             redact_secrets(&title.chars().take(200).collect::<String>())
         );
     }
 
-    // Keep the overview comment lean.
-    const MAX_CHARS: usize = 2800;
+    const MAX_CHARS: usize = 4800;
     if prompt.chars().count() > MAX_CHARS {
         prompt = prompt.chars().take(MAX_CHARS.saturating_sub(1)).collect();
         prompt.push('…');
@@ -547,7 +612,7 @@ fn write_agent_fix_prompt(body: &mut String, findings: &[Finding], pr_title: &st
     let _ = writeln!(
         body,
         "<details>\n<summary>Copy this into your AI coding agent</summary>\n\n\
-         Paste into your AI coding agent to apply the fixes:\n\n\
+         Paste this prompt into Cursor, Copilot, or another coding agent:\n\n\
          ```text\n{prompt}\n```\n\n</details>\n"
     );
 }
@@ -1149,6 +1214,7 @@ mod tests {
             None,
             None,
             false,
+            None,
         );
         assert!(body.contains("<!-- codasaurus:overview:v1 -->"));
         assert!(body.contains("## What to do next"));
@@ -1167,8 +1233,9 @@ mod tests {
         assert!(!body.contains("flowchart TB"));
         assert!(body.contains("Copy this into your AI coding agent"));
         assert!(body.contains("```text"));
-        assert!(body.contains("Findings to fix:"));
-        assert!(body.contains("Do this:"));
+        assert!(body.contains("Findings (priority order)"));
+        assert!(body.contains("**Location:**"));
+        assert!(body.contains("**Fix:**"));
 
         let checks = checks_comment_body(
             &findings,
@@ -1203,6 +1270,7 @@ mod tests {
             None,
             None,
             false,
+            None,
         );
         assert!(!clean_overview.contains("Copy this into your AI coding agent"));
         assert!(!clean_overview.contains("Findings to fix:"));
@@ -1227,6 +1295,7 @@ mod tests {
             None,
             Some(&progress),
             false,
+            None,
         );
         assert!(with_progress.contains("## Since last review"));
         assert!(with_progress.contains("**Resolved**"));
@@ -1241,12 +1310,45 @@ mod tests {
             None,
             None,
             true,
+            None,
         );
         assert!(advisory.contains("Advisory draft"));
         assert!(
             advisory.contains("alt=\"READY TO MERGE: NO\""),
             "advisory drafts must not show ready-to-merge"
         );
+
+        let suggested = overview_comment_body(
+            &Findings::default(),
+            false,
+            "update",
+            &files,
+            &runtime,
+            None,
+            None,
+            false,
+            Some(&TitleFixNote {
+                proposed: "feat: add title fix".into(),
+                applied: false,
+            }),
+        );
+        assert!(suggested.contains("Suggested title: `feat: add title fix`"));
+        let applied = overview_comment_body(
+            &Findings::default(),
+            false,
+            "feat: add title fix",
+            &files,
+            &runtime,
+            None,
+            None,
+            false,
+            Some(&TitleFixNote {
+                proposed: "feat: add title fix".into(),
+                applied: true,
+            }),
+        );
+        assert!(applied.contains("Updated PR title to `feat: add title fix`"));
+        assert!(!applied.contains("Suggested title:"));
 
         let ctx = context_comment_body(
             &WalkthroughExtras {
@@ -1281,13 +1383,56 @@ mod tests {
             codemod: None,
         }];
         let prompt = agent_fix_prompt(&findings, "Add webhook retries").expect("prompt");
-        assert!(prompt.contains("Findings to fix:"));
-        assert!(prompt.contains("src/serve.rs:88"));
+        assert!(prompt.contains("## Findings (priority order)"));
+        assert!(prompt.contains("**Location:** `src/serve.rs`:88"));
         assert!(prompt.contains("[blocking]"));
-        assert!(prompt.contains("PR title: Add webhook retries"));
+        assert!(prompt.contains("PR context"));
+        assert!(prompt.contains("Add webhook retries"));
         assert!(prompt.contains("redacted") || prompt.contains("…[redacted]"));
         assert!(!prompt.contains("abcdefghijklmnopqrstuvwxyz0123456789"));
-        assert!(!prompt.contains(" — "));
+    }
+
+    #[test]
+    fn agent_fix_prompt_skips_policy_and_golden_fixtures() {
+        let findings = vec![
+            Finding {
+                detector: "secrets".into(),
+                severity: "blocking",
+                file: "golden/secret_leak/input.rs".into(),
+                line: 2,
+                column: 0,
+                message: "key".into(),
+                suggestion: None,
+                evidence: None,
+                codemod: None,
+            },
+            Finding {
+                detector: "policy".into(),
+                severity: "blocking",
+                file: "POLICY".into(),
+                line: 0,
+                column: 0,
+                message: "too many".into(),
+                suggestion: Some("raise max_blocking".into()),
+                evidence: None,
+                codemod: None,
+            },
+            Finding {
+                detector: "todo-leaks".into(),
+                severity: "warning",
+                file: "src/main.rs".into(),
+                line: 10,
+                column: 0,
+                message: "TODO".into(),
+                suggestion: None,
+                evidence: None,
+                codemod: None,
+            },
+        ];
+        let prompt = agent_fix_prompt(&findings, "Fix todos").expect("prompt");
+        assert!(prompt.contains("**Location:** `src/main.rs`:10"));
+        assert!(!prompt.contains("golden/secret_leak"));
+        assert!(!prompt.contains("POLICY"));
     }
 
     #[test]

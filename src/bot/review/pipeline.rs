@@ -56,7 +56,7 @@ pub async fn review_pr_with_options(
     }
 
     let pr_number = pr["number"].as_i64().unwrap_or(0);
-    let pr_title = pr["title"].as_str().unwrap_or("").to_string();
+    let mut pr_title = pr["title"].as_str().unwrap_or("").to_string();
     let pr_body = pr["body"].as_str().unwrap_or("").to_string();
     let head_sha = pr["head"]["sha"].as_str().unwrap_or("");
 
@@ -155,6 +155,19 @@ pub async fn review_pr_with_options(
                 }
             }
         }
+        let repo_had_title_key = repo_config_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .is_some_and(|v| v.get("pr_title_fix").is_some());
+        let global_title = crate::db::config::get_config(pool, "pr_title_fix")
+            .await
+            .ok()
+            .flatten();
+        repo_flags.pr_title_fix = crate::bot::title_fix::resolve_mode(
+            repo_flags.pr_title_fix,
+            global_title.as_deref(),
+            repo_had_title_key,
+        );
     }
     let mut options = options;
     if !repo_flags.auto_describe {
@@ -565,6 +578,7 @@ pub async fn review_pr_with_options(
             &commit_messages,
             &changed_paths,
             &present_paths,
+            &pr_title,
         );
         findings.findings.extend(g);
     }
@@ -737,6 +751,9 @@ pub async fn review_pr_with_options(
         if f.line == 0 {
             continue;
         }
+        if crate::detectors::is_golden_fixture_path(&f.file) {
+            continue;
+        }
         if review_comments.len() >= runtime.max_inline_comments {
             break;
         }
@@ -760,6 +777,19 @@ pub async fn review_pr_with_options(
     // Load prior findings before save_review_to_db so same-SHA re-reviews can delta.
     let progress = load_finding_progress(repo_name, pr_number, &findings).await;
     let advisory_draft = crate::bot::concern::is_advisory_draft(&findings.findings, has_blocking);
+
+    let title_fix_note = maybe_fix_pr_title(
+        client,
+        &headers,
+        repo_name,
+        pr_number,
+        &mut pr_title,
+        &commit_messages,
+        &changed_paths,
+        &remote_ctx.guidelines,
+        repo_flags.pr_title_fix,
+    )
+    .await;
 
     // Clean PR: overview only; optional APPROVE (merge still needs a human maintainer).
     if findings.is_empty() {
@@ -792,6 +822,7 @@ pub async fn review_pr_with_options(
             sequence.as_deref(),
             progress.as_ref(),
             false,
+            title_fix_note.as_ref(),
         )
         .await?;
         if repo_flags.auto_approve {
@@ -915,6 +946,7 @@ pub async fn review_pr_with_options(
         sequence.as_deref(),
         progress.as_ref(),
         advisory_draft,
+        title_fix_note.as_ref(),
     )
     .await?;
 
@@ -954,38 +986,56 @@ pub async fn review_pr_with_options(
 
         let review_url =
             format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews");
-        let resp = retry_async(
-            &RetryConfig::api_default(),
-            "post_pr_review",
-            &is_reqwest_error_retryable,
-            || async {
-                client
-                    .post(&review_url)
-                    .header("Authorization", &auth_header)
-                    .header("Accept", "application/vnd.github+json")
-                    .header(
-                        "User-Agent",
-                        concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
-                    )
-                    .json(&review_body)
-                    .send()
-                    .await
-                    .map_err(Into::into)
-            },
+        let already_posted = super::github::review_exists_for_commit(
+            client,
+            &auth_header,
+            repo_name,
+            pr_number,
+            head_sha,
         )
-        .await?;
-
-        if !resp.status().is_success() {
-            // Walkthrough already updated above; do not claim SHA so a retry can
-            // re-post inline comments / REQUEST_CHANGES after transient GitHub errors.
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            tracing::warn!(
-                status = %status,
-                body = %body.chars().take(400).collect::<String>(),
-                "PR review API failed after walkthrough update"
+        .await
+        .unwrap_or(false);
+        if already_posted {
+            tracing::info!(
+                repo = repo_name,
+                pr_number,
+                sha = head_sha,
+                "PR review already exists for commit; skipping duplicate POST"
             );
-            anyhow::bail!("GitHub PR review POST failed with status {status}");
+        } else {
+            let resp = retry_async(
+                &RetryConfig::api_default(),
+                "post_pr_review",
+                &is_reqwest_error_retryable,
+                || async {
+                    client
+                        .post(&review_url)
+                        .header("Authorization", &auth_header)
+                        .header("Accept", "application/vnd.github+json")
+                        .header(
+                            "User-Agent",
+                            concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+                        )
+                        .json(&review_body)
+                        .send()
+                        .await
+                        .map_err(Into::into)
+                },
+            )
+            .await?;
+
+            if !resp.status().is_success() {
+                // Walkthrough already updated above; do not claim SHA so a retry can
+                // re-post inline comments / REQUEST_CHANGES after transient GitHub errors.
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                tracing::warn!(
+                    status = %status,
+                    body = %body.chars().take(400).collect::<String>(),
+                    "PR review API failed after walkthrough update"
+                );
+                anyhow::bail!("GitHub PR review POST failed with status {status}");
+            }
         }
     }
 
@@ -1183,6 +1233,71 @@ async fn maybe_sequence_diagram(
 }
 
 #[allow(clippy::too_many_arguments)]
+async fn maybe_fix_pr_title(
+    client: &reqwest::Client,
+    headers: &reqwest::header::HeaderMap,
+    repo_name: &str,
+    pr_number: i64,
+    pr_title: &mut String,
+    commit_messages: &[String],
+    changed_paths: &[String],
+    guidelines: &[crate::context::guidelines::GuidelineFile],
+    mode: crate::config::PrTitleFixMode,
+) -> Option<crate::bot::markdown::TitleFixNote> {
+    use crate::config::PrTitleFixMode;
+    if matches!(mode, PrTitleFixMode::Off) {
+        return None;
+    }
+    let want_conventional = crate::bot::title_fix::guidelines_want_conventional(guidelines);
+    let proposed = crate::bot::title_fix::propose_pr_title(
+        pr_title,
+        commit_messages,
+        changed_paths,
+        want_conventional,
+    )?;
+    match mode {
+        PrTitleFixMode::Off => None,
+        PrTitleFixMode::Suggest => Some(crate::bot::markdown::TitleFixNote {
+            proposed: proposed.title,
+            applied: false,
+        }),
+        PrTitleFixMode::Auto => {
+            if !proposed.auto_safe {
+                return Some(crate::bot::markdown::TitleFixNote {
+                    proposed: proposed.title,
+                    applied: false,
+                });
+            }
+            match crate::bot::github_extra::patch_pull_request(
+                client,
+                headers,
+                repo_name,
+                pr_number,
+                Some(&proposed.title),
+                None,
+            )
+            .await
+            {
+                Ok(true) => {
+                    *pr_title = proposed.title.clone();
+                    Some(crate::bot::markdown::TitleFixNote {
+                        proposed: proposed.title,
+                        applied: true,
+                    })
+                }
+                Ok(false) | Err(_) => {
+                    tracing::warn!(repo = repo_name, pr_number, "PR title auto-update failed");
+                    Some(crate::bot::markdown::TitleFixNote {
+                        proposed: proposed.title,
+                        applied: false,
+                    })
+                }
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn post_split_review_comments(
     client: &reqwest::Client,
     auth_header: &str,
@@ -1204,6 +1319,7 @@ async fn post_split_review_comments(
     sequence_mermaid: Option<&str>,
     progress: Option<&crate::bot::markdown::FindingProgress>,
     advisory_draft: bool,
+    title_fix: Option<&crate::bot::markdown::TitleFixNote>,
 ) -> Result<()> {
     let overview = crate::bot::markdown::overview_comment_body(
         findings,
@@ -1214,6 +1330,7 @@ async fn post_split_review_comments(
         agent_badge,
         progress,
         advisory_draft,
+        title_fix,
     );
     post_or_update_comment(
         client,

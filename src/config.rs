@@ -240,6 +240,33 @@ pub struct BotPolicy {
     pub min_severity: String,
 }
 
+/// How Codasaurus handles high-confidence PR title improvements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PrTitleFixMode {
+    #[default]
+    Off,
+    Suggest,
+    Auto,
+}
+
+impl PrTitleFixMode {
+    pub fn parse(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "suggest" | "suggestion" | "propose" => Self::Suggest,
+            "auto" | "apply" | "update" => Self::Auto,
+            _ => Self::Off,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Suggest => "suggest",
+            Self::Auto => "auto",
+        }
+    }
+}
+
 /// Per-repo bot flags from dashboard `config_json`.
 #[derive(Debug, Clone)]
 pub struct RepoBotFlags {
@@ -251,6 +278,7 @@ pub struct RepoBotFlags {
     pub allow_auto_fix: bool,
     /// Opt-in: post GitHub APPROVE on clean high-confidence PRs (merge still needs a human).
     pub auto_approve: bool,
+    pub pr_title_fix: PrTitleFixMode,
 }
 
 impl Default for RepoBotFlags {
@@ -264,6 +292,7 @@ impl Default for RepoBotFlags {
             update_pr_description: false,
             allow_auto_fix: false,
             auto_approve: false,
+            pr_title_fix: PrTitleFixMode::Off,
         }
     }
 }
@@ -294,7 +323,8 @@ impl Config {
     /// Overlay per-repo `config_json` from the dashboard.
     /// Shape: `{ "detectors": {...}, "llm_enabled": bool, "auto_describe": bool,
     /// "auto_review_diff": bool, "auto_labels": bool, "update_pr_description": bool,
-    /// "allow_auto_fix": bool, "auto_approve": bool, "exclude_patterns": ["vendor/"] }`.
+    /// "allow_auto_fix": bool, "auto_approve": bool, "pr_title_fix": "off"|"suggest"|"auto",
+    /// "exclude_patterns": ["vendor/"] }`.
     pub fn overlay_repo_config_json(&mut self, config_json: &str) -> RepoBotFlags {
         let mut flags = RepoBotFlags::default();
         let Ok(value) = serde_json::from_str::<serde_json::Value>(config_json) else {
@@ -342,6 +372,9 @@ impl Config {
         }
         if let Some(v) = value.get("auto_approve").and_then(|v| v.as_bool()) {
             flags.auto_approve = v;
+        }
+        if let Some(v) = value.get("pr_title_fix").and_then(|v| v.as_str()) {
+            flags.pr_title_fix = PrTitleFixMode::parse(v);
         }
         flags
     }

@@ -7,6 +7,9 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     let dep_map = build_dep_map(parsed_files);
 
     for file in parsed_files {
+        if crate::detectors::is_test_or_fixture_path(&file.path) {
+            continue;
+        }
         // Skip dependency manifest files themselves
         let fname = file.path.rsplit('/').next().unwrap_or("").to_lowercase();
         if matches!(
@@ -104,7 +107,11 @@ fn build_dep_map(
             map.entry("pypi".to_string()).or_default().extend(pkgs);
         } else if path.ends_with("cargo.toml") {
             let pkgs = crate::dep_parser::extract_cargo_deps(&file.raw_content);
-            map.entry("crates.io".to_string()).or_default().extend(pkgs);
+            let entry = map.entry("crates.io".to_string()).or_default();
+            entry.extend(pkgs);
+            if let Some(name) = crate::dep_parser::extract_cargo_package_name(&file.raw_content) {
+                entry.insert(name);
+            }
         } else if path.ends_with("go.mod") {
             let pkgs = crate::dep_parser::extract_go_mod_deps(&file.raw_content);
             map.entry("go".to_string()).or_default().extend(pkgs);

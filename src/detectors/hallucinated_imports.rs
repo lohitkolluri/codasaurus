@@ -9,6 +9,9 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     let mut warned_registries = std::collections::HashSet::new();
 
     for file in parsed_files {
+        if crate::detectors::is_test_or_fixture_path(&file.path) {
+            continue;
+        }
         let registry_name = match file.language.as_str() {
             "javascript" | "typescript" | "tsx" | "jsx" => "npm",
             "python" => "pypi",

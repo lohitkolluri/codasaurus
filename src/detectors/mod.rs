@@ -256,6 +256,25 @@ pub fn is_excluded_prepared(path: &str, patterns: &[PreparedExclude]) -> bool {
     })
 }
 
+/// Golden detector regression fixtures intentionally contain secrets/todos.
+pub fn is_golden_fixture_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase().replace('\\', "/");
+    lower.contains("/fixtures/golden/")
+        || lower.starts_with("golden/")
+        || (lower.contains("/golden/") && lower.contains("/input."))
+}
+
+/// Integration tests and golden fixtures use workspace crates and intentional samples.
+pub fn is_test_or_fixture_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase().replace('\\', "/");
+    is_golden_fixture_path(path)
+        || lower.starts_with("tests/")
+        || lower.contains("/tests/")
+        || lower.contains("_test.")
+        || lower.contains(".spec.")
+        || lower.contains("_spec.")
+}
+
 /// Extract the package name from an import statement. Handles @scoped/packages,
 /// submodule paths, Rust :: paths, and plain package names.
 pub(crate) fn extract_package_name(import: &str) -> Option<String> {

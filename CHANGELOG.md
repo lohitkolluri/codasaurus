@@ -25,6 +25,7 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - Learned ignore rules are repo-scoped; security detectors require a maintainer dismissal before auto-promotion; mined false-positive comments no longer suppress `secrets`/`vulnerabilities`/`iac`.
 - Dismiss reactions on finding comments require the same ACL as `@codasaurus` commands (repo owner / PR author / association).
 - OIDC ID-token verification pins `RS256` instead of trusting the JWT header `alg`.
+- CSP drops `'unsafe-inline'`; setup wizard detail endpoints require owner auth after bootstrap; PR review POST checks for an existing review on the same SHA before retrying.
 
 ### Fixed
 
@@ -34,6 +35,7 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - Advisory drafts no longer show READY TO MERGE: YES.
 - Repo delete cascades run in a single DB transaction.
 - Dashboard: race-safe review/repo detail loads, role-gated RepoDetail/Sidebar, Space key on toggles, Stats mojibake, invite password `minlength` alignment.
+- Agent fix prompt is structured for coding agents (location, detector, issue, fix) and skips policy meta-rows and golden fixture paths; phantom-deps / hallucinated-imports skip `tests/` and golden harness files; `sync_repos` uses the shared GitHub client with retries.
 
 ### Added
 
@@ -75,6 +77,7 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - Context blast radius uses shields badges (`BLAST RADIUS` / `SCORE`); low-noise blasts stay hidden.
 - LLM PR summary prompt tightened and hard-capped (~600 chars) so comments stay scannable.
 - Review maturity: advisory draft for soft findings, opt-in `auto_approve` on clean PRs (merge still needs a maintainer), concern labels (`security|quality|tests|docs`), LLM path/symbol grounding, learning promotion requires distinct PRs or a maintainer dismiss, and golden detector fixtures in CI.
+- Opt-in **PR title fix** (`pr_title_fix`: off / suggest / auto) can propose or auto-update titles from guidelines and commit subjects, polished to conventional best practices (imperative, lowercase, ~72 chars).
 - `.env.example` documents the full dashboard ↔ env mirror set (timeouts, cookies, model cheap, etc.).
 - Jira / Linear ticket context is taken from the PR **title and body**; Linear issues resolve via `issue(id:)` (supports bare `ENG-123` when Linear is configured).
 - Jira Cloud ADF descriptions are flattened into text for review context.

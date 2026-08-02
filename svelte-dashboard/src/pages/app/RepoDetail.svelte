@@ -26,6 +26,7 @@
   let updatePrDescription = $state(false);
   let allowAutoFix = $state(false);
   let autoApprove = $state(false);
+  let prTitleFix = $state("off");
   let excludePatterns = $state("");
 
   // Reactively load when params change (fixes $params being undefined at mount)
@@ -70,6 +71,9 @@
       updatePrDescription = cfg.update_pr_description ?? false;
       allowAutoFix = cfg.allow_auto_fix ?? false;
       autoApprove = cfg.auto_approve ?? false;
+      prTitleFix = ["off", "suggest", "auto"].includes(cfg.pr_title_fix)
+        ? cfg.pr_title_fix
+        : "off";
       excludePatterns = Array.isArray(cfg.exclude_patterns)
         ? cfg.exclude_patterns.join(", ")
         : (cfg.exclude_patterns ?? "");
@@ -98,6 +102,8 @@
           update_pr_description: updatePrDescription,
           allow_auto_fix: allowAutoFix,
           auto_approve: autoApprove,
+          pr_title_fix: prTitleFix,
+
           exclude_patterns: excludePatterns
             .split(/[,\n]/)
             .map((s) => s.trim())
@@ -252,6 +258,17 @@
           </div>
         </label>
         <span>Auto-approve clean PRs (merge still needs a maintainer)</span>
+      </div>
+      <div class="form-group" style="margin-top:12px">
+        <label for="repo-pr-title-fix">PR title fix</label>
+        <select id="repo-pr-title-fix" bind:value={prTitleFix}>
+          <option value="off">Off</option>
+          <option value="suggest">Suggest only</option>
+          <option value="auto">Auto-update</option>
+        </select>
+        <p class="muted" style="margin: 0.35rem 0 0; font-size: 0.85rem;">
+          Suggest posts a proposed title; Auto updates the GitHub title when confidence is high. Overrides org default when set.
+        </p>
       </div>
       <div class="form-group" style="margin-top:12px">
         <label for="repo-exclude">Exclude patterns</label>

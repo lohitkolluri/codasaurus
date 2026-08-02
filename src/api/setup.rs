@@ -27,6 +27,14 @@ async fn require_setup_open_or_admin(
     Ok(())
 }
 
+/// Wizard detail endpoints: open before first owner; owner-only after bootstrap.
+async fn require_setup_wizard_access(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+) -> Result<(), ApiError> {
+    require_setup_open_or_admin(state, headers).await
+}
+
 // ---------------------------------------------------------------------------
 // Request / response types
 // ---------------------------------------------------------------------------
@@ -125,7 +133,10 @@ pub struct SetupStatus {
 }
 
 /// GET /api/setup/status — check which setup steps have been completed.
-async fn setup_status(State(state): State<AppState>) -> Result<Json<SetupStatus>, ApiError> {
+async fn setup_status(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<SetupStatus>, ApiError> {
     use db::config::get_config;
 
     // Serving implies Postgres is already connected; also honor wizard / env markers.
@@ -158,11 +169,15 @@ async fn setup_status(State(state): State<AppState>) -> Result<Json<SetupStatus>
 
     let complete = database && llm && github && admin;
 
-    let github_install_url = get_config(&state.pool, "github_app_slug")
+    let owner_exists = admin;
+    let mut github_install_url = get_config(&state.pool, "github_app_slug")
         .await
         .ok()
         .flatten()
         .map(|slug| format!("https://github.com/apps/{slug}/installations/new"));
+    if owner_exists && super::rbac::current_user(&state.pool, &headers).await.is_err() {
+        github_install_url = None;
+    }
 
     Ok(Json(SetupStatus {
         database,
@@ -177,7 +192,9 @@ async fn setup_status(State(state): State<AppState>) -> Result<Json<SetupStatus>
 /// GET /api/setup/database — live Postgres connection summary for the wizard.
 async fn get_database_status(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    require_setup_wizard_access(&state, &headers).await?;
     state
         .pool
         .ping()
@@ -293,7 +310,9 @@ async fn setup_database(
 /// GET /api/setup/llm — return current LLM config from DB + env vars.
 async fn get_llm_config(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    require_setup_wizard_access(&state, &headers).await?;
     use db::config::get_config;
 
     let provider = get_config(&state.pool, "llm_provider")
