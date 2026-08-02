@@ -222,24 +222,75 @@ impl LearningStore {
         let repo = rule.repo_full_name.clone();
         db_execute!(
             &self.pool,
-            "INSERT INTO learned_rules (id, detector, file_pattern, message_pattern, action, reason, repo_full_name)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO learned_rules (id, detector, file_pattern, message_pattern, action, reason, repo_full_name, status, source_count)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                detector = excluded.detector,
                file_pattern = excluded.file_pattern,
                message_pattern = excluded.message_pattern,
                action = excluded.action,
                reason = excluded.reason,
-               repo_full_name = COALESCE(excluded.repo_full_name, learned_rules.repo_full_name)",
+               repo_full_name = COALESCE(excluded.repo_full_name, learned_rules.repo_full_name),
+               status = excluded.status,
+               source_count = excluded.source_count",
             &rule.id,
             &rule.detector,
             &rule.file_pattern,
             &rule.message_pattern,
             rule.action.as_str(),
             &rule.reason,
-            &repo
+            &repo,
+            &rule.status,
+            rule.source_count
         )?;
         Ok(())
+    }
+
+    /// Move a suggested rule into active use.
+    pub async fn approve_rule(&self, id: &str) -> Result<bool> {
+        let n = db_execute!(
+            &self.pool,
+            "UPDATE learned_rules SET status = 'approved', approved_at = NOW()
+             WHERE id = ? AND status = 'suggested'",
+            id
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Retire a rule that no longer matches team behavior.
+    pub async fn archive_rule(&self, id: &str) -> Result<bool> {
+        let n = db_execute!(
+            &self.pool,
+            "UPDATE learned_rules SET status = 'archived', archived_at = NOW()
+             WHERE id = ? AND status IN ('suggested', 'approved')",
+            id
+        )?;
+        Ok(n > 0)
+    }
+
+    /// First approved rule matching detector + file path (decay check).
+    pub async fn find_approved_rule_for_detector(
+        &self,
+        detector: &str,
+        file: &str,
+        repo_full_name: Option<&str>,
+    ) -> Result<Option<String>> {
+        let repo = repo_full_name.unwrap_or("");
+        let row: Option<(String,)> = db_fetch_all!(
+            &self.pool,
+            (String,),
+            "SELECT id FROM learned_rules
+             WHERE detector = ? AND status = 'approved'
+               AND (repo_full_name IS NULL OR repo_full_name = '' OR repo_full_name = ?)
+               AND (file_pattern IS NULL OR ? LIKE file_pattern || '%')
+             ORDER BY source_count DESC LIMIT 1",
+            detector,
+            repo,
+            file
+        )?
+        .into_iter()
+        .next();
+        Ok(row.map(|(id,)| id))
     }
 
     pub async fn list_rules(&self) -> Result<Vec<crate::learning::LearnedRule>> {
@@ -253,11 +304,13 @@ impl LearningStore {
             reason: String,
             created_at: chrono::DateTime<chrono::Utc>,
             repo_full_name: Option<String>,
+            status: String,
+            source_count: i64,
         }
         let rows: Vec<Row> = db_fetch_all!(
             &self.pool,
             Row,
-            "SELECT id, detector, file_pattern, message_pattern, action, reason, created_at, repo_full_name
+            "SELECT id, detector, file_pattern, message_pattern, action, reason, created_at, repo_full_name, status, source_count
              FROM learned_rules ORDER BY created_at DESC LIMIT 200"
         )?;
         Ok(rows
@@ -272,6 +325,8 @@ impl LearningStore {
                 reason: r.reason,
                 created_at: r.created_at,
                 repo_full_name: r.repo_full_name,
+                status: r.status,
+                source_count: r.source_count,
             })
             .collect())
     }
@@ -362,7 +417,8 @@ impl LearningStore {
                 &self.pool,
                 (String, Option<String>, Option<String>, String),
                 "SELECT detector, file_pattern, message_pattern, action FROM learned_rules
-                 WHERE repo_full_name IS NULL OR repo_full_name = '' OR repo_full_name = ?",
+                 WHERE status = 'approved'
+                   AND (repo_full_name IS NULL OR repo_full_name = '' OR repo_full_name = ?)",
                 repo
             )?
         } else {
@@ -370,7 +426,8 @@ impl LearningStore {
                 &self.pool,
                 (String, Option<String>, Option<String>, String),
                 "SELECT detector, file_pattern, message_pattern, action FROM learned_rules
-                 WHERE repo_full_name IS NULL OR repo_full_name = ''"
+                 WHERE status = 'approved'
+                   AND (repo_full_name IS NULL OR repo_full_name = '')"
             )?
         }
         .into_iter()

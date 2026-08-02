@@ -254,6 +254,29 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     migrate_v18_confidence(pool).await?;
     migrate_v19_symbol_index(pool).await?;
     migrate_v20_pre_merge_checks(pool).await?;
+    migrate_v21_learning_rule_status(pool).await?;
+    Ok(())
+}
+
+/// v21: rule lifecycle (suggested → approved → archived) + source count.
+async fn migrate_v21_learning_rule_status(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
+    if current.unwrap_or(0) >= 21 {
+        return Ok(());
+    }
+    let _ = sqlx::query(
+        r#"
+        ALTER TABLE learned_rules
+            ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'approved',
+            ADD COLUMN IF NOT EXISTS source_count INTEGER NOT NULL DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ
+        "#,
+    )
+    .execute(pool)
+    .await;
     Ok(())
 }
 

@@ -34,6 +34,9 @@ pub struct Config {
 
     #[serde(default)]
     pub reachability: ReachabilityConfig,
+
+    #[serde(default)]
+    pub learning: LearningConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -276,6 +279,33 @@ fn default_require_approvals() -> usize {
     1
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LearningConfig {
+    /// Auto-approve mined rules without the `@codasaurus approve-rule` gate.
+    #[serde(default)]
+    pub auto_approve_rules: bool,
+    /// Reserved: write `CODASAURUS_RULES.md` into the repo via a bot PR.
+    #[serde(default)]
+    pub publish_wiki: bool,
+    /// Dismissals (or distinct PRs) needed before a finding becomes a rule candidate.
+    #[serde(default = "default_min_dismissals_for_rule")]
+    pub min_dismissals_for_rule: usize,
+}
+
+impl Default for LearningConfig {
+    fn default() -> Self {
+        Self {
+            auto_approve_rules: false,
+            publish_wiki: false,
+            min_dismissals_for_rule: default_min_dismissals_for_rule(),
+        }
+    }
+}
+
+fn default_min_dismissals_for_rule() -> usize {
+    3
+}
+
 fn default_gate_name() -> String {
     "codasaurus way".into()
 }
@@ -373,6 +403,7 @@ impl Default for Config {
             index: IndexConfig::default(),
             readiness: ReadinessConfig::default(),
             reachability: ReachabilityConfig::default(),
+            learning: LearningConfig::default(),
         }
     }
 }
