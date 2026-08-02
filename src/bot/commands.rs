@@ -1223,7 +1223,9 @@ async fn spawn_similar(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
             for r in &related {
                 body.push_str(&format!("- {r}\n"));
             }
-            body.push_str("\n<sub>Ranked by shared path history (budgeted).</sub>\n");
+            body.push_str(
+                "\n<sub>Ranked by overlapping source-path history (meta files like CHANGELOG deprioritized).</sub>\n",
+            );
             body
         };
         post_issue_comment(&token, &ctx.repo_full_name, pr_number, &text).await
