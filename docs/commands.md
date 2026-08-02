@@ -38,6 +38,7 @@ Commands are case-insensitive; extra words after the verb become arguments for `
 | `add_docs`                       | README / docs stubs (LLM)                                               |
 | `fix` / `fix <fingerprint>`      | Apply available codemods (opt-in; needs Contents Write + settings flag) |
 | `ignore <fingerprint>`           | Dismiss a finding by fingerprint (feeds learning)                       |
+| `retry`                          | Re-run the latest review for this PR (after config or ignore changes)   |
 
 React **👎** or **confused** on a Codasaurus finding comment to dismiss that fingerprint (requires `reaction` webhook + Reactions: Read).
 
@@ -55,4 +56,5 @@ On `opened` / `synchronize` (when enabled), Codasaurus runs describe+review with
 @codasaurus fix a1b2c3d4
 @codasaurus digest
 @codasaurus impact
+@codasaurus retry
 ```

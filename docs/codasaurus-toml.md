@@ -13,6 +13,8 @@ Place `.codasaurus.toml` at the repo root (or set `CODASAURUS_CONFIG`). Dashboar
 [checks]
 hallucinated_imports = true
 phantom_deps = true
+lockfile_drift = true
+license_drift = true
 vulnerabilities = true
 secrets = true
 over_engineering = true
