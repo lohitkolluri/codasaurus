@@ -159,6 +159,7 @@
   let githubMsg = $state("");
   let clearingGithub = $state(false);
   let confirmClearGithub = $state(false);
+  let testingGithub = $state(false);
 
   let pwCurrent = $state("");
   let pwNew = $state("");
@@ -197,6 +198,9 @@
   let oidcAllowPublicClient = $state(false);
   let authSaving = $state(false);
   let authMsg = $state("");
+  let testingOidc = $state(false);
+  let clearingOidc = $state(false);
+  let confirmClearOidc = $state(false);
 
   // Integrations
   let jiraBaseUrl = $state("");
@@ -205,6 +209,10 @@
   let linearApiKey = $state("");
   let integrationsSaving = $state(false);
   let integrationsMsg = $state("");
+  let testingJira = $state(false);
+  let testingLinear = $state(false);
+  let clearingTickets = $state(false);
+  let confirmClearTickets = $state(false);
 
   const PROVIDER_DEFAULTS = {
     openrouter: { model: "openai/gpt-4o", baseUrl: OPENROUTER_BASE },
@@ -597,6 +605,105 @@
       githubMsg = err.message || "Clear failed";
     } finally {
       clearingGithub = false;
+    }
+  }
+
+  async function testGithub() {
+    testingGithub = true;
+    githubMsg = "";
+    try {
+      const res = await api.post("/api/settings/github/test", {});
+      githubMsg = res?.message || "GitHub App connection OK";
+    } catch (err) {
+      githubMsg = err.message || "GitHub test failed";
+    } finally {
+      testingGithub = false;
+    }
+  }
+
+  async function testOidc() {
+    testingOidc = true;
+    authMsg = "";
+    try {
+      // Persist form values first so the test uses what the user typed.
+      await saveAuth();
+      if (authMsg && authMsg !== "Saved") return;
+      const res = await api.post("/api/settings/oidc/test", {});
+      authMsg = res?.message || "OIDC discovery OK";
+    } catch (err) {
+      authMsg = err.message || "OIDC test failed";
+    } finally {
+      testingOidc = false;
+    }
+  }
+
+  async function clearOidc() {
+    clearingOidc = true;
+    authMsg = "";
+    try {
+      const res = await api.delete("/api/settings/oidc");
+      oidcIssuer = "";
+      oidcClientId = "";
+      oidcClientSecret = "";
+      oidcRedirectUri = "";
+      oidcScopes = "openid email profile";
+      oidcAllowOpenJoin = false;
+      oidcAllowUnverifiedEmail = false;
+      oidcAllowPublicClient = false;
+      confirmClearOidc = false;
+      authMsg = res?.message || "SSO cleared";
+    } catch (err) {
+      authMsg = err.message || "Clear failed";
+    } finally {
+      clearingOidc = false;
+    }
+  }
+
+  async function testJira() {
+    testingJira = true;
+    integrationsMsg = "";
+    try {
+      await saveIntegrations();
+      if (integrationsMsg && integrationsMsg !== "Saved") return;
+      const res = await api.post("/api/settings/jira/test", {});
+      integrationsMsg = res?.message || "Jira connection OK";
+    } catch (err) {
+      integrationsMsg = err.message || "Jira test failed";
+    } finally {
+      testingJira = false;
+    }
+  }
+
+  async function testLinear() {
+    testingLinear = true;
+    integrationsMsg = "";
+    try {
+      await saveIntegrations();
+      if (integrationsMsg && integrationsMsg !== "Saved") return;
+      const res = await api.post("/api/settings/linear/test", {});
+      integrationsMsg = res?.message || "Linear connection OK";
+    } catch (err) {
+      integrationsMsg = err.message || "Linear test failed";
+    } finally {
+      testingLinear = false;
+    }
+  }
+
+  async function clearTickets() {
+    clearingTickets = true;
+    integrationsMsg = "";
+    try {
+      const res = await api.delete("/api/settings/tickets");
+      jiraBaseUrl = "";
+      jiraEmail = "";
+      jiraApiToken = "";
+      linearApiKey = "";
+      confirmClearTickets = false;
+      integrationsMsg = res?.message || "Ticket integrations cleared";
+    } catch (err) {
+      integrationsMsg = err.message || "Clear failed";
+    } finally {
+      clearingTickets = false;
     }
   }
 
@@ -1007,6 +1114,9 @@
                 </div>
               </div>
               <div class="save-row" style="margin-top:8px">
+                <button type="button" onclick={testGithub} disabled={testingGithub}>
+                  {testingGithub ? "Testing…" : "Test connection"}
+                </button>
                 <button type="button" onclick={openInstallUrl}>Open install URL</button>
                 <a
                   class="btn sm"
@@ -1016,7 +1126,7 @@
                 >Manage on GitHub ↗</a>
               </div>
               {#if githubMsg}
-                <p class="save-msg" class:error={/fail|error/i.test(githubMsg)}>{githubMsg}</p>
+                <p class="save-msg" class:error={/fail|error|reject/i.test(githubMsg)}>{githubMsg}</p>
               {/if}
               <div class="danger-zone" style="margin-top:16px">
                 <h3>Danger zone</h3>
@@ -1110,14 +1220,33 @@
             </details>
             <div class="save-row">
               <button onclick={saveAuth} disabled={authSaving || !canEditSettings}>{authSaving ? "Saving…" : "Save SSO"}</button>
-              {#if authMsg}<span class="save-msg" class:error={authMsg !== "Saved"}>{authMsg}</span>{/if}
+              <button type="button" onclick={testOidc} disabled={testingOidc || authSaving || !canEditSettings || !oidcIssuer}>
+                {testingOidc ? "Testing…" : "Test discovery"}
+              </button>
+              {#if authMsg}<span class="save-msg" class:error={/fail|error|reject|missing|invalid/i.test(authMsg)}>{authMsg}</span>{/if}
             </div>
+            {#if canEditSettings && (oidcIssuer || oidcClientId)}
+              <div class="danger-zone" style="margin-top:16px">
+                <h3>Clear SSO</h3>
+                <p>Removes OIDC settings from this instance (IdP app is unchanged).</p>
+                {#if !confirmClearOidc}
+                  <button class="danger" onclick={() => (confirmClearOidc = true)}>Clear SSO config</button>
+                {:else}
+                  <div style="display:flex;gap:8px;margin-top:8px">
+                    <button class="danger" onclick={clearOidc} disabled={clearingOidc}>
+                      {clearingOidc ? "Clearing…" : "Confirm clear"}
+                    </button>
+                    <button onclick={() => (confirmClearOidc = false)}>Cancel</button>
+                  </div>
+                {/if}
+              </div>
+            {/if}
           </section>
 
           <section class="card settings-card">
             <header class="settings-section-head">
               <h3 class="section-heading">Tickets</h3>
-              <p class="section-desc">Optional Jira / Linear context from PR descriptions.</p>
+              <p class="section-desc">Optional Jira / Linear context from PR title and body (keys like ENG-123 or Linear issue URLs).</p>
             </header>
             <div class="form-group">
               <label for="jira-base">Jira base URL</label>
@@ -1139,8 +1268,30 @@
             </div>
             <div class="save-row">
               <button onclick={saveIntegrations} disabled={integrationsSaving || !canEditSettings}>{integrationsSaving ? "Saving…" : "Save tickets"}</button>
-              {#if integrationsMsg}<span class="save-msg" class:error={integrationsMsg !== "Saved"}>{integrationsMsg}</span>{/if}
+              <button type="button" onclick={testJira} disabled={testingJira || integrationsSaving || !canEditSettings || !jiraBaseUrl}>
+                {testingJira ? "Testing…" : "Test Jira"}
+              </button>
+              <button type="button" onclick={testLinear} disabled={testingLinear || integrationsSaving || !canEditSettings || !linearApiKey}>
+                {testingLinear ? "Testing…" : "Test Linear"}
+              </button>
+              {#if integrationsMsg}<span class="save-msg" class:error={/fail|error|reject|missing|invalid/i.test(integrationsMsg)}>{integrationsMsg}</span>{/if}
             </div>
+            {#if canEditSettings && (jiraBaseUrl || jiraEmail || linearApiKey)}
+              <div class="danger-zone" style="margin-top:16px">
+                <h3>Clear tickets</h3>
+                <p>Removes Jira and Linear credentials from this instance.</p>
+                {#if !confirmClearTickets}
+                  <button class="danger" onclick={() => (confirmClearTickets = true)}>Clear ticket config</button>
+                {:else}
+                  <div style="display:flex;gap:8px;margin-top:8px">
+                    <button class="danger" onclick={clearTickets} disabled={clearingTickets}>
+                      {clearingTickets ? "Clearing…" : "Confirm clear"}
+                    </button>
+                    <button onclick={() => (confirmClearTickets = false)}>Cancel</button>
+                  </div>
+                {/if}
+              </div>
+            {/if}
           </section>
         </div>
 

@@ -266,72 +266,159 @@ pub async fn fetch_linked_issues(
     Ok(issues)
 }
 
-/// Parse Jira keys (`PROJ-123`) and Linear URLs from PR body; fetch when credentials exist.
-pub async fn fetch_external_tickets(pr_body: &str) -> Vec<IssueContext> {
+/// Flatten Atlassian Document Format (ADF) or plain-string Jira descriptions.
+pub fn jira_description_text(value: &serde_json::Value) -> Option<String> {
+    if value.is_null() {
+        return None;
+    }
+    if let Some(s) = value.as_str() {
+        let t = s.trim();
+        return if t.is_empty() {
+            None
+        } else {
+            Some(t.chars().take(800).collect())
+        };
+    }
+    let mut out = String::new();
+    fn walk(node: &serde_json::Value, out: &mut String) {
+        if let Some(t) = node.get("text").and_then(|v| v.as_str()) {
+            if !out.is_empty() && !out.ends_with([' ', '\n']) {
+                out.push(' ');
+            }
+            out.push_str(t);
+        }
+        if let Some(arr) = node.get("content").and_then(|v| v.as_array()) {
+            for (i, child) in arr.iter().enumerate() {
+                let before = out.len();
+                walk(child, out);
+                let ty = child.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                if matches!(
+                    ty,
+                    "paragraph" | "heading" | "bulletList" | "orderedList" | "listItem"
+                ) && out.len() > before
+                    && !out.ends_with('\n')
+                {
+                    out.push('\n');
+                }
+                if i + 1 < arr.len() && ty == "hardBreak" {
+                    out.push('\n');
+                }
+            }
+        }
+    }
+    walk(value, &mut out);
+    let trimmed = out.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.chars().take(800).collect())
+    }
+}
+
+fn ticket_number(key: &str) -> u64 {
+    key.split('-')
+        .next_back()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
+}
+
+fn unique_keys(haystack: &str, re: &Regex, limit: usize) -> Vec<String> {
+    let mut seen = HashSet::new();
     let mut out = Vec::new();
-    // Jira: PROJ-123
-    let keys: Vec<String> = JIRA_KEY_RE
-        .captures_iter(pr_body)
-        .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
-        .take(5)
-        .collect();
+    for caps in re.captures_iter(haystack) {
+        let Some(m) = caps.get(1) else { continue };
+        let key = m.as_str().to_string();
+        if seen.insert(key.clone()) {
+            out.push(key);
+            if out.len() >= limit {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// Parse Jira keys (`PROJ-123`) and Linear URLs/ids from PR title+body; fetch when credentials exist.
+pub async fn fetch_external_tickets(pr_title: &str, pr_body: &str) -> Vec<IssueContext> {
+    let haystack = format!("{pr_title}\n{pr_body}");
+    let mut out = Vec::new();
+
+    let keys = unique_keys(&haystack, &JIRA_KEY_RE, 5);
+    let linear_from_url = unique_keys(&haystack, &LINEAR_ISSUE_RE, 5);
+    let mut linear_ids = linear_from_url.clone();
+    // Bare PROJ-123 also works as a Linear identifier when Linear is configured.
+    for k in &keys {
+        if !linear_ids.iter().any(|id| id == k) {
+            linear_ids.push(k.clone());
+        }
+    }
+    linear_ids.truncate(5);
+
+    let jira_configured = std::env::var("JIRA_BASE_URL").is_ok()
+        && std::env::var("JIRA_EMAIL").is_ok()
+        && std::env::var("JIRA_API_TOKEN").is_ok();
+    let linear_configured = std::env::var("LINEAR_API_KEY").is_ok();
+
     if let (Ok(base), Ok(email), Ok(token)) = (
         std::env::var("JIRA_BASE_URL"),
         std::env::var("JIRA_EMAIL"),
         std::env::var("JIRA_API_TOKEN"),
     ) {
-        let client = reqwest::Client::new();
-        for key in keys {
-            let url = format!("{}/rest/api/3/issue/{}", base.trim_end_matches('/'), key);
-            if let Ok(resp) = client
-                .get(&url)
-                .basic_auth(&email, Some(&token))
-                .header("Accept", "application/json")
-                .send()
-                .await
+        if crate::ssrf::validate_http_url(base.trim(), false).is_ok() {
+            let client = match reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(8))
+                .build()
             {
-                if resp.status().is_success() {
-                    if let Ok(v) = resp.json::<serde_json::Value>().await {
-                        let title = v["fields"]["summary"].as_str().unwrap_or(&key).to_string();
-                        let body = v["fields"]["description"]
-                            .as_str()
-                            .map(|s| s.chars().take(800).collect());
-                        let num = key
-                            .split('-')
-                            .next_back()
-                            .and_then(|s| s.parse().ok())
-                            .unwrap_or(0);
-                        out.push(IssueContext {
-                            number: num,
-                            title: format!("[Jira {key}] {title}"),
-                            body,
-                        });
+                Ok(c) => c,
+                Err(_) => reqwest::Client::new(),
+            };
+            for key in &keys {
+                let url = format!("{}/rest/api/3/issue/{}", base.trim_end_matches('/'), key);
+                if let Ok(resp) = client
+                    .get(&url)
+                    .basic_auth(&email, Some(&token))
+                    .header("Accept", "application/json")
+                    .send()
+                    .await
+                {
+                    if resp.status().is_success() {
+                        if let Ok(v) = resp.json::<serde_json::Value>().await {
+                            let title = v["fields"]["summary"].as_str().unwrap_or(key).to_string();
+                            let body = jira_description_text(&v["fields"]["description"]);
+                            out.push(IssueContext {
+                                number: ticket_number(key),
+                                title: format!("[Jira {key}] {title}"),
+                                body,
+                            });
+                        }
                     }
                 }
             }
         }
-    } else {
-        for key in keys {
+    } else if !keys.is_empty() && !jira_configured && !linear_configured {
+        for key in &keys {
             out.push(IssueContext {
                 number: 0,
-                title: format!("[Jira {key}] (configure JIRA_* to fetch)"),
+                title: format!("[Ticket {key}] (configure JIRA_* or LINEAR_API_KEY to fetch)"),
                 body: None,
             });
         }
     }
 
-    // Linear: https://linear.app/.../issue/ENG-123/...
-    let ids: Vec<String> = LINEAR_ISSUE_RE
-        .captures_iter(pr_body)
-        .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
-        .take(5)
-        .collect();
     if let Ok(api_key) = std::env::var("LINEAR_API_KEY") {
-        let client = reqwest::Client::new();
-        for id in ids {
+        let client = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(8))
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => reqwest::Client::new(),
+        };
+        for id in &linear_ids {
+            let from_url = linear_from_url.iter().any(|u| u == id);
+            // `issue(id:)` accepts Linear identifiers like ENG-123 (and UUIDs).
             let query = serde_json::json!({
-                "query": "query($q: String!) { issueSearch(query: $q, first: 1) { nodes { identifier title description } } }",
-                "variables": { "q": id }
+                "query": "query($id: String!) { issue(id: $id) { identifier title description } }",
+                "variables": { "id": id }
             });
             match client
                 .post("https://api.linear.app/graphql")
@@ -343,42 +430,41 @@ pub async fn fetch_external_tickets(pr_body: &str) -> Vec<IssueContext> {
             {
                 Ok(resp) if resp.status().is_success() => {
                     if let Ok(v) = resp.json::<serde_json::Value>().await {
-                        let node = &v["data"]["issueSearch"]["nodes"][0];
-                        if node.is_object() {
-                            let title = node["title"].as_str().unwrap_or(&id).to_string();
+                        let node = &v["data"]["issue"];
+                        if node.is_object() && !node.is_null() {
+                            let title = node["title"].as_str().unwrap_or(id).to_string();
                             let body = node["description"]
                                 .as_str()
                                 .map(|s| s.chars().take(800).collect());
-                            let num = id
-                                .split('-')
-                                .next_back()
-                                .and_then(|s| s.parse().ok())
-                                .unwrap_or(0);
                             out.push(IssueContext {
-                                number: num,
+                                number: ticket_number(id),
                                 title: format!("[Linear {id}] {title}"),
                                 body,
                             });
                             continue;
                         }
                     }
+                    // Bare keys may be Jira-only — only surface misses for explicit Linear URLs.
+                    if from_url {
+                        out.push(IssueContext {
+                            number: 0,
+                            title: format!("[Linear {id}]"),
+                            body: Some("Linked from PR (fetch returned no issue).".into()),
+                        });
+                    }
+                }
+                _ if from_url => {
                     out.push(IssueContext {
                         number: 0,
                         title: format!("[Linear {id}]"),
-                        body: Some("Linked from PR body (fetch returned no issue).".into()),
+                        body: Some("Linked from PR (Linear fetch failed).".into()),
                     });
                 }
-                _ => {
-                    out.push(IssueContext {
-                        number: 0,
-                        title: format!("[Linear {id}]"),
-                        body: Some("Linked from PR body (Linear fetch failed).".into()),
-                    });
-                }
+                _ => {}
             }
         }
     } else {
-        for id in ids {
+        for id in linear_from_url {
             out.push(IssueContext {
                 number: 0,
                 title: format!("[Linear {id}] (configure LINEAR_API_KEY to fetch)"),
@@ -437,7 +523,7 @@ pub async fn gather_remote_context(
     let codeowner_reviewers = codeowners_res.unwrap_or_default();
     let linked_issues = {
         let mut issues = issues_res.unwrap_or_default();
-        issues.extend(fetch_external_tickets(pr_body).await);
+        issues.extend(fetch_external_tickets(pr_title, pr_body).await);
         issues
     };
 
@@ -549,5 +635,57 @@ mod tests {
             .collect();
         assert!(nums.contains(&42));
         assert!(nums.contains(&7));
+    }
+
+    #[test]
+    fn jira_description_plain_string() {
+        let v = serde_json::json!("Hello ticket\n\nDetails here");
+        assert_eq!(
+            jira_description_text(&v).as_deref(),
+            Some("Hello ticket\n\nDetails here")
+        );
+    }
+
+    #[test]
+    fn jira_description_adf_paragraphs() {
+        let v = serde_json::json!({
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [{ "type": "text", "text": "First line" }]
+                },
+                {
+                    "type": "paragraph",
+                    "content": [
+                        { "type": "text", "text": "Second" },
+                        { "type": "text", "text": "line" }
+                    ]
+                }
+            ]
+        });
+        let text = jira_description_text(&v).expect("adf text");
+        assert!(text.contains("First line"));
+        assert!(text.contains("Second"));
+        assert!(text.contains("line"));
+    }
+
+    #[test]
+    fn jira_description_null_empty() {
+        assert!(jira_description_text(&serde_json::Value::Null).is_none());
+        assert!(jira_description_text(&serde_json::json!("")).is_none());
+        assert!(
+            jira_description_text(&serde_json::json!({ "type": "doc", "content": [] })).is_none()
+        );
+    }
+
+    #[test]
+    fn extracts_linear_ids_from_urls() {
+        let hay = "See https://linear.app/acme/issue/ENG-99/title and ENG-100";
+        let ids = unique_keys(hay, &LINEAR_ISSUE_RE, 5);
+        assert_eq!(ids, vec!["ENG-99".to_string()]);
+        let keys = unique_keys(hay, &JIRA_KEY_RE, 5);
+        assert!(keys.contains(&"ENG-99".to_string()));
+        assert!(keys.contains(&"ENG-100".to_string()));
     }
 }

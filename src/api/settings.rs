@@ -1,10 +1,11 @@
 use axum::extract::{Path, State};
-use axum::routing::{delete, get, put};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::db;
+use crate::github_jwt;
 
 use super::errors::ApiError;
 use super::AppState;
@@ -24,6 +25,24 @@ const GITHUB_KEYS: &[&str] = &[
     "github_webhook_secret",
     "github_app_name",
     "github_app_slug",
+];
+
+const OIDC_KEYS: &[&str] = &[
+    "oidc_issuer",
+    "oidc_client_id",
+    "oidc_client_secret",
+    "oidc_redirect_uri",
+    "oidc_scopes",
+    "oidc_allow_open_join",
+    "oidc_allow_unverified_email",
+    "oidc_allow_public_client",
+];
+
+const TICKET_KEYS: &[&str] = &[
+    "jira_base_url",
+    "jira_email",
+    "jira_api_token",
+    "linear_api_key",
 ];
 
 const SENSITIVE_KEYS: &[&str] = &[
@@ -110,9 +129,16 @@ const ALLOWED_KEYS: &[&str] = &[
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(get_settings))
-        .route("/{key}", put(set_setting))
         .route("/github", get(get_github_settings))
         .route("/github", delete(delete_github_settings))
+        .route("/github/test", post(test_github_connection))
+        .route("/oidc", delete(delete_oidc_settings))
+        .route("/oidc/test", post(test_oidc_connection))
+        .route("/tickets", delete(delete_ticket_settings))
+        .route("/jira/test", post(test_jira_connection))
+        .route("/linear/test", post(test_linear_connection))
+        // `/{key}` last so static segments win.
+        .route("/{key}", put(set_setting))
 }
 
 // ---------------------------------------------------------------------------
@@ -271,15 +297,18 @@ async fn set_setting(
         | "oidc_allow_unverified_email"
         | "oidc_allow_public_client"
         | "offline_mode" => parse_boolish(&body.value, &key)?,
-        "public_url" | "oidc_issuer" | "oidc_redirect_uri" | "jira_base_url"
-            if !body.value.trim().is_empty() =>
-        {
+        "public_url" | "oidc_redirect_uri" if !body.value.trim().is_empty() => {
             let v = body.value.trim();
             if !(v.starts_with("http://") || v.starts_with("https://")) {
                 return Err(ApiError::bad_request(format!(
                     "{key} must be an http(s) URL"
                 )));
             }
+        }
+        "oidc_issuer" | "jira_base_url" if !body.value.trim().is_empty() => {
+            crate::ssrf::validate_http_url_resolved(body.value.trim(), false)
+                .await
+                .map_err(ApiError::bad_request)?;
         }
         _ => {}
     }
@@ -362,5 +391,300 @@ async fn delete_github_settings(
     Ok(Json(json!({
         "status": "ok",
         "message": "Local GitHub App config cleared and repos marked inactive. This does not uninstall the App on GitHub. Remove it under GitHub Settings → Applications if needed."
+    })))
+}
+
+async fn clear_mirrored_keys(pool: &db::DbPool, keys: &[&str]) -> Result<(), ApiError> {
+    for key in keys {
+        db::config::delete_config(pool, key).await?;
+        db::config::apply_setting_to_env(key, "");
+    }
+    Ok(())
+}
+
+async fn config_or_env(pool: &db::DbPool, db_key: &str, env_key: &str) -> Option<String> {
+    if let Ok(Some(v)) = db::config::get_config(pool, db_key).await {
+        if !v.is_empty() {
+            return Some(v);
+        }
+    }
+    std::env::var(env_key).ok().filter(|v| !v.is_empty())
+}
+
+fn http_client(secs: u64) -> Result<reqwest::Client, ApiError> {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(secs))
+        .build()
+        .map_err(|e| ApiError::internal(format!("HTTP client: {e}")))
+}
+
+/// POST /api/settings/github/test — verify App JWT against GET /app.
+async fn test_github_connection(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    super::rbac::require_maintainer(&state, &headers).await?;
+
+    let cfg = crate::bot::current_bot_config();
+    let (app_id, private_key) = if let Some(c) = cfg {
+        (c.app_id, c.private_key)
+    } else {
+        let app_id = config_or_env(&state.pool, "github_app_id", "GITHUB_APP_ID")
+            .await
+            .ok_or_else(|| ApiError::bad_request("GitHub App is not configured"))?;
+        let private_key = db::config::get_config(&state.pool, "github_private_key")
+            .await
+            .ok()
+            .flatten()
+            .or_else(|| {
+                std::env::var("GITHUB_APP_PRIVATE_KEY").ok().or_else(|| {
+                    std::env::var("GITHUB_APP_PRIVATE_KEY_B64")
+                        .ok()
+                        .and_then(|b64| {
+                            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64)
+                                .ok()
+                                .and_then(|bytes| String::from_utf8(bytes).ok())
+                        })
+                })
+            })
+            .ok_or_else(|| ApiError::bad_request("GitHub App private key is not configured"))?;
+        (app_id, private_key)
+    };
+
+    let token = github_jwt::create_app_jwt(&app_id, &private_key)
+        .map_err(|e| ApiError::bad_request(format!("Invalid GitHub App credentials: {e}")))?;
+
+    let client = http_client(10)?;
+    let resp = client
+        .get("https://api.github.com/app")
+        .header("Authorization", format!("Bearer {token}"))
+        .header("User-Agent", "codasaurus")
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("GitHub API request failed: {e}")))?;
+
+    if !resp.status().is_success() {
+        return Err(ApiError::bad_request(format!(
+            "GitHub rejected App credentials (HTTP {})",
+            resp.status()
+        )));
+    }
+
+    let body: serde_json::Value = resp.json().await.unwrap_or(json!({}));
+    let name = body["name"].as_str().unwrap_or("GitHub App");
+    Ok(Json(json!({
+        "status": "ok",
+        "ok": true,
+        "message": format!("Connected as {name}"),
+        "app_id": app_id,
+        "app_name": name,
+    })))
+}
+
+/// DELETE /api/settings/oidc — clear SSO config from DB + process env.
+async fn delete_oidc_settings(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let actor = super::rbac::require_owner(&state, &headers).await?;
+    clear_mirrored_keys(&state.pool, OIDC_KEYS).await?;
+    db::audit::log_event(
+        &state.pool,
+        "oidc.config_cleared",
+        Some(&actor.email),
+        Some("oidc"),
+        None,
+    )
+    .await;
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "SSO (OIDC) configuration cleared.",
+    })))
+}
+
+/// POST /api/settings/oidc/test — fetch OpenID discovery document.
+async fn test_oidc_connection(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    super::rbac::require_maintainer(&state, &headers).await?;
+
+    let issuer = config_or_env(&state.pool, "oidc_issuer", "OIDC_ISSUER")
+        .await
+        .ok_or_else(|| ApiError::bad_request("OIDC issuer is not configured"))?;
+    let issuer = issuer.trim().trim_end_matches('/').to_string();
+    crate::ssrf::validate_http_url_resolved(&issuer, false)
+        .await
+        .map_err(ApiError::bad_request)?;
+
+    let discovery_url = format!("{issuer}/.well-known/openid-configuration");
+    let client = http_client(10)?;
+    let resp = client
+        .get(&discovery_url)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("OIDC discovery request failed: {e}")))?;
+
+    if !resp.status().is_success() {
+        return Err(ApiError::bad_request(format!(
+            "OIDC discovery failed (HTTP {})",
+            resp.status()
+        )));
+    }
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("Invalid OIDC discovery JSON: {e}")))?;
+
+    let auth = body["authorization_endpoint"].as_str().unwrap_or("");
+    let token = body["token_endpoint"].as_str().unwrap_or("");
+    if auth.is_empty() || token.is_empty() {
+        return Err(ApiError::bad_request(
+            "OIDC discovery missing authorization_endpoint or token_endpoint",
+        ));
+    }
+
+    Ok(Json(json!({
+        "status": "ok",
+        "ok": true,
+        "message": "OIDC discovery succeeded",
+        "issuer": issuer,
+        "authorization_endpoint": auth,
+        "token_endpoint": token,
+    })))
+}
+
+/// DELETE /api/settings/tickets — clear Jira + Linear config.
+async fn delete_ticket_settings(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let actor = super::rbac::require_owner(&state, &headers).await?;
+    clear_mirrored_keys(&state.pool, TICKET_KEYS).await?;
+    db::audit::log_event(
+        &state.pool,
+        "tickets.config_cleared",
+        Some(&actor.email),
+        Some("tickets"),
+        None,
+    )
+    .await;
+    Ok(Json(json!({
+        "status": "ok",
+        "message": "Jira and Linear configuration cleared.",
+    })))
+}
+
+/// POST /api/settings/jira/test — GET /rest/api/3/myself.
+async fn test_jira_connection(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    super::rbac::require_maintainer(&state, &headers).await?;
+
+    let base = config_or_env(&state.pool, "jira_base_url", "JIRA_BASE_URL")
+        .await
+        .ok_or_else(|| ApiError::bad_request("Jira base URL is not configured"))?;
+    let email = config_or_env(&state.pool, "jira_email", "JIRA_EMAIL")
+        .await
+        .ok_or_else(|| ApiError::bad_request("Jira email is not configured"))?;
+    let token = config_or_env(&state.pool, "jira_api_token", "JIRA_API_TOKEN")
+        .await
+        .ok_or_else(|| ApiError::bad_request("Jira API token is not configured"))?;
+
+    let base = base.trim().trim_end_matches('/');
+    crate::ssrf::validate_http_url_resolved(base, false)
+        .await
+        .map_err(ApiError::bad_request)?;
+
+    let url = format!("{base}/rest/api/3/myself");
+    let client = http_client(10)?;
+    let resp = client
+        .get(&url)
+        .basic_auth(&email, Some(&token))
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("Jira request failed: {e}")))?;
+
+    if !resp.status().is_success() {
+        return Err(ApiError::bad_request(format!(
+            "Jira rejected credentials (HTTP {})",
+            resp.status()
+        )));
+    }
+
+    let body: serde_json::Value = resp.json().await.unwrap_or(json!({}));
+    let display = body["displayName"]
+        .as_str()
+        .or_else(|| body["emailAddress"].as_str())
+        .unwrap_or("Jira user");
+
+    Ok(Json(json!({
+        "status": "ok",
+        "ok": true,
+        "message": format!("Connected as {display}"),
+    })))
+}
+
+/// POST /api/settings/linear/test — GraphQL viewer query.
+async fn test_linear_connection(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    super::rbac::require_maintainer(&state, &headers).await?;
+
+    let api_key = config_or_env(&state.pool, "linear_api_key", "LINEAR_API_KEY")
+        .await
+        .ok_or_else(|| ApiError::bad_request("Linear API key is not configured"))?;
+
+    let client = http_client(10)?;
+    let query = json!({ "query": "{ viewer { id name email } }" });
+    let resp = client
+        .post("https://api.linear.app/graphql")
+        .header("Authorization", api_key.as_str())
+        .header("Content-Type", "application/json")
+        .json(&query)
+        .send()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("Linear request failed: {e}")))?;
+
+    if !resp.status().is_success() {
+        return Err(ApiError::bad_request(format!(
+            "Linear rejected credentials (HTTP {})",
+            resp.status()
+        )));
+    }
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("Invalid Linear response: {e}")))?;
+
+    if body.get("errors").is_some() {
+        let msg = body["errors"][0]["message"]
+            .as_str()
+            .unwrap_or("GraphQL error");
+        return Err(ApiError::bad_request(format!("Linear API error: {msg}")));
+    }
+
+    let viewer = &body["data"]["viewer"];
+    if viewer.is_null() {
+        return Err(ApiError::bad_request(
+            "Linear API returned no viewer (check API key)",
+        ));
+    }
+    let name = viewer["name"]
+        .as_str()
+        .or_else(|| viewer["email"].as_str())
+        .unwrap_or("Linear user");
+
+    Ok(Json(json!({
+        "status": "ok",
+        "ok": true,
+        "message": format!("Connected as {name}"),
     })))
 }

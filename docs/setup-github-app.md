@@ -19,7 +19,7 @@ Codasaurus reviews PRs as a **GitHub App**. Prefer the dashboard [onboarding wiz
 | Reactions     | Read                                       | 👎 / confused on finding comments → learn dismiss |
 | Metadata      | Read                                       | Required baseline                                 |
 
-**Subscribe to events:** `Pull request` · `Issue comment` · `Reaction`
+**Subscribe to events:** `Pull request` · `Issue comment` · `Reaction` · `Installation` · `Installation repositories`
 
 Webhook URL: `https://<your-host>/webhook` (trailing slash is also accepted).
 Generate a secret: `openssl rand -hex 32`.
@@ -33,19 +33,19 @@ Logo (optional): upload [`assets/logo.png`](../assets/logo.png).
 3. Confirm → GitHub redirects to `/api/setup/github/callback` with a one-time `code`.
 4. Codasaurus exchanges the code, stores App ID / PEM / webhook secret / slug, and returns you to the wizard.
 
-`PUBLIC_URL` (or the request Host) must match the URL GitHub can reach for webhooks and callbacks.
+`PUBLIC_URL` (or the request Host) must match the URL GitHub can reach for webhooks and callbacks. The manifest sets the callback to `/api/setup/github/callback` (App creation), not a user OAuth login endpoint.
 
 ## Manual credentials
 
 **Settings → Developer settings → GitHub Apps → New GitHub App**, then set:
 
-| Field          | Value                                                             |
-| -------------- | ----------------------------------------------------------------- |
-| Name           | `codasaurus` (or yours)                                           |
-| Homepage       | your deployment URL                                               |
-| Webhook URL    | `https://<host>/webhook`                                          |
-| Webhook secret | from `openssl rand -hex 32`                                       |
-| Callback URL   | `https://<host>/api/auth/github/callback` (if using GitHub login) |
+| Field          | Value                                       |
+| -------------- | ------------------------------------------- |
+| Name           | `codasaurus` (or yours)                     |
+| Homepage       | your deployment URL                         |
+| Webhook URL    | `https://<host>/webhook`                    |
+| Webhook secret | from `openssl rand -hex 32`                 |
+| Callback URL   | `https://<host>/api/setup/github/callback`  |
 
 Generate a **private key** (`.pem`). Never commit it.
 
@@ -77,6 +77,8 @@ curl -s http://localhost:3000/health
 ```
 
 Expect `"status":"ok"` and an `egress_profile`. Open a PR on an installed repo. Codasaurus should post a review within the webhook delivery window.
+
+In the dashboard, **Settings → Connections → GitHub App → Test connection** calls `GET /app` with your App JWT to confirm credentials without opening a PR.
 
 ### Common failures
 

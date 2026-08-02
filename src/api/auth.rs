@@ -349,9 +349,7 @@ async fn oidc_callback(
         {
             Some(u) => u,
             None => {
-                let open_join = std::env::var("OIDC_ALLOW_OPEN_JOIN")
-                    .ok()
-                    .is_some_and(|v| v == "1");
+                let open_join = crate::util::env_flag("OIDC_ALLOW_OPEN_JOIN");
                 if open_join {
                     db::users::upsert_oidc_user(&state.pool, &email, "viewer")
                         .await

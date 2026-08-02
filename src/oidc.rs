@@ -60,13 +60,10 @@ impl OidcConfig {
     }
 
     fn require_client_secret(&self) -> Result<()> {
-        if self.client_secret.is_empty() {
-            let allow = std::env::var("OIDC_ALLOW_PUBLIC_CLIENT")
-                .ok()
-                .is_some_and(|v| v == "1");
-            if !allow {
-                bail!("OIDC_CLIENT_SECRET is required unless OIDC_ALLOW_PUBLIC_CLIENT=1");
-            }
+        if self.client_secret.is_empty() && !crate::util::env_flag("OIDC_ALLOW_PUBLIC_CLIENT") {
+            bail!(
+                "OIDC_CLIENT_SECRET is required unless OIDC_ALLOW_PUBLIC_CLIENT=1 (or true/yes/on)"
+            );
         }
         Ok(())
     }
@@ -233,15 +230,10 @@ fn email_from_claims(claims: &IdClaims) -> Result<String> {
     if claims.email_verified == Some(false) {
         bail!("OIDC email_verified claim is false");
     }
-    if claims.email_verified.is_none() {
-        let allow = std::env::var("OIDC_ALLOW_UNVERIFIED_EMAIL")
-            .ok()
-            .is_some_and(|v| v == "1");
-        if !allow {
-            bail!(
-                "OIDC token missing email_verified claim; set OIDC_ALLOW_UNVERIFIED_EMAIL=1 to allow"
-            );
-        }
+    if claims.email_verified.is_none() && !crate::util::env_flag("OIDC_ALLOW_UNVERIFIED_EMAIL") {
+        bail!(
+            "OIDC token missing email_verified claim; set OIDC_ALLOW_UNVERIFIED_EMAIL=1 (or true/yes/on) to allow"
+        );
     }
     if let Some(email) = claims.email.as_deref().filter(|e| !e.is_empty()) {
         return Ok(email.to_string());

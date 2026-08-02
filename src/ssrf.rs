@@ -63,6 +63,16 @@ pub async fn validate_llm_base_url_resolved(raw: &str, allow_loopback: bool) -> 
     resolve_and_check_host(raw, allow_loopback).await
 }
 
+/// Alias for non-LLM HTTP(S) integrations (Jira base URL, etc.).
+pub fn validate_http_url(raw: &str, allow_loopback: bool) -> Result<(), String> {
+    validate_llm_base_url(raw, allow_loopback)
+}
+
+/// Alias for non-LLM HTTP(S) integrations with DNS rebinding checks.
+pub async fn validate_http_url_resolved(raw: &str, allow_loopback: bool) -> Result<(), String> {
+    validate_llm_base_url_resolved(raw, allow_loopback).await
+}
+
 /// Validate a user-supplied Postgres URL before connecting (setup wizard).
 ///
 /// Allows only `postgres` / `postgresql` schemes. Loopback (`localhost`,

@@ -22,11 +22,13 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 
 ### Added
 
-- Nothing yet.
+- Settings → Connections: **Test connection** for GitHub App, OIDC discovery, Jira, and Linear; **Clear** for SSO and ticket credentials.
+- GitHub App manifest now requests `installation` and `installation_repositories` events so installs sync without a manual Sync.
 
 ### Changed
 
-- Nothing yet.
+- Jira / Linear ticket context is taken from the PR **title and body**; Linear issues resolve via `issue(id:)` (supports bare `ENG-123` when Linear is configured).
+- Jira Cloud ADF descriptions are flattened into text for review context.
 
 ### Deprecated
 
@@ -38,11 +40,12 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 
 ### Fixed
 
-- Nothing yet.
+- OIDC allow-flags from the dashboard (`true`/`false`) were ignored at runtime (only `1` was accepted).
+- GitHub App manifest `callback_urls` pointed at a non-existent GitHub user-OAuth callback; they now match the setup callback.
 
 ### Security
 
-- Nothing yet.
+- Jira base URL and OIDC issuer are validated with the existing SSRF guards (including DNS checks) before save or outbound fetch.
 
 ---
 
