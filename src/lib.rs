@@ -1,4 +1,5 @@
 pub mod api;
+pub mod baseline;
 pub mod bot;
 pub mod bot_runtime;
 pub mod config;
@@ -6,6 +7,7 @@ pub mod context;
 pub mod db;
 pub mod dep_parser;
 pub mod detectors;
+pub mod gates;
 pub mod github_jwt;
 pub mod graph;
 pub mod learning;

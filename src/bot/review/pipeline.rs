@@ -273,6 +273,27 @@ pub async fn review_pr_with_options(
         return Ok(());
     }
 
+    if let Some(pool) = pool {
+        if let Err(e) = crate::baseline::clear_pr_diff_lines(pool, repo_name, pr_number).await {
+            tracing::warn!(error = %e, "clear pr_diff_lines failed");
+        }
+        for file in &files {
+            let path = file["filename"].as_str().unwrap_or("");
+            let patch = file["patch"].as_str().unwrap_or("");
+            let changed = crate::baseline::parse_patch_changed_lines(patch);
+            if changed.is_empty() {
+                continue;
+            }
+            if let Err(e) =
+                crate::baseline::save_pr_diff_lines(pool, repo_name, pr_number, path, &changed)
+                    .await
+            {
+                tracing::warn!(error = %e, "save pr_diff_lines failed");
+                break;
+            }
+        }
+    }
+
     let changed_paths: Vec<String> = files
         .iter()
         .filter_map(|f| f["filename"].as_str().map(String::from))
@@ -657,6 +678,41 @@ pub async fn review_pr_with_options(
     // Surface highest-signal findings only; policy detector ranks near secrets.
     crate::bot::apply_signal_budget(&mut findings.findings, &budget);
 
+    if let Some(pool) = pool {
+        match crate::baseline::filter_new_code_findings(
+            pool,
+            repo_name,
+            pr_number,
+            &findings.findings,
+        )
+        .await
+        {
+            Ok(filtered) => findings.findings = filtered,
+            Err(e) => tracing::warn!(error = %e, "baseline filter failed; keeping all findings"),
+        }
+    }
+
+    let mut gate = crate::gates::QualityGate::from(config.quality_gate.clone());
+    if let Some(raw) = repo_config_json.as_deref() {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) {
+            if let Some(gj) = value.get("quality_gate") {
+                if let Ok(cfg) =
+                    serde_json::from_value::<crate::config::QualityGateConfig>(gj.clone())
+                {
+                    gate = cfg.into();
+                }
+            }
+        }
+    }
+    let gate_result = crate::gates::evaluate_gate(&gate, &findings.findings);
+    tracing::info!(
+        repo = repo_name,
+        pr = pr_number,
+        gate_passed = gate_result.passed,
+        gate = %gate.name,
+        "quality gate evaluated"
+    );
+
     let blast_report =
         crate::bot::blast::estimate_blast_radius(&parsed_files_collected, &changed_paths);
     let blast_md = crate::bot::blast::blast_markdown(&blast_report);
@@ -889,8 +945,8 @@ pub async fn review_pr_with_options(
                 repo_name,
                 head_sha,
                 &findings.findings,
-                false,
                 &dep_delta_md,
+                Some((&gate_result, config.quality_gate.block_on_fail)),
             )
             .await
             {
@@ -1069,8 +1125,8 @@ pub async fn review_pr_with_options(
             repo_name,
             head_sha,
             &findings.findings,
-            has_blocking,
             &dep_delta_md,
+            Some((&gate_result, config.quality_gate.block_on_fail)),
         )
         .await
         {

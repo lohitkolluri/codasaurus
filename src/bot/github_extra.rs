@@ -131,14 +131,15 @@ fn annotation_level(severity: &str) -> &'static str {
 
 /// Create a completed Check Run with annotations mirroring findings.
 /// `summary_extra` is appended (e.g. dependency delta markdown); pass `""` if none.
+/// `gate` carries the quality-gate result and whether a failed gate blocks.
 pub async fn create_findings_check_run(
     client: &reqwest::Client,
     headers: &HeaderMap,
     repo: &str,
     head_sha: &str,
     findings: &[Finding],
-    has_blocking: bool,
     summary_extra: &str,
+    gate: Option<(&crate::gates::GateResult, bool)>,
 ) -> Result<()> {
     if head_sha.is_empty() {
         return Ok(());
@@ -160,7 +161,9 @@ pub async fn create_findings_check_run(
     let blocking = findings.iter().filter(|f| f.severity == "blocking").count();
     let warning = findings.iter().filter(|f| f.severity == "warning").count();
     let info = findings.iter().filter(|f| f.severity == "info").count();
-    let conclusion = if has_blocking || blocking > 0 {
+    let gate_failed = gate.is_some_and(|(g, _)| !g.passed);
+    let gate_block_on_fail = gate.is_some_and(|(_, b)| b);
+    let conclusion = if (gate_failed && gate_block_on_fail) || blocking > 0 {
         "action_required"
     } else if warning > 0 {
         "neutral"
@@ -173,6 +176,11 @@ pub async fn create_findings_check_run(
          **{blocking}** blocking · {warning} warning · {info} info\n\n\
          Inline review comments and walkthrough are on the PR."
     );
+    if let Some((g, _)) = gate {
+        let gs: String = crate::gates::gate_summary(g).chars().take(4_000).collect();
+        summary.push_str("\n\n---\n\n");
+        summary.push_str(&gs);
+    }
     if !summary_extra.trim().is_empty() {
         // GitHub check-run summary soft limit ~64KB; keep appendix short.
         let extra: String = summary_extra.chars().take(4_000).collect();
