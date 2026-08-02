@@ -153,7 +153,7 @@ fn mask_if_sensitive(key: &str, value: String) -> String {
     }
 }
 
-/// GET /api/v1/settings
+/// GET /api/settings
 async fn get_settings(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -221,7 +221,7 @@ fn parse_boolish(value: &str, key: &str) -> Result<(), ApiError> {
     }
 }
 
-/// PUT /api/v1/settings/:key
+/// PUT /api/settings/:key
 async fn set_setting(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -233,12 +233,31 @@ async fn set_setting(
         return Err(ApiError::bad_request(format!("Unknown setting: {key}")));
     }
     // Don't persist the masked placeholder from GET /settings.
-    if SENSITIVE_KEYS.contains(&key.as_str())
-        && (body.value.is_empty() || body.value.contains('•') || body.value.contains('*'))
-    {
-        return Ok(Json(
-            json!({ "status": "ok", "key": key, "skipped": "unchanged" }),
-        ));
+    // Empty `metrics_token` clears the token; other secrets keep prior values when blank.
+    if SENSITIVE_KEYS.contains(&key.as_str()) {
+        if body.value.contains('•') || body.value.contains('*') {
+            return Ok(Json(
+                json!({ "status": "ok", "key": key, "skipped": "unchanged" }),
+            ));
+        }
+        if body.value.is_empty() {
+            if key == "metrics_token" {
+                db::config::delete_config(&state.pool, &key).await?;
+                db::config::apply_setting_to_env(&key, "");
+                db::audit::log_event(
+                    &state.pool,
+                    "settings.updated",
+                    Some(&actor.email),
+                    Some("setting"),
+                    None,
+                )
+                .await;
+                return Ok(Json(json!({ "status": "ok", "key": key, "cleared": true })));
+            }
+            return Ok(Json(
+                json!({ "status": "ok", "key": key, "skipped": "unchanged" }),
+            ));
+        }
     }
     if key == "review_strictness" {
         let v = body.value.trim().to_ascii_lowercase();
@@ -436,17 +455,8 @@ async fn test_github_connection(
             .await
             .ok()
             .flatten()
-            .or_else(|| {
-                std::env::var("GITHUB_APP_PRIVATE_KEY").ok().or_else(|| {
-                    std::env::var("GITHUB_APP_PRIVATE_KEY_B64")
-                        .ok()
-                        .and_then(|b64| {
-                            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64)
-                                .ok()
-                                .and_then(|bytes| String::from_utf8(bytes).ok())
-                        })
-                })
-            })
+            .filter(|k| !k.trim().is_empty())
+            .or_else(crate::github_jwt::resolve_private_key_from_env)
             .ok_or_else(|| ApiError::bad_request("GitHub App private key is not configured"))?;
         (app_id, private_key)
     };

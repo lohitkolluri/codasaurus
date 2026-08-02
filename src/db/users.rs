@@ -193,15 +193,16 @@ pub async fn delete_user(pool: &DbPool, id: i64) -> Result<bool, sqlx::Error> {
     Ok(n > 0)
 }
 
-pub async fn set_password(pool: &DbPool, email: &str, password: &str) -> Result<(), sqlx::Error> {
+/// Set password for `email`. Returns `true` if a row was updated.
+pub async fn set_password(pool: &DbPool, email: &str, password: &str) -> Result<bool, sqlx::Error> {
     let password_hash = hash_password(password)?;
-    db_execute!(
+    let n = db_execute!(
         pool,
         "UPDATE users SET password_hash = ?, auth_provider = 'local' WHERE email = ?",
         &password_hash,
         email
     )?;
-    Ok(())
+    Ok(n > 0)
 }
 
 pub async fn delete_sessions_for_email(pool: &DbPool, email: &str) -> Result<(), sqlx::Error> {

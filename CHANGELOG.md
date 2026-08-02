@@ -22,6 +22,8 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 
 ### Added
 
+- CLI `codasaurus reset-password --email … --password …` for emergency local dashboard recovery (no email flow).
+- Repository detail: **Remove from Codasaurus** (cascades local review history; does not uninstall the GitHub App).
 - Settings → Connections: **Test connection** for GitHub App, OIDC discovery, Jira, and Linear; **Clear** for SSO and ticket credentials.
 - GitHub App manifest now requests `installation` and `installation_repositories` events so installs sync without a manual Sync.
 - PR review comments use shields.io verdict / severity badges and a structured walkthrough.
@@ -31,6 +33,9 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 
 ### Changed
 
+- Settings tabs sync to the URL (`/app/settings/llm|review|…`) so deep links stay accurate.
+- Agent-authored PR badge reasons are generic (no vendor product names in walkthrough copy).
+- `.env.example` documents the full dashboard ↔ env mirror set (timeouts, cookies, model cheap, etc.).
 - Jira / Linear ticket context is taken from the PR **title and body**; Linear issues resolve via `issue(id:)` (supports bare `ENG-123` when Linear is configured).
 - Jira Cloud ADF descriptions are flattened into text for review context.
 - Automatic reviews no longer post a duplicate “describe” comment (walkthrough stays on the review).
@@ -49,6 +54,10 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 
 ### Fixed
 
+- Docker image build failed: `.dockerignore` excluded `assets/logo.png` required by `include_bytes!` for `/branding/logo.png`.
+- Runtime GitHub App auth now accepts raw `GITHUB_APP_PRIVATE_KEY` everywhere (not only `*_B64`).
+- Hallucinated-import suggestions link to real registry URLs (npmjs / PyPI / crates.io).
+- Blank metrics token on save clears `/metrics` auth; insecure/secure cookie flags stay consistent.
 - OIDC allow-flags from the dashboard (`true`/`false`) were ignored at runtime (only `1` was accepted).
 - GitHub App manifest `callback_urls` pointed at a non-existent GitHub user-OAuth callback; they now match the setup callback.
 - Dashboard / Stats pass-rate queries failed on Postgres (`NUMERIC` vs `FLOAT8`) — cast `AVG` to `float8`.
@@ -105,7 +114,7 @@ First public release of Codasaurus: a self-hosted GitHub App that reviews pull r
 
 - Release binary targets `x86_64-unknown-linux-gnu` only (macOS / Windows / GHCR image deferred)
 - No crates.io publish in the release workflow yet
-- Email password reset is not implemented; store the bootstrap owner password safely
+- Email password reset is not implemented; use `codasaurus reset-password` or store the bootstrap owner password safely
 
 ---
 

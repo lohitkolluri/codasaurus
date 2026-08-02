@@ -51,7 +51,7 @@ pub fn router() -> Router<AppState> {
 // Handlers
 // ---------------------------------------------------------------------------
 
-/// GET /api/v1/reviews
+/// GET /api/reviews
 async fn list_reviews(
     State(state): State<AppState>,
     Query(params): Query<ListReviewsParams>,
@@ -143,7 +143,7 @@ async fn count_reviews(
     Ok(count)
 }
 
-/// GET /api/v1/reviews/:id
+/// GET /api/reviews/:id
 async fn get_review(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -205,7 +205,7 @@ async fn get_review(
     })))
 }
 
-/// GET /api/v1/reviews/:id/findings
+/// GET /api/reviews/:id/findings
 async fn get_review_findings(
     State(state): State<AppState>,
     Path(id): Path<i64>,

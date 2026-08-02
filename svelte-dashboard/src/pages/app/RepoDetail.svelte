@@ -11,6 +11,8 @@
   let repo = $state(null);
   let loading = $state(true);
   let saving = $state(false);
+  let deleting = $state(false);
+  let confirmDelete = $state(false);
   let error = $state("");
   let saveMsg = $state("");
 
@@ -102,6 +104,22 @@
       saveMsg = err.message || "Save failed";
     } finally {
       saving = false;
+    }
+  }
+
+  async function handleDelete() {
+    const id = $params?.id;
+    if (!id) return;
+    deleting = true;
+    saveMsg = "";
+    try {
+      await api.delete(`/api/repos/${id}`);
+      push("/app/repos");
+    } catch (err) {
+      saveMsg = err.message || "Delete failed";
+      confirmDelete = false;
+    } finally {
+      deleting = false;
     }
   }
 </script>
@@ -220,13 +238,26 @@
     </div>
 
     <div class="actions">
-      <button class="primary" onclick={handleSave} disabled={saving}>
+      <button class="primary" onclick={handleSave} disabled={saving || deleting}>
         {saving ? "Saving…" : "Save Changes"}
       </button>
+      {#if !confirmDelete}
+        <button class="danger" type="button" onclick={() => (confirmDelete = true)} disabled={deleting}>
+          Remove from Codasaurus
+        </button>
+      {:else}
+        <button class="danger" type="button" onclick={handleDelete} disabled={deleting}>
+          {deleting ? "Removing…" : "Confirm remove"}
+        </button>
+        <button type="button" onclick={() => (confirmDelete = false)} disabled={deleting}>Cancel</button>
+      {/if}
       {#if saveMsg}
         <span class="toast" class:success={saveMsg === 'Saved'}>{saveMsg}</span>
       {/if}
     </div>
+    <p class="delete-note">
+      Removes this repo and its local review history from Codasaurus. Does not uninstall the GitHub App.
+    </p>
   {/if}
 </AppShell>
 
@@ -326,6 +357,12 @@
     align-items: center;
     gap: 12px;
     font-size: 14px;
+  }
+  .delete-note {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: 8px 0 0;
+    max-width: 36rem;
   }
   .actions {
     display: flex;

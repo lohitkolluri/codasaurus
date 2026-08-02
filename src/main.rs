@@ -1,10 +1,12 @@
 //! Codasaurus — self-hosted GitHub App PR review agent.
 //!
-//! Binary commands: `serve`, `health`, `version`.
+//! Binary commands: `serve`, `health`, `version`, `reset-password`.
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use codasaurus::bot;
+use codasaurus::db;
+use codasaurus::github_jwt;
 use codasaurus::serve;
 
 #[derive(Parser)]
@@ -46,6 +48,17 @@ enum Commands {
         #[arg(long)]
         ready: bool,
     },
+
+    /// Reset a local dashboard user's password (emergency recovery; no email flow)
+    ResetPassword {
+        /// Account email
+        #[arg(long)]
+        email: String,
+
+        /// New password (min 10 characters)
+        #[arg(long)]
+        password: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -73,30 +86,51 @@ fn main() -> Result<()> {
                 _ => "postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus".into(),
             };
 
-            let bot_config =
-                std::env::var("GITHUB_APP_ID")
-                    .ok()
-                    .and_then(|_| match resolve_private_key() {
-                        Ok(key) => Some(bot::BotConfig {
-                            app_id: std::env::var("GITHUB_APP_ID").unwrap(),
-                            private_key: key,
-                            webhook_secret: std::env::var("GITHUB_WEBHOOK_SECRET")
-                                .unwrap_or_default(),
-                            host: host.clone(),
-                            port,
-                        }),
-                        Err(e) => {
-                            eprintln!("  Warning: GITHUB_APP_ID set but private key missing: {e}");
-                            eprintln!("  Running in dashboard-only mode (no GitHub bot)");
-                            None
-                        }
-                    });
+            let bot_config = std::env::var("GITHUB_APP_ID").ok().and_then(|_| {
+                match github_jwt::require_private_key_from_env() {
+                    Ok(key) => Some(bot::BotConfig {
+                        app_id: std::env::var("GITHUB_APP_ID").unwrap(),
+                        private_key: key,
+                        webhook_secret: std::env::var("GITHUB_WEBHOOK_SECRET").unwrap_or_default(),
+                        host: host.clone(),
+                        port,
+                    }),
+                    Err(e) => {
+                        eprintln!("  Warning: GITHUB_APP_ID set but private key missing: {e}");
+                        eprintln!("  Running in dashboard-only mode (no GitHub bot)");
+                        None
+                    }
+                }
+            });
 
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(serve::serve(host, port, &database_url, bot_config))?;
         }
         Commands::Version => {
             println!("codasaurus v{}", env!("CARGO_PKG_VERSION"));
+        }
+        Commands::ResetPassword { email, password } => {
+            let email = email.trim().to_lowercase();
+            if email.is_empty() {
+                anyhow::bail!("--email is required");
+            }
+            if password.len() < 10 {
+                anyhow::bail!("--password must be at least 10 characters");
+            }
+            let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+                "postgres://codasaurus:codasaurus@127.0.0.1:5432/codasaurus".into()
+            });
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(async {
+                let pool = db::create_pool(&database_url).await?;
+                if !db::users::set_password(&pool, &email, password).await? {
+                    anyhow::bail!("no local user found for {email}");
+                }
+                let _ = db::users::delete_sessions_for_email(&pool, &email).await;
+                pool.close().await;
+                println!("Password reset for {email}. Existing sessions cleared.");
+                Ok::<(), anyhow::Error>(())
+            })?;
         }
         Commands::Health { port, host, ready } => {
             let port = port
@@ -127,21 +161,4 @@ fn main() -> Result<()> {
     }
 
     Ok(())
-}
-
-/// Resolve the GitHub App private key from environment.
-/// Tries GITHUB_APP_PRIVATE_KEY first (raw PEM), then GITHUB_APP_PRIVATE_KEY_B64
-/// (base64url-encoded, no special chars — safe for PaaS .env files).
-fn resolve_private_key() -> anyhow::Result<String> {
-    if let Ok(key) = std::env::var("GITHUB_APP_PRIVATE_KEY") {
-        return Ok(key);
-    }
-    let b64 = std::env::var("GITHUB_APP_PRIVATE_KEY_B64").map_err(|_| {
-        anyhow::anyhow!("GITHUB_APP_PRIVATE_KEY or GITHUB_APP_PRIVATE_KEY_B64 required")
-    })?;
-    use base64::Engine;
-    let decoded = base64::engine::general_purpose::STANDARD
-        .decode(b64.as_bytes())
-        .map_err(|e| anyhow::anyhow!("Invalid base64 key: {e}"))?;
-    String::from_utf8(decoded).map_err(|e| anyhow::anyhow!("Invalid UTF-8 in decoded key: {e}"))
 }

@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { location } from "svelte-spa-router";
+  import { location, push } from "svelte-spa-router";
   import { api } from "../../stores/api.js";
   import { currentUser, isOwner, isMaintainer, roleLabel } from "../../stores/auth.js";
   import AppShell from "../../lib/AppShell.svelte";
@@ -302,17 +302,45 @@
     setTimeout(() => (cheapModelDropdown = false), 150);
   }
 
+  function tabPath(id) {
+    switch (id) {
+      case "connections":
+        return "/app/settings/github";
+      case "system":
+        return "/app/settings/system";
+      case "learning":
+        return "/app/settings/learning";
+      case "review":
+        return "/app/settings/review";
+      case "account":
+        return "/app/settings/account";
+      default:
+        return "/app/settings/llm";
+    }
+  }
+
   function selectTab(id) {
     if (!TABS.some((t) => t.id === id)) return;
     activeTab = id;
+    const next = tabPath(id);
+    if (($location || "") !== next) push(next);
   }
 
   function applyDeepLink() {
     const loc = $location || "";
-    if (loc.includes("/settings/github")) activeTab = "connections";
-    else if (loc.includes("/settings/runtime") || loc.includes("/settings/system")) activeTab = "system";
-    else if (loc.includes("/settings/oidc") || loc.includes("/settings/auth")) activeTab = "connections";
-    else if (loc.includes("/settings/learning")) activeTab = "learning";
+    if (loc.includes("/settings/github") || loc.includes("/settings/oidc") || loc.includes("/settings/auth")) {
+      activeTab = "connections";
+    } else if (loc.includes("/settings/runtime") || loc.includes("/settings/system")) {
+      activeTab = "system";
+    } else if (loc.includes("/settings/learning")) {
+      activeTab = "learning";
+    } else if (loc.includes("/settings/review")) {
+      activeTab = "review";
+    } else if (loc.includes("/settings/account")) {
+      activeTab = "account";
+    } else if (loc.includes("/settings/llm") || loc.endsWith("/settings")) {
+      activeTab = "llm";
+    }
   }
 
   async function changePassword() {
@@ -342,7 +370,7 @@
         ]);
         github = gh;
         llmProvider = data.llm_provider ?? "openrouter";
-        llmKey = data.openrouter_api_key ?? data.llm_api_key ?? "";
+        llmKey = data.openrouter_api_key ?? "";
         llmModel = data.llm_model ?? "";
         llmModelCheap = data.llm_model_cheap ?? "";
         llmBaseUrl = data.llm_base_url ?? "";
@@ -410,6 +438,11 @@
         applyDeepLink();
       }
     })();
+  });
+
+  $effect(() => {
+    const _loc = $location;
+    if (!loading) applyDeepLink();
   });
 
   function boolVal(on) {
@@ -500,14 +533,12 @@
         ["auto_improve_max_diff", autoImproveMaxDiff],
         ["allow_local_llm", boolVal(allowLocalLlm)],
         ["insecure_cookies", boolVal(insecureCookies)],
+        // Server prefers secure_cookies; keep both flags consistent with the UI toggle.
+        ["secure_cookies", boolVal(!insecureCookies)],
       ];
-      // Secure cookies are checked before insecure on the server; clear when opting into HTTP.
-      if (insecureCookies) {
-        pairs.push(["secure_cookies", "false"]);
-      }
       const { failed, restart } = await putMany(pairs);
-      if (metricsToken && !metricsToken.includes("•") && !metricsToken.includes("*")) {
-        await api.put("/api/settings/metrics_token", { value: metricsToken });
+      if (!metricsToken.includes("•") && !metricsToken.includes("*")) {
+        await api.put("/api/settings/metrics_token", { value: metricsToken.trim() });
       }
       if (failed > 0) systemMsg = `Save failed (${failed} errors)`;
       else if (restart) systemMsg = "Saved. Restart the process to apply worker or concurrency changes.";
@@ -1372,6 +1403,7 @@
             <div class="form-group">
               <label for="metrics-token">Metrics bearer token</label>
               <input id="metrics-token" type="password" bind:value={metricsToken} placeholder="Blank disables /metrics" disabled={!canEditSettings} autocomplete="off" />
+              <p class="field-hint">Leave blank and save to clear the token and disable <code>/metrics</code>.</p>
             </div>
             <div class="toggle-stack">
               <div class="detector-row">

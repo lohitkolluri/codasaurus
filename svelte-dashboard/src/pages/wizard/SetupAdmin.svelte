@@ -52,7 +52,7 @@
   current="admin"
   {status}
   title="Create your admin login"
-  subtitle="This is the account that unlocks the dashboard. Store the password somewhere safe. There's no email reset yet."
+  subtitle="This is the account that unlocks the dashboard. Store the password somewhere safe. No email reset — use `codasaurus reset-password` if you lock yourself out."
 >
   {#if error}
     <div class="error-box">{error}</div>

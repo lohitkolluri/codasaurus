@@ -183,7 +183,7 @@ Do **not** enable `allow_auto_fix` in air-gap until Contents Write is granted an
 
 ## Weekly digest (dashboard)
 
-The Dashboard **Review analytics** panel rolls up the last 7 days from Postgres (`reviews`, `findings`, `dismissed_findings`). No Slack required — open the dashboard after a Render wake. On a PR you can also ask:
+The Dashboard **Review analytics** panel rolls up the last 7 days from Postgres (`reviews`, `findings`, `dismissed_findings`). Open the dashboard after a Render wake — no external notification channel required. On a PR you can also ask:
 
 ```text
 @codasaurus digest

@@ -45,7 +45,8 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                             "Package `{package}` not found on {registry_name}. This may be a hallucinated import."
                         ),
                         suggestion: Some(format!(
-                            "Verify the correct package name at https://www.{registry_name}.com/package/{package} before installing."
+                            "Verify the correct package name at {} before installing.",
+                            package_registry_url(registry_name, &package)
                         )),
                         codemod: None,
                         evidence: None,
@@ -63,15 +64,8 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                                 "Package `{package}` check skipped — registry lookup failed for {registry_name}."
                             ),
                             suggestion: Some(format!(
-                                "Could not verify `{}` on {}. Run `{} {}` manually to confirm.",
-                                package,
-                                registry_name,
-                                match registry_name {
-                                    "npm" => "npm view",
-                                    "pypi" => "pip install --dry-run",
-                                    _ => "check",
-                                },
-                                package
+                                "Could not verify `{package}` on {registry_name}. Run `{}` manually to confirm.",
+                                package_manual_check(registry_name, &package)
                             )),
                             evidence: None,
                             codemod: None,
@@ -83,6 +77,24 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     }
 
     findings
+}
+
+fn package_registry_url(registry: &str, package: &str) -> String {
+    match registry {
+        "npm" => format!("https://www.npmjs.com/package/{package}"),
+        "pypi" => format!("https://pypi.org/project/{package}/"),
+        "crates.io" => format!("https://crates.io/crates/{package}"),
+        other => format!("https://{other}/{package}"),
+    }
+}
+
+fn package_manual_check(registry: &str, package: &str) -> String {
+    match registry {
+        "npm" => format!("npm view {package}"),
+        "pypi" => format!("pip index versions {package}"),
+        "crates.io" => format!("cargo search {package} --limit 1"),
+        _ => format!("look up {package} on {registry}"),
+    }
 }
 
 static NPM_BUILTINS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
@@ -177,5 +189,18 @@ pub(crate) fn is_builtin(package: &str, registry: &str) -> bool {
                 || package.starts_with("proc_macro::")
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::*;
+
+    #[test]
+    fn registry_urls_are_real_hosts() {
+        assert!(package_registry_url("npm", "lodash").contains("npmjs.com"));
+        assert!(package_registry_url("pypi", "requests").contains("pypi.org"));
+        assert!(package_registry_url("crates.io", "serde").contains("crates.io/crates/"));
+        assert!(!package_registry_url("npm", "x").contains("www.npm.com"));
     }
 }

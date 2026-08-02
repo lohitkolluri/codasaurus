@@ -19,10 +19,13 @@ docker-compose.yml
 .omo/
 Makefile
 
-# Docs & assets (not needed at build time)
+# Docs (not needed at build time)
 *.md
 docs/
-assets/
+# Keep bundled brand mark for include_bytes! (`/branding/logo.png`); skip source SVGs only.
+assets/sources/
+assets/ATTRIBUTION.md
+assets/*.svg
 
 # Secrets
 .env

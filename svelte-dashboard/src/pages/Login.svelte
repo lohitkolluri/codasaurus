@@ -42,10 +42,10 @@
 </script>
 
 <div class="auth-matte">
-  <!-- Obys-style: pure black stage + bold type as atmosphere -->
+  <!-- Full-bleed dark stage + bold wordmark as atmosphere -->
   <div class="auth-matte-wordmark" aria-hidden="true">CODASAURUS</div>
 
-  <!-- Discord-style: elevated opaque card, welcome headline, clear form -->
+  <!-- Elevated opaque card: welcome headline + clear form -->
   <div class="auth-matte-panel">
     <header class="auth-matte-hero">
       <BrandMark size={32} />

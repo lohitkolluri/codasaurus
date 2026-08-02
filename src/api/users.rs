@@ -333,6 +333,8 @@ async fn change_my_password(
     if !ok {
         return Err(ApiError::unauthorized("Current password is incorrect"));
     }
-    db::users::set_password(&state.pool, &actor.email, &body.new_password).await?;
+    if !db::users::set_password(&state.pool, &actor.email, &body.new_password).await? {
+        return Err(ApiError::not_found("User not found"));
+    }
     Ok(Json(json!({ "status": "ok" })))
 }
