@@ -34,6 +34,11 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 
 ### Changed
 
+- LLM `review_diff` prompts use a scoped 5-part framework (role, priority scope, do-not-report noise list, confidence/severity rules, structured output) to cut style false positives.
+- Review JSON schema constrains `verdict` enum, requires `rationale` + `suggestion`, and caps issues at 8.
+- PR title/description/issues in LLM context are wrapped in `<<<UNTRUSTED_*>>>` markers; default LLM diff budget raised to 24k chars (aligned with auto-improve).
+- Finding filter order: slop + forbidden paths → severity floor → count caps → signal budget (policy no longer bypasses floors/budgets incorrectly).
+- Forbidden path matching is exact/prefix/basename only (no substring false positives).
 - Review walkthrough uses short prose + Changes list + effort line; findings only as inline comments (no table dump).
 - Walkthrough overview uses a stable HTML marker and themed badges; Mermaid change map only when 2+ path areas.
 - Inline findings use Impact / Action / Evidence (collapsed) instead of long free-form dumps.
@@ -46,7 +51,7 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - Repo settings: removed no-op “Auto-describe on open” (walkthrough already covers open/push).
 - Settings → System clarifies that Offline mode is a kill-switch (not tied to LLM keys) and shows when `CODASAURUS_OFFLINE` env forces it.
 - Settings tabs sync to the URL (`/app/settings/llm|review|…`) so deep links stay accurate.
-- Agent-authored PR badge reasons are generic (no vendor product names in walkthrough copy).
+- Softened third-party branding in comments and operator copy: competitor review-bot names removed; host/LLM references use generic terms where a specific vendor is not required for configuration.
 - `.env.example` documents the full dashboard ↔ env mirror set (timeouts, cookies, model cheap, etc.).
 - Jira / Linear ticket context is taken from the PR **title and body**; Linear issues resolve via `issue(id:)` (supports bare `ENG-123` when Linear is configured).
 - Jira Cloud ADF descriptions are flattened into text for review context.
@@ -56,16 +61,16 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - Mermaid change map always included in review walkthroughs (not gated on LLM).
 - GitHub App manifest includes a description; wizard documents manual icon upload (manifest cannot set logos).
 
-### Deprecated
-
-- Nothing yet.
-
 ### Removed
 
+- Dead `markdown::walkthrough_body` wrapper, retired `guidelines::detect` stub, and unused `Config::bot_policy` helper.
 - Placeholder “configure JIRA\_\*” linked-issue stubs from walkthroughs (only real tickets when integrations are configured).
 
 ### Fixed
 
+- Empty or fully-excluded PRs complete the SHA claim instead of leaving `in_progress` leases that skip later reviews.
+- Hard 8k second truncate in `build_review_prompt` no longer ignored larger `CODASAURUS_MAX_LLM_DIFF_CHARS` / auto-improve budgets.
+- Learning dismissals: short fingerprint prefixes require ≥12 chars and only match as a prefix of the finding fingerprint (no bidirectional collisions).
 - Walkthrough summary is always updated in place on new commits (issue-comment slot); PR Reviews only carry short bodies + inlines — no longer a full duplicate walkthrough per push.
 - Queue / SHA stale reclaim window tracks review timeout (+120s) so a second worker cannot steal a still-running job.
 - Same-SHA skip now posts a short status comment explaining how to force a re-run.

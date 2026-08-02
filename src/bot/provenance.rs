@@ -77,14 +77,14 @@ fn confidence_rank(conf: &str) -> u8 {
     }
 }
 
-/// Drop LLM issues that fail path/evidence/confidence gates (hallucination + HITL posture).
+/// Drop LLM issues that fail path / evidence / confidence gates before auto-post.
 ///
-/// Rules (Antern-style confidence gate, auto-post path):
+/// Keeps false positives out of PR threads:
 /// - unknown path → drop
-/// - `confidence=low` or missing → drop (never auto-post unsure findings)
-/// - empty/short description (no rationale) → drop
+/// - `confidence=low` or missing → drop
+/// - empty/short rationale → drop
 /// - non-info without a line citation → drop
-/// - `critical` + only `medium` confidence → downgrade severity to `warning`
+/// - `critical`/`blocking` at medium confidence → downgrade to `warning`
 pub fn reverify_llm_issues(
     issues: &[crate::llm::LlmIssue],
     known_paths: &[String],
@@ -125,30 +125,45 @@ pub fn reverify_llm_issues(
                 return None;
             }
 
-            // Weak content check when patch is available.
+            // Require lexical overlap with the patch so invented line citations are dropped.
             if let Some((_, content)) = file_contents
                 .iter()
                 .find(|(p, _)| path_matches(p, &issue.file))
             {
-                let needle = issue
+                let content_l = content.to_ascii_lowercase();
+                let tokens: Vec<&str> = issue
                     .description
                     .split_whitespace()
-                    .find(|w| w.len() >= 6)
-                    .unwrap_or("");
-                if !needle.is_empty()
-                    && !content
-                        .to_ascii_lowercase()
-                        .contains(&needle.to_ascii_lowercase())
-                    && issue.line == 0
-                {
-                    return None;
+                    .chain(
+                        issue
+                            .rationale
+                            .as_deref()
+                            .unwrap_or("")
+                            .split_whitespace(),
+                    )
+                    .filter(|w| w.len() >= 6)
+                    .take(8)
+                    .collect();
+                if !tokens.is_empty() {
+                    let any_hit = tokens.iter().any(|t| content_l.contains(&t.to_ascii_lowercase()));
+                    if !any_hit && (issue.line == 0 || sev == "critical") {
+                        tracing::debug!(
+                            file = %issue.file,
+                            "dropping LLM issue with no patch token overlap"
+                        );
+                        return None;
+                    }
                 }
             }
 
             let mut out = issue.clone();
-            // Critical claims need high confidence to stay critical when auto-posted.
-            if sev == "critical" && conf < 3 {
+            // Merge-blocking severity requires high confidence on the auto-post path.
+            // Normalize Tier-1 "blocking" into the LLM "critical" label for display.
+            if (sev == "critical" || sev == "blocking") && conf < 3 {
                 out.severity = "warning".into();
+            }
+            if sev == "blocking" && out.severity == "blocking" {
+                out.severity = "critical".into();
             }
             Some(out)
         })

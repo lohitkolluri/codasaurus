@@ -82,20 +82,25 @@ impl ReviewStrictness {
         }
     }
 
-    /// Appended to LLM custom instructions when present.
+    /// Tone overlay injected into LLM context (strictness → review personality).
     pub fn llm_tone_hint(self) -> &'static str {
         match self {
             Self::Lenient => {
-                "Review tone: lenient. Prefer only high-confidence, merge-blocking issues. Skip style and naming nits."
+                "Review tone: lenient. Emit ONLY high-confidence merge-blocking \
+                 issues (security/correctness). Skip style, naming, maintainability nits, and info. \
+                 Prefer empty issues over weak warnings."
             }
             Self::Balanced => {
-                "Review tone: balanced. Report clear bugs and risks; skip pure preference nits."
+                "Review tone: balanced. Report clear bugs and production risks. \
+                 Skip pure preference nits. Prefer fewer high-confidence findings."
             }
             Self::Strict => {
-                "Review tone: strict. Flag correctness, security, and maintainability issues thoroughly."
+                "Review tone: strict. Thoroughly flag correctness, security, API misuse, \
+                 and maintainability issues that could cause incidents. Still skip formatting/naming."
             }
             Self::Nitpick => {
-                "Review tone: nitpick. Also report style, naming, and small clarity issues when confident."
+                "Review tone: nitpick. Also report style, naming, and small clarity issues \
+                 when confident — but still prioritize security and logic first."
             }
         }
     }

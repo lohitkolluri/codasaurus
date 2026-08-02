@@ -248,6 +248,8 @@ pub async fn review_pr_with_options(
         })?;
     if files.is_empty() {
         tracing::info!(repo = repo_name, pr = pr_number, "no files in PR");
+        // Avoid leaving an in_progress lease that would skip later pushes.
+        complete_sha_claim(&state, repo_name, pr_number, head_sha).await;
         return Ok(());
     }
 
@@ -266,6 +268,7 @@ pub async fn review_pr_with_options(
             pr = pr_number,
             "all PR files excluded by patterns"
         );
+        complete_sha_claim(&state, repo_name, pr_number, head_sha).await;
         return Ok(());
     }
 
@@ -310,14 +313,15 @@ pub async fn review_pr_with_options(
         head_sha
     };
     let critical_paths: Vec<String> = if !low_signal_only {
+        let rich_paths: std::collections::HashSet<&str> = parsed_files_collected
+            .iter()
+            .filter(|p| p.raw_content.len() > 400)
+            .map(|p| p.path.as_str())
+            .collect();
         changed_paths
             .iter()
             .filter(|path| is_critical_full_file_path(path))
-            .filter(|path| {
-                !parsed_files_collected
-                    .iter()
-                    .any(|p| p.path == **path && p.raw_content.len() > 400)
-            })
+            .filter(|path| !rich_paths.contains(path.as_str()))
             .cloned()
             .collect()
     } else {
@@ -445,10 +449,14 @@ pub async fn review_pr_with_options(
         }
     }
     // Changed manifests skipped by bootstrap (already in the PR) still need a real base fetch.
+    let bootstrapped_paths: std::collections::HashSet<&str> =
+        bootstrapped.iter().map(|b| b.path.as_str()).collect();
+    let changed_set: std::collections::HashSet<&str> =
+        changed_paths.iter().map(String::as_str).collect();
     let base_fetch_paths: Vec<String> = head_manifests
         .keys()
-        .filter(|path| !bootstrapped.iter().any(|b| &b.path == *path))
-        .filter(|path| changed_paths.iter().any(|p| p == *path))
+        .filter(|path| !bootstrapped_paths.contains(path.as_str()))
+        .filter(|path| changed_set.contains(path.as_str()))
         .cloned()
         .collect();
     let base_contents = crate::bot::github_files::fetch_repo_files_parallel(
@@ -609,11 +617,7 @@ pub async fn review_pr_with_options(
         tracing::info!(n = related_prs.len(), "found related PRs");
     }
 
-    // Apply default_severity floor from dashboard settings
-    findings
-        .findings
-        .retain(|f| severity_at_least(f.severity, &policy.min_severity));
-
+    // Collect all detector output before floors/budgets so every finding is treated equally.
     let slop_findings = crate::detectors::slop::detect_slop(
         &parsed_files_collected,
         &pr_title,
@@ -621,6 +625,20 @@ pub async fn review_pr_with_options(
         &commit_messages,
     );
     findings.findings.extend(slop_findings);
+
+    // Forbidden-path hits must see pre-budget volume (count caps are meaningful only then).
+    findings
+        .findings
+        .extend(crate::bot::policy::forbidden_path_findings(
+            &changed_paths,
+            &policy_pack.forbidden_paths,
+        ));
+
+    findings
+        .findings
+        .retain(|f| severity_at_least(f.severity, &policy.min_severity));
+
+    crate::bot::policy::enforce_count_caps(&mut findings.findings, &policy_pack);
 
     let agent_signal =
         crate::bot::agent_mode::detect_agent_pr(&pr_title, &pr_body, &commit_messages, pr_author);
@@ -634,7 +652,7 @@ pub async fn review_pr_with_options(
         );
     }
 
-    // Org-scale: severity budgets + noise ranking (high-signal only).
+    // Surface highest-signal findings only; policy detector ranks near secrets.
     crate::bot::apply_signal_budget(&mut findings.findings, &budget);
 
     let blast_report =
@@ -653,15 +671,6 @@ pub async fn review_pr_with_options(
         .collect();
     let dep_delta_md = crate::bot::dep_delta::dep_delta_markdown(&dep_deltas, &vuln_pkgs);
     let agent_badge_owned = crate::bot::agent_mode::agent_badge(&agent_signal);
-
-    // Policy pack: forbidden paths + count caps.
-    findings
-        .findings
-        .extend(crate::bot::policy::forbidden_path_findings(
-            &changed_paths,
-            &policy_pack.forbidden_paths,
-        ));
-    crate::bot::policy::enforce_count_caps(&mut findings.findings, &policy_pack);
 
     // CODEOWNERS first, then history-based (deduped).
     for owner in remote_ctx.codeowner_reviewers.iter().rev() {
@@ -1035,8 +1044,26 @@ pub async fn review_pr_with_options(
         }
     }
 
-    // auto_describe intentionally unused: the walkthrough issue-comment slot already
-    // covers open/synchronize. `@codasaurus describe` posts a short LLM summary instead.
-
+    // Walkthrough already covers open/push; slash `describe` is the LLM path.
     Ok(())
+}
+
+/// Complete a claimed SHA so empty/excluded reviews do not strand leases.
+async fn complete_sha_claim(
+    state: &Option<ReviewState>,
+    repo_name: &str,
+    pr_number: i64,
+    head_sha: &str,
+) {
+    if head_sha.is_empty() {
+        return;
+    }
+    if let Some(ref s) = state {
+        if let Err(e) = s
+            .set_reviewed_sha_async(repo_name, pr_number, head_sha)
+            .await
+        {
+            tracing::warn!(error = %e, "failed to store reviewed SHA");
+        }
+    }
 }

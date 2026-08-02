@@ -5,10 +5,11 @@ use crate::bot::quality::SignalBudget;
 #[derive(Debug, Clone, Default)]
 pub struct AgentSignal {
     pub is_agent: bool,
+    /// Generic labels only — never echo third-party product names into PR copy.
     pub reasons: Vec<String>,
 }
 
-/// Heuristic detection of agent-authored PRs (common coding-agent trailers / markers).
+/// Heuristic detection of agent-authored PRs from trailers / markers in PR text.
 pub fn detect_agent_pr(
     pr_title: &str,
     pr_body: &str,
@@ -25,7 +26,7 @@ pub fn detect_agent_pr(
     )
     .to_ascii_lowercase();
 
-    // Match known agent fingerprints; surface generic reasons in PR copy (no vendor branding).
+    // Match substrings commonly left by coding agents; reasons stay brand-neutral.
     let markers = [
         ("co-authored-by: copilot", "AI co-author trailer"),
         ("co-authored-by: claude", "AI co-author trailer"),
@@ -98,7 +99,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detects_copilot_trailer() {
+    fn detects_ai_coauthor_trailer() {
         let s = detect_agent_pr(
             "feat",
             "body",

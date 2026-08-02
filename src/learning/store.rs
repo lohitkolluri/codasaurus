@@ -281,7 +281,7 @@ impl LearningStore {
                 &self.pool,
                 (String,),
                 "SELECT fingerprint FROM dismissed_findings
-                 WHERE length(fingerprint) BETWEEN 8 AND 63
+                 WHERE length(fingerprint) BETWEEN 12 AND 63
                    AND (repo_full_name IS NULL OR repo_full_name = '' OR repo_full_name = ?)",
                 repo
             )?
@@ -293,7 +293,7 @@ impl LearningStore {
                 &self.pool,
                 (String,),
                 "SELECT fingerprint FROM dismissed_findings
-                 WHERE length(fingerprint) BETWEEN 8 AND 63
+                 WHERE length(fingerprint) BETWEEN 12 AND 63
                    AND (repo_full_name IS NULL OR repo_full_name = '')"
             )?
             .into_iter()
@@ -308,10 +308,10 @@ impl LearningStore {
                 if dismissed_set.contains(&fp) {
                     return None;
                 }
-                if short_prefixes
-                    .iter()
-                    .any(|p| fp.starts_with(p.as_str()) || p.starts_with(fp.as_str()))
-                {
+                if short_prefixes.iter().any(|p| {
+                    // Prefix-of-fingerprint only; bidirectional match collided on short strings.
+                    p.len() >= 12 && fp.starts_with(p.as_str())
+                }) {
                     return None;
                 }
 

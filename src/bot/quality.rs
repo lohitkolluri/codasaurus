@@ -30,23 +30,29 @@ fn noise_rank(f: &Finding) -> u8 {
     };
     let detector = match f.detector.as_str() {
         "secrets" => 0,
-        "hallucinated-imports" => 1,
-        "phantom-deps" => 2,
-        "vulnerabilities" => 3,
-        "todo-leaks" => 4,
-        "stale-api" => 5,
-        "guidelines" => 6,
-        "slop" => 7,
-        "over-engineering" | "boilerplate" => 8,
-        "graph" => 9,
-        _ => 10,
+        "policy" => 1,
+        "hallucinated-imports" => 2,
+        "phantom-deps" => 3,
+        "vulnerabilities" => 4,
+        "todo-leaks" => 5,
+        "stale-api" => 6,
+        "guidelines" => 7,
+        "slop" => 8,
+        "over-engineering" | "boilerplate" => 9,
+        "graph" => 10,
+        _ => 11,
     };
     sev + detector
 }
 
-/// Keep high-signal findings only; preserves relative order within the same rank.
+/// Keep high-signal findings only; stable order within the same rank.
 pub fn apply_signal_budget(findings: &mut Vec<Finding>, budget: &SignalBudget) {
-    findings.sort_by_key(|f| (noise_rank(f), f.file.clone(), f.line));
+    findings.sort_by(|a, b| {
+        noise_rank(a)
+            .cmp(&noise_rank(b))
+            .then_with(|| a.file.as_str().cmp(b.file.as_str()))
+            .then_with(|| a.line.cmp(&b.line))
+    });
 
     let mut blocking = 0usize;
     let mut warning = 0usize;
