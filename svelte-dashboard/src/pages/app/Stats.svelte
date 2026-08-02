@@ -374,7 +374,7 @@
             {#if detectors.length > DETECTOR_PAGE}
               <div class="detector-page-meta">
                 <span>
-                  {detectors.length} detectors Â· page {detectorPageSafe} of {detectorPages}
+                  {detectors.length} detectors · page {detectorPageSafe} of {detectorPages}
                 </span>
                 <Pagination
                   page={detectorPageSafe}

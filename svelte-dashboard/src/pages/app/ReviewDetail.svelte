@@ -73,21 +73,19 @@
     detectorFilter = "all";
     try {
       const data = await api.get(`/api/reviews/${id}`);
-      // Ignore stale responses after rapid navigation.
-      if ($params?.id !== id) return;
       review = data.review ?? null;
       summary = data.summary ?? null;
       allFindings = data.findings ?? [];
       if (allFindings.length > 0) {
+        const first = files[0] ?? null;
         // files derived may lag one tick — pick from findings directly
         const path = allFindings[0]?.file_path ?? allFindings[0]?.file;
         if (path) selectedFile = path;
       }
     } catch (err) {
-      if ($params?.id !== id) return;
       error = err.message || "Failed to load review";
     } finally {
-      if ($params?.id === id) loading = false;
+      loading = false;
     }
   }
 
@@ -160,8 +158,6 @@
         detector: finding.detector,
         file: finding.file_path ?? finding.file,
         message: finding.message,
-        pr_number: review?.pr_number ?? null,
-        repo: review?.repo_full_name ?? null,
       });
       allFindings = allFindings.filter((f) => f.id !== finding.id);
       if (summary) {
@@ -343,7 +339,7 @@
               <p class="rd-muted">No findings match these filters.</p>
             {:else}
               <p class="rd-nav-hint rd-muted">
-                Open a line on GitHub before dismissing.
+                Open the line on GitHub to judge a dismiss — dashboard findings are summaries, not the full diff.
                 {#if githubPrFilesUrl()}
                   <a href={githubPrFilesUrl()} target="_blank" rel="noopener noreferrer">PR files ↗</a>
                 {/if}
@@ -364,12 +360,6 @@
                     {/if}
                     <SeverityBadge severity={finding.severity ?? "info"} />
                     <span class="rd-chip quiet">{finding.detector}</span>
-                    {#if finding.confidence != null}
-                      <span
-                        class="rd-chip conf conf-{finding.confidence}"
-                        title={finding.judge_rationale ? `Judge: ${finding.judge_rationale}` : `Confidence ${finding.confidence}/5`}
-                      >c{finding.confidence}</span>
-                    {/if}
                     {#if finding.fingerprint}
                       <span class="rd-mono rd-fp">{shortFp(finding)}</span>
                     {/if}
@@ -524,14 +514,6 @@
     background: transparent;
   }
 
-  .rd-chip.conf {
-    cursor: help;
-    font-variant-numeric: tabular-nums;
-  }
-  .rd-chip.conf-0, .rd-chip.conf-1 { color: var(--danger, #ef4444); border-color: color-mix(in srgb, var(--danger, #ef4444) 40%, var(--border)); }
-  .rd-chip.conf-2, .rd-chip.conf-3 { color: var(--warning, #f59e0b); border-color: color-mix(in srgb, var(--warning, #f59e0b) 40%, var(--border)); }
-  .rd-chip.conf-4, .rd-chip.conf-5 { color: var(--success, #22c55e); border-color: color-mix(in srgb, var(--success, #22c55e) 40%, var(--border)); }
-
   .rd-filters {
     margin: 0;
     align-items: end;
@@ -637,7 +619,6 @@
 
   .rd-dismiss {
     margin-left: auto;
-    flex-shrink: 0;
     font-size: 12px;
   }
 

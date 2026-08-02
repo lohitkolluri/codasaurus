@@ -656,7 +656,6 @@ fn write_agent_fix_prompt(body: &mut String, findings: &[Finding], pr_title: &st
     let _ = writeln!(
         body,
         "<details>\n<summary>Copy this into your AI coding agent</summary>\n\n\
-         Paste this prompt into Cursor, Copilot, or another coding agent:\n\n\
          ```text\n{prompt}\n```\n\n</details>\n"
     );
 }

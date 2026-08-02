@@ -3076,6 +3076,7 @@ body,
     background: var(--det-bar, var(--accent-soft));
     opacity: 0.9;
     min-width: 4px;
+<<<<<<< HEAD
 }
 
 .analytics-det-fill.tone-0 {
@@ -3101,7 +3102,18 @@ body,
 }
 .analytics-det-fill.tone-7 {
     --det-bar: #94a3b8;
+=======
+>>>>>>> origin/feat/guide-review-ux
 }
+
+.analytics-det-fill.tone-0 { --det-bar: var(--accent-soft); }
+.analytics-det-fill.tone-1 { --det-bar: var(--info); }
+.analytics-det-fill.tone-2 { --det-bar: var(--warning); }
+.analytics-det-fill.tone-3 { --det-bar: var(--success); }
+.analytics-det-fill.tone-4 { --det-bar: #a78bfa; }
+.analytics-det-fill.tone-5 { --det-bar: #22d3ee; }
+.analytics-det-fill.tone-6 { --det-bar: #fb7185; }
+.analytics-det-fill.tone-7 { --det-bar: #94a3b8; }
 
 .analytics-det-count {
     text-align: right;
