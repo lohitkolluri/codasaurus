@@ -479,6 +479,8 @@ async fn resolve_public_url(state: &AppState, headers: &axum::http::HeaderMap) -
 /// Build the GitHub App manifest JSON shared by the HTML page and JSON endpoints.
 fn build_manifest(public_url: &str) -> serde_json::Value {
     let suffix: String = uuid::Uuid::new_v4().to_string().chars().take(4).collect();
+    // Events must match handlers in `bot::handle_webhook`. Installation events keep
+    // the dashboard repo list in sync without a manual Sync after install.
     json!({
         "name": format!("codasaurus-{}", suffix),
         "url": public_url,
@@ -487,8 +489,9 @@ fn build_manifest(public_url: &str) -> serde_json::Value {
             "active": true
         },
         "redirect_url": format!("{}/api/setup/github/callback", public_url),
+        // Dashboard auth is password + OIDC only (no GitHub OAuth user login).
         "callback_urls": [
-            format!("{}/api/auth/github/callback", public_url)
+            format!("{}/api/setup/github/callback", public_url)
         ],
         "setup_url": format!("{}/#/setup/complete", public_url),
         "setup_on_update": true,
@@ -506,10 +509,9 @@ fn build_manifest(public_url: &str) -> serde_json::Value {
         "default_events": [
             "pull_request",
             "issue_comment",
-            "push",
-            "check_run",
-            "check_suite",
-            "reaction"
+            "reaction",
+            "installation",
+            "installation_repositories"
         ]
     })
 }
