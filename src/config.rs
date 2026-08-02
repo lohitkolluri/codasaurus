@@ -31,6 +31,14 @@ pub struct CheckConfig {
     #[serde(default = "default_true")]
     pub phantom_deps: bool,
 
+    /// Check for deps declared in a manifest but missing from the lockfile
+    #[serde(default = "default_true")]
+    pub lockfile_drift: bool,
+
+    /// Check for new dependencies with licenses that conflict with the repo
+    #[serde(default = "default_true")]
+    pub license_drift: bool,
+
     /// Check for known vulnerabilities via OSV.dev
     #[serde(default = "default_true")]
     pub vulnerabilities: bool,
@@ -168,6 +176,8 @@ impl Default for Config {
             checks: CheckConfig {
                 hallucinated_imports: true,
                 phantom_deps: true,
+                lockfile_drift: true,
+                license_drift: true,
                 vulnerabilities: true,
                 secrets: true,
                 over_engineering: true,
@@ -202,6 +212,8 @@ fn apply_enabled_flag(checks: &mut CheckConfig, key: &str, value: &str) {
     match key {
         "hallucinated_imports_enabled" => checks.hallucinated_imports = enabled,
         "phantom_deps_enabled" => checks.phantom_deps = enabled,
+        "lockfile_drift_enabled" => checks.lockfile_drift = enabled,
+        "license_drift_enabled" => checks.license_drift = enabled,
         "vulnerabilities_enabled" => checks.vulnerabilities = enabled,
         "secrets_enabled" => checks.secrets = enabled,
         "over_engineering_enabled" => checks.over_engineering = enabled,
@@ -384,6 +396,8 @@ fn apply_detector_key(checks: &mut CheckConfig, key: &str, enabled: bool) {
     match key {
         "hallucinated_imports" => checks.hallucinated_imports = enabled,
         "phantom_deps" => checks.phantom_deps = enabled,
+        "lockfile_drift" => checks.lockfile_drift = enabled,
+        "license_drift" => checks.license_drift = enabled,
         "vulnerabilities" => checks.vulnerabilities = enabled,
         "secrets" => checks.secrets = enabled,
         "over_engineering" => checks.over_engineering = enabled,

@@ -26,6 +26,8 @@ fn all_checks_config() -> Config {
         checks: codasaurus::config::CheckConfig {
             hallucinated_imports: true,
             phantom_deps: true,
+            lockfile_drift: true,
+            license_drift: true,
             vulnerabilities: true,
             secrets: true,
             over_engineering: true,
