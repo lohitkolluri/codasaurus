@@ -250,6 +250,77 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     migrate_v14_repo_scoped_learning(pool).await?;
     migrate_v15_invites_email_index(pool).await?;
     migrate_v16_dismissal_provenance(pool).await?;
+    migrate_v17_baseline_and_gates(pool).await?;
+    Ok(())
+}
+
+/// v17: baseline (new-code filtering) + quality gates.
+async fn migrate_v17_baseline_and_gates(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
+    if current.unwrap_or(0) >= 17 {
+        return Ok(());
+    }
+
+    let _ = sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS finding_baseline (
+            repo_full_name TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            resolved_at TIMESTAMPTZ,
+            PRIMARY KEY (repo_full_name, fingerprint)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_finding_baseline_repo ON finding_baseline(repo_full_name)",
+    )
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS pr_diff_lines (
+            repo_full_name TEXT NOT NULL,
+            pr_number BIGINT NOT NULL,
+            file_path TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            PRIMARY KEY (repo_full_name, pr_number, file_path, line)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_pr_diff_lines_lookup ON pr_diff_lines(repo_full_name, pr_number, file_path)",
+    )
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS quality_gates (
+            repo_full_name TEXT PRIMARY KEY,
+            gate_json TEXT NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        "#,
+    )
+    .execute(pool)
+    .await;
+
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (17) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

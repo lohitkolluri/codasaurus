@@ -9,6 +9,12 @@
   import { formatLabel } from "../../lib/utils.js";
   import { isMaintainer, isOwner } from "../../stores/auth.js";
 
+  const DEFAULT_GATE_CONDITIONS = [
+    { metric: "new_blocker_issues", op: "gt", threshold: 0 },
+    { metric: "new_high_issues", op: "gt", threshold: 0 },
+    { metric: "new_medium_issues", op: "gt", threshold: 5 },
+  ];
+
   let repo = $state(null);
   let loading = $state(true);
   let saving = $state(false);
@@ -28,6 +34,8 @@
   let autoApprove = $state(false);
   let prTitleFix = $state("off");
   let excludePatterns = $state("");
+  let gateBlockOnFail = $state(true);
+  let gateConditions = $state("");
 
   // Reactively load when params change (fixes $params being undefined at mount)
   $effect(() => {
@@ -77,6 +85,8 @@
       excludePatterns = Array.isArray(cfg.exclude_patterns)
         ? cfg.exclude_patterns.join(", ")
         : (cfg.exclude_patterns ?? "");
+      gateBlockOnFail = cfg.quality_gate?.block_on_fail ?? true;
+      gateConditions = JSON.stringify(cfg.quality_gate?.conditions ?? DEFAULT_GATE_CONDITIONS, null, 2);
     } catch (err) {
       if ($params?.id !== id) return;
       error = err.message || "Failed to load repo";
@@ -91,24 +101,37 @@
     try {
       const id = $params?.id;
       if (!id) return;
-      await api.put(`/api/repos/${id}`, {
-        config_json: JSON.stringify({
-          detectors,
-          llm_enabled: llmEnabled,
-          // auto_describe removed: walkthrough issue-comment covers open/push.
-          auto_describe: false,
-          auto_review_diff: autoReviewDiff,
-          auto_labels: autoLabels,
-          update_pr_description: updatePrDescription,
-          allow_auto_fix: allowAutoFix,
-          auto_approve: autoApprove,
-          pr_title_fix: prTitleFix,
+      let parsedGate;
+      try {
+        parsedGate = JSON.parse(gateConditions);
+      } catch {
+        parsedGate = null;
+      }
+      const config_json = {
+        detectors,
+        llm_enabled: llmEnabled,
+        // auto_describe removed: walkthrough issue-comment covers open/push.
+        auto_describe: false,
+        auto_review_diff: autoReviewDiff,
+        auto_labels: autoLabels,
+        update_pr_description: updatePrDescription,
+        allow_auto_fix: allowAutoFix,
+        auto_approve: autoApprove,
+        pr_title_fix: prTitleFix,
 
-          exclude_patterns: excludePatterns
-            .split(/[,\n]/)
-            .map((s) => s.trim())
-            .filter(Boolean),
-        }),
+        exclude_patterns: excludePatterns
+          .split(/[,\n]/)
+          .map((s) => s.trim())
+          .filter(Boolean),
+      };
+      if (parsedGate) {
+        config_json.quality_gate = {
+          block_on_fail: gateBlockOnFail,
+          conditions: parsedGate,
+        };
+      }
+      await api.put(`/api/repos/${id}`, {
+        config_json: JSON.stringify(config_json),
         active: repo?.active ?? true,
       });
       saveMsg = "Saved";
@@ -273,6 +296,34 @@
       <div class="form-group" style="margin-top:12px">
         <label for="repo-exclude">Exclude patterns</label>
         <input id="repo-exclude" type="text" bind:value={excludePatterns} placeholder="vendor/,packages/legacy/" disabled={!canManage} />
+      </div>
+    </div>
+
+    <div class="card static">
+      <h3>Quality Gate</h3>
+      <p class="muted" style="margin: 0 0 0.75rem; font-size: 0.9rem;">
+        Sonar-style gate on new-code findings. Any failed condition fails the gate; with block-on-fail the Codasaurus check run concludes <code>action_required</code>.
+      </p>
+      <div class="llm-row">
+        <label class="toggle">
+          <div class="toggle-track" class:on={gateBlockOnFail} role="checkbox" aria-checked={gateBlockOnFail}
+            tabindex={canManage ? "0" : undefined}
+            aria-disabled={!canManage}
+            onclick={() => { if (canManage) gateBlockOnFail = !gateBlockOnFail; }}
+            onkeydown={(e) => { if (!canManage) return; if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); gateBlockOnFail = !gateBlockOnFail; } }}>
+            <div class="toggle-knob"></div>
+          </div>
+        </label>
+        <span>Block check run when gate fails</span>
+      </div>
+      <div class="form-group" style="margin-top:12px">
+        <label for="repo-gate-conditions">Conditions (JSON)</label>
+        <textarea id="repo-gate-conditions" rows="6" style="font-family: monospace; width: 100%;"
+          bind:value={gateConditions} disabled={!canManage}
+          placeholder='metric + op + threshold objects, e.g. new_blocker_issues gt 0'></textarea>
+        <p class="muted" style="margin: 0.35rem 0 0; font-size: 0.85rem;">
+          Metrics: new_issues, new_blocker_issues, new_high_issues, new_medium_issues, new_warning_issues, new_info_issues. Ops: gt, gte, lt, lte, eq, ne.
+        </p>
       </div>
     </div>
 

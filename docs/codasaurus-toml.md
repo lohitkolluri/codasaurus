@@ -45,6 +45,25 @@ require_description = false
 require_title_convention = false
 max_blocking = 0
 max_warnings = 20
+
+[quality_gate]
+name = "codasaurus way"
+block_on_fail = true
+
+[[quality_gate.conditions]]
+metric = "new_blocker_issues"
+op = "gt"
+threshold = 0.0
+
+[[quality_gate.conditions]]
+metric = "new_high_issues"
+op = "gt"
+threshold = 0.0
+
+[[quality_gate.conditions]]
+metric = "new_medium_issues"
+op = "gt"
+threshold = 5.0
 ```
 
 ## Sections
@@ -56,6 +75,7 @@ max_warnings = 20
 | `[registry]`   | Package registry / OSV cache TTL                          |
 | `[guidelines]` | Contribution guideline path override                      |
 | `[pre_merge]`  | Soft caps used as defaults before DB policy overlay       |
+| `[quality_gate]` | Sonar-style gate on new findings; failed gate blocks the check run when `block_on_fail` |
 
 ## `review_strictness`
 
@@ -67,6 +87,21 @@ max_warnings = 20
 | `nitpick`  | Force info floor; wider info/warning budgets; nitpick LLM tone |
 
 Dashboard **Settings → Review → Tone & thresholds** overrides TOML when set. Repo `config_json.policy.review_strictness` overrides both.
+
+## `quality_gate`
+
+Sonar-style gate evaluated against findings on new code lines. Any failed condition fails the gate; when `block_on_fail = true` the Codasaurus check run concludes `action_required`. Findings on pre-existing lines are baseline-suppressed (recorded once, then hidden) and do not count toward the gate.
+
+| Metric                | Counts                |
+| --------------------- | --------------------- |
+| `new_issues`          | All new-code findings |
+| `new_blocker_issues`  | Severity `blocking`   |
+| `new_high_issues`     | Severity `blocking` (taxonomy has no `high`; maps to blocking) |
+| `new_medium_issues`   | Severity `warning`    |
+| `new_warning_issues`  | Severity `warning`    |
+| `new_info_issues`     | Severity `info`       |
+
+Operators: `gt`, `gte`, `lt`, `lte`, `eq`, `ne`.
 
 ## Repo `config_json` (dashboard)
 
@@ -87,6 +122,14 @@ Dashboard **Settings → Review → Tone & thresholds** overrides TOML when set.
         "request_reviewers": true,
         "create_check_run": true,
         "review_strictness": "strict"
+    },
+    "quality_gate": {
+        "name": "release",
+        "block_on_fail": true,
+        "conditions": [
+            { "metric": "new_blocker_issues", "op": "gt", "threshold": 0 },
+            { "metric": "new_medium_issues", "op": "gt", "threshold": 2 }
+        ]
     }
 }
 ```

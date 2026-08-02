@@ -19,6 +19,9 @@ pub struct Config {
 
     #[serde(default)]
     pub pre_merge: PreMergeConfig,
+
+    #[serde(default)]
+    pub quality_gate: QualityGateConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -131,6 +134,57 @@ pub struct PreMergeConfig {
     pub max_warnings: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QualityGateConfig {
+    #[serde(default = "default_gate_name")]
+    pub name: String,
+    #[serde(default = "default_true")]
+    pub block_on_fail: bool,
+    #[serde(default = "default_gate_conditions")]
+    pub conditions: Vec<QualityGateCondition>,
+}
+
+impl Default for QualityGateConfig {
+    fn default() -> Self {
+        Self {
+            name: default_gate_name(),
+            block_on_fail: true,
+            conditions: default_gate_conditions(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QualityGateCondition {
+    pub metric: String,
+    pub op: String,
+    pub threshold: f64,
+}
+
+fn default_gate_name() -> String {
+    "codasaurus way".into()
+}
+
+fn default_gate_conditions() -> Vec<QualityGateCondition> {
+    vec![
+        QualityGateCondition {
+            metric: "new_blocker_issues".into(),
+            op: "gt".into(),
+            threshold: 0.0,
+        },
+        QualityGateCondition {
+            metric: "new_high_issues".into(),
+            op: "gt".into(),
+            threshold: 0.0,
+        },
+        QualityGateCondition {
+            metric: "new_medium_issues".into(),
+            op: "gt".into(),
+            threshold: 5.0,
+        },
+    ]
+}
+
 fn default_zero() -> usize {
     0
 }
@@ -199,6 +253,7 @@ impl Default for Config {
             },
             guidelines: GuidelinesConfig::default(),
             pre_merge: PreMergeConfig::default(),
+            quality_gate: QualityGateConfig::default(),
         }
     }
 }
