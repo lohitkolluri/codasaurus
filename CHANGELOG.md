@@ -29,14 +29,19 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - PR review comments use shields.io verdict / severity badges and a structured walkthrough.
 - Walkthrough sections: estimated effort, Mermaid change map, grouped file summary, linked-issue assessment, pre-merge checks.
 - `GET /branding/logo.png` serves the bundled App mark for post-wizard badge upload.
+- `GET /branding/review-banner.svg` for walkthrough headers when `PUBLIC_URL` / dashboard public URL is set.
 - Review detail page: KPI strip, detector chips, severity filters, full file paths, suggestions, and richer metadata.
 
 ### Changed
 
-- Review walkthrough is summary-first and list-based (no markdown tables in the main comment); Context/diagram stay collapsed.
+- Review walkthrough uses short prose + Changes list + effort line; findings only as inline comments (no table dump).
+- Walkthrough overview uses a stable HTML marker and themed badges; Mermaid change map only when 2+ path areas.
+- Inline findings use Impact / Action / Evidence (collapsed) instead of long free-form dumps.
+- Advisory bots no longer auto-`APPROVE` clean PRs — walkthrough + COMMENT/REQUEST_CHANGES reviews only.
+- Signal budget drops advisory (`info`) inlines by default (high-signal blocking/warning only).
 - Related / similar PRs: sample high-signal source paths (skip changelog/docs/lockfile noise), rank by overlap strength instead of GitHub file-list order.
 - Durable `@codasaurus` command replies (describe, summarize, improve, ask, …) update their issue-comment slots in place instead of stacking new posts.
-- Clean-PR `APPROVE` reviews only on open/reopen/ready (not every synchronize); Check Runs update in place on the same SHA.
+- Check Runs update in place on the same SHA.
 - `@codasaurus review` force-reclaims the head SHA so same-commit re-runs are not silently skipped.
 - Repo settings: removed no-op “Auto-describe on open” (walkthrough already covers open/push).
 - Settings → System clarifies that Offline mode is a kill-switch (not tied to LLM keys) and shows when `CODASAURUS_OFFLINE` env forces it.

@@ -1035,7 +1035,6 @@ async fn spawn_review(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
                 auto_review_diff: true,
                 force_draft: true,
                 force_rereview: true,
-                post_approve_event: true,
             },
         )
         .await
