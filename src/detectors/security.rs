@@ -41,6 +41,13 @@ static SECRET_PRE_CHECK: LazyLock<AhoCorasick> = LazyLock::new(|| {
             "passwd",
             "pwd",
             "xoxb",
+            "akia",
+            "ghu_",
+            "ghr_",
+            "xoxa",
+            "xoxp",
+            "xoxr",
+            "xoxs",
         ])
         .expect("valid secret pre-check patterns")
 });
@@ -83,7 +90,11 @@ pub fn detect_secrets(parsed_files: &[ParsedFile]) -> Vec<Finding> {
 
             for pattern in SECRET_PATTERNS.iter() {
                 if let Some(captures) = pattern.regex.captures(trimmed) {
-                    let value = captures.get(1).map(|m| m.as_str()).unwrap_or("");
+                    let value = captures
+                        .get(1)
+                        .or_else(|| captures.get(2))
+                        .map(|m| m.as_str())
+                        .unwrap_or("");
                     let masked = mask_value(value);
 
                     findings.push(Finding {
@@ -212,7 +223,7 @@ static SECRET_PATTERNS: LazyLock<Vec<SecretPattern>> = LazyLock::new(|| {
     vec![
         SecretPattern::new(
             "AWS Access Key",
-            r#"(?i)(?:aws_access_key_id|AWS_ACCESS_KEY|AKIA[0-9A-Z]{16,}|AWS_KEY)\s*[:=]\s*['"]?([A-Za-z0-9/+=]{20,})['"]?"#,
+            r#"(?i)(?:aws_access_key_id|AWS_ACCESS_KEY|AWS_KEY)\s*[:=]\s*['"]?([A-Za-z0-9/+=]{20,})['"]?|(AKIA[0-9A-Z]{16,})"#,
         ),
         SecretPattern::new(
             "AWS Secret Key",
@@ -246,3 +257,49 @@ static SECRET_PATTERNS: LazyLock<Vec<SecretPattern>> = LazyLock::new(|| {
         ),
     ]
 });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::parse_file;
+
+    fn flag_count(content: &str) -> usize {
+        let f = parse_file("config.env", content).unwrap();
+        detect_secrets(&[f])
+            .iter()
+            .filter(|x| x.detector == "secrets")
+            .count()
+    }
+
+    #[test]
+    fn detects_bare_akia_key() {
+        let akia = format!("AKIA{}", "ABCDEFGHIJKLMNOP".repeat(2));
+        assert!(
+            flag_count(&format!("const c = '{akia}';")) > 0,
+            "bare AKIA key must be flagged"
+        );
+    }
+
+    #[test]
+    fn detects_ghu_and_ghr_tokens() {
+        let long = "a".repeat(36);
+        assert!(
+            flag_count(&format!("T=ghu_{long}")) > 0,
+            "ghu_ token missed"
+        );
+        assert!(
+            flag_count(&format!("T=ghr_{long}")) > 0,
+            "ghr_ token missed"
+        );
+    }
+
+    #[test]
+    fn detects_xox_variant_slack_tokens() {
+        for prefix in ["xoxa", "xoxp", "xoxr", "xoxs", "xoxb"] {
+            assert!(
+                flag_count(&format!("SLACK={prefix}-abc123def456ghi")) > 0,
+                "{prefix} slack token missed"
+            );
+        }
+    }
+}

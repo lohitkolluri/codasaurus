@@ -221,10 +221,7 @@ fn to_imperative(body: &str) -> String {
 /// Clean description body: no type prefix, imperative, lowercase start, no trailing punct.
 fn clean_body(raw: &str) -> String {
     let mut s = raw.trim().to_string();
-    s = s.replace(['\n', '\r', '\t'], " ");
-    while s.contains("  ") {
-        s = s.replace("  ", " ");
-    }
+    s = s.split_whitespace().collect::<Vec<_>>().join(" ");
     s = s
         .trim_matches(|c: char| matches!(c, '"' | '\'' | '`'))
         .to_string();
