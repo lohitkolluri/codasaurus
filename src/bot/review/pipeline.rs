@@ -1152,7 +1152,7 @@ pub async fn review_pr_with_options(
 
     let mut premerge_md = String::new();
     let mut premerge_blockers: Vec<String> = Vec::new();
-    if !offline_mode && !config.pre_merge.checks.is_empty() {
+    if repo_llm_enabled && !offline_mode && !config.pre_merge.checks.is_empty() {
         let mut diff = String::new();
         for f in files.iter().take(20) {
             let name = f["filename"].as_str().unwrap_or("?");
