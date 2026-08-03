@@ -47,7 +47,7 @@ fn parse_hunk_start_count(s: &str) -> (usize, usize) {
 }
 
 /// Persist the new-code line numbers for a PR so that the baseline filter can
-/// query them during review.
+/// query them during review. Batched: one statement per file, not per line.
 pub async fn save_pr_diff_lines(
     pool: &DbPool,
     repo_full_name: &str,
@@ -55,23 +55,24 @@ pub async fn save_pr_diff_lines(
     file_path: &str,
     changed_lines: &HashSet<usize>,
 ) -> Result<()> {
+    if changed_lines.is_empty() {
+        return Ok(());
+    }
     let repo = repo_full_name;
     let pr = pr_number;
     let file = file_path;
-    for line in changed_lines {
-        let l = *line as i32;
-        sqlx::query(
-            "INSERT INTO pr_diff_lines (repo_full_name, pr_number, file_path, line)
-             VALUES ($1, $2, $3, $4)
-             ON CONFLICT (repo_full_name, pr_number, file_path, line) DO NOTHING",
-        )
-        .bind(repo)
-        .bind(pr)
-        .bind(file)
-        .bind(l)
-        .execute(pool.as_pg())
-        .await?;
-    }
+    let lines: Vec<i64> = changed_lines.iter().map(|&l| l as i64).collect();
+    sqlx::query(
+        "INSERT INTO pr_diff_lines (repo_full_name, pr_number, file_path, line)
+         SELECT $1, $2, $3, unnest($4::bigint[])
+         ON CONFLICT (repo_full_name, pr_number, file_path, line) DO NOTHING",
+    )
+    .bind(repo)
+    .bind(pr)
+    .bind(file)
+    .bind(lines)
+    .execute(pool.as_pg())
+    .await?;
     Ok(())
 }
 
@@ -90,55 +91,6 @@ pub async fn clear_pr_diff_lines(
     Ok(())
 }
 
-/// Insert a finding into the baseline so that future PRs will not re-flag it.
-async fn record_baseline(pool: &DbPool, repo_full_name: &str, fingerprint: &str) -> Result<()> {
-    sqlx::query(
-        "INSERT INTO finding_baseline (repo_full_name, fingerprint, first_seen_at, last_seen_at)
-         VALUES ($1, $2, NOW(), NOW())
-         ON CONFLICT (repo_full_name, fingerprint)
-         DO UPDATE SET last_seen_at = NOW()",
-    )
-    .bind(repo_full_name)
-    .bind(fingerprint)
-    .execute(pool.as_pg())
-    .await?;
-    Ok(())
-}
-
-/// Return true if a finding has already been recorded as pre-existing.
-async fn is_baseline(pool: &DbPool, repo_full_name: &str, fingerprint: &str) -> Result<bool> {
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM finding_baseline
-         WHERE repo_full_name = $1 AND fingerprint = $2",
-    )
-    .bind(repo_full_name)
-    .bind(fingerprint)
-    .fetch_one(pool.as_pg())
-    .await?;
-    Ok(count > 0)
-}
-
-/// True if the given file path and line is a new-code line in the current PR.
-async fn is_new_code_line(
-    pool: &DbPool,
-    repo_full_name: &str,
-    pr_number: i64,
-    file_path: &str,
-    line: usize,
-) -> Result<bool> {
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM pr_diff_lines
-         WHERE repo_full_name = $1 AND pr_number = $2 AND file_path = $3 AND line = $4",
-    )
-    .bind(repo_full_name)
-    .bind(pr_number)
-    .bind(file_path)
-    .bind(line as i32)
-    .fetch_one(pool.as_pg())
-    .await?;
-    Ok(count > 0)
-}
-
 /// Filter findings to only those on new code lines.
 ///
 /// Findings that land on pre-existing (non-new) lines are recorded into the
@@ -152,22 +104,68 @@ pub async fn filter_new_code_findings(
     pr_number: i64,
     findings: &[Finding],
 ) -> Result<Vec<Finding>> {
+    use std::collections::HashMap;
+
+    let new_by_file: HashMap<String, HashSet<i32>> = sqlx::query_as::<_, (String, i32)>(
+        "SELECT file_path, line FROM pr_diff_lines WHERE repo_full_name = $1 AND pr_number = $2",
+    )
+    .bind(repo_full_name)
+    .bind(pr_number)
+    .fetch_all(pool.as_pg())
+    .await?
+    .into_iter()
+    .fold(HashMap::new(), |mut acc, (file, line)| {
+        acc.entry(file).or_default().insert(line);
+        acc
+    });
+
+    let mut baseline: HashSet<String> =
+        sqlx::query_scalar("SELECT fingerprint FROM finding_baseline WHERE repo_full_name = $1")
+            .bind(repo_full_name)
+            .fetch_all(pool.as_pg())
+            .await?
+            .into_iter()
+            .collect();
+
     let mut out = Vec::new();
+    let mut new_baselines: Vec<String> = Vec::new();
     for f in findings {
-        let is_new = is_new_code_line(pool, repo_full_name, pr_number, &f.file, f.line).await?;
+        let is_new = new_by_file
+            .get(&f.file)
+            .is_some_and(|lines| lines.contains(&(f.line as i32)));
         if is_new {
             out.push(f.clone());
             continue;
         }
         let fp = f.fingerprint();
-        if is_baseline(pool, repo_full_name, &fp).await? {
-            // Already known pre-existing issue: suppress.
+        if baseline.contains(&fp) {
             continue;
         }
-        // First time we see this issue on old code: record it silently.
-        record_baseline(pool, repo_full_name, &fp).await?;
+        baseline.insert(fp.clone());
+        new_baselines.push(fp);
     }
+    record_baselines(pool, repo_full_name, &new_baselines).await?;
     Ok(out)
+}
+
+async fn record_baselines(
+    pool: &DbPool,
+    repo_full_name: &str,
+    fingerprints: &[String],
+) -> Result<()> {
+    if fingerprints.is_empty() {
+        return Ok(());
+    }
+    sqlx::query(
+        "INSERT INTO finding_baseline (repo_full_name, fingerprint, first_seen_at, last_seen_at)
+         SELECT $1, unnest($2::text[]), NOW(), NOW()
+         ON CONFLICT (repo_full_name, fingerprint) DO UPDATE SET last_seen_at = NOW()",
+    )
+    .bind(repo_full_name)
+    .bind(fingerprints.to_vec())
+    .execute(pool.as_pg())
+    .await?;
+    Ok(())
 }
 
 #[cfg(test)]
