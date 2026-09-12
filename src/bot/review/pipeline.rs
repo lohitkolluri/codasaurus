@@ -558,6 +558,13 @@ pub async fn review_pr_with_options(
         out
     };
 
+    // Version-aware CVE check needs network (OSV querybatch); runs as its own
+    // async step since detectors::run_all is sync-only.
+    if config.checks.dependency_vulns && !offline_mode {
+        let dep_vuln_findings = detectors::dependency_vulns::detect(&parsed_files_collected).await;
+        findings.findings.extend(dep_vuln_findings);
+    }
+
     if want_guidelines && !remote_ctx.guidelines.is_empty() {
         // Probe required files from guidelines (budgeted Contents GETs).
         let mut required: Vec<String> = Vec::new();

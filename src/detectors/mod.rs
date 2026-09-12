@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
+pub mod dependency_vulns;
 pub mod graph;
 pub mod guidelines;
 pub mod hallucinated_imports;

@@ -246,6 +246,58 @@ pub async fn check_vulnerabilities_async(
     check_osv_async(ecosystem, package).await
 }
 
+/// Batch-query OSV for (ecosystem, package, version) triples via `querybatch`,
+/// one HTTP call per PR file instead of one per dependency. No caching here —
+/// callers (e.g. dependency_vulns detector) run this once per review and fail
+/// open on error. Version is optional; omit to get all known advisories.
+pub async fn query_osv_batch(
+    queries: &[(String, String, Option<String>)],
+) -> Result<Vec<Vec<OsvVulnerability>>> {
+    if queries.is_empty() || offline_mode() {
+        return Ok(vec![Vec::new(); queries.len()]);
+    }
+    let client = async_client()?;
+    let body = serde_json::json!({
+        "queries": queries.iter().map(|(ecosystem, name, version)| {
+            let mut q = serde_json::json!({
+                "package": { "name": name, "ecosystem": ecosystem }
+            });
+            if let Some(v) = version {
+                q["version"] = serde_json::Value::String(v.clone());
+            }
+            q
+        }).collect::<Vec<_>>()
+    });
+
+    let data: serde_json::Value = retry_async(
+        &RetryConfig::api_default(),
+        "osv_querybatch",
+        &is_reqwest_error_retryable,
+        || async {
+            client
+                .post("https://api.osv.dev/v1/querybatch")
+                .json(&body)
+                .send()
+                .await?
+                .error_for_status()?
+                .json::<serde_json::Value>()
+                .await
+                .map_err(Into::into)
+        },
+    )
+    .await?;
+
+    let results = data["results"].as_array().cloned().unwrap_or_default();
+    Ok(results
+        .into_iter()
+        .map(|r| {
+            r["vulns"].as_array().map_or_else(Vec::new, |arr| {
+                arr.iter().filter_map(extract_osv_vuln).collect()
+            })
+        })
+        .collect())
+}
+
 /// Concurrently warm package-existence + OSV caches for a large PR (org-scale).
 pub async fn prefetch_packages(pairs: &[(String, String)]) {
     if pairs.is_empty() || offline_mode() {

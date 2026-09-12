@@ -25,6 +25,8 @@ fn all_checks_config() -> Config {
             guidelines: true,
             graph: true,
             iac: true,
+            dependency_vulns: true,
+            test_coverage: false,
             exclude_patterns: vec![],
         },
         ..Config::default()

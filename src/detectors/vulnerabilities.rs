@@ -1,19 +1,21 @@
-use crate::dep_parser;
 use crate::detectors::Finding;
 use crate::parser::ParsedFile;
 use crate::registry;
 
 const REACHABLE: &str = "reachable";
-const MANIFEST_ONLY: &str = "manifest_only";
 
-/// Detect known vulnerabilities in imported packages via OSV.dev.
+/// Detect known vulnerabilities in *imported* packages via OSV.dev.
 ///
 /// Without a resolved package version, OSV returns *historical* vulns for the
 /// package name. Those must never be `blocking` — they destroy review trust.
 ///
 /// When reachability analysis is enabled, imports in changed code are marked
-/// `reachable` (uplifted to warning for HIGH/CRITICAL advisories) and packages
-/// that appear only in manifests are marked `manifest_only` (always info).
+/// `reachable` (uplifted to warning for HIGH/CRITICAL advisories).
+///
+/// Manifest-declared (not-yet-imported) dependencies are no longer checked
+/// here — `dependency_vulns` reads the manifest-pinned version and reports
+/// those with accurate blocking/warning severity, so double-reporting the
+/// same CVE as an unversioned `info` finding here would just be noise.
 pub fn detect(parsed_files: &[ParsedFile], reachability_enabled: bool) -> Vec<Finding> {
     let mut findings = Vec::new();
     // Track which (registry, package) we've already checked to avoid duplicate API calls
@@ -104,89 +106,6 @@ pub fn detect(parsed_files: &[ParsedFile], reachability_enabled: bool) -> Vec<Fi
         }
     }
 
-    if reachability_enabled {
-        findings.extend(manifest_only_findings(parsed_files, &checked));
-    }
-
-    findings
-}
-
-/// Packages declared in manifests but not imported in changed code get
-/// `manifest_only`: the vuln exists in the dependency graph but this PR does
-/// not reach it through source imports.
-fn manifest_only_findings(
-    parsed_files: &[ParsedFile],
-    checked: &std::collections::HashSet<String>,
-) -> Vec<Finding> {
-    let mut findings = Vec::new();
-    let mut seen = checked.clone();
-
-    for file in parsed_files {
-        let lower = file.path.to_ascii_lowercase();
-        let (registry_name, deps): (&str, Vec<String>) = if lower.ends_with("package.json") {
-            ("npm", dep_parser::extract_npm_deps(&file.raw_content))
-        } else if lower.ends_with("requirements.txt") || lower.ends_with("requirements-dev.txt") {
-            (
-                "pypi",
-                dep_parser::extract_requirements_deps(&file.raw_content),
-            )
-        } else if lower.ends_with("pyproject.toml") {
-            (
-                "pypi",
-                dep_parser::extract_pyproject_deps(&file.raw_content),
-            )
-        } else if lower.ends_with("cargo.toml") {
-            (
-                "crates.io",
-                dep_parser::extract_cargo_deps(&file.raw_content),
-            )
-        } else if lower.ends_with("go.mod") {
-            ("go", dep_parser::extract_go_mod_deps(&file.raw_content))
-        } else {
-            continue;
-        };
-
-        for package in deps {
-            if package.is_empty() || package.starts_with('.') || package.starts_with('/') {
-                continue;
-            }
-            let key = format!("{registry_name}:{package}");
-            if !seen.insert(key) {
-                continue;
-            }
-
-            if let Ok(vulns) = registry::check_vulnerabilities(registry_name, &package) {
-                for vuln in vulns.iter().take(3) {
-                    let fixed = vuln
-                        .fixed_version
-                        .as_ref()
-                        .map(|v| format!(" Upgrade to {v}."))
-                        .unwrap_or_default();
-                    findings.push(Finding {
-                        detector: "vulnerabilities".to_string(),
-                        severity: "info",
-                        file: file.path.clone(),
-                        line: 1,
-                        column: 0,
-                        message: format!(
-                            "{}: {}{} (manifest-only — not imported in this PR)",
-                            vuln.id, vuln.summary, fixed
-                        ),
-                        suggestion: Some(format!(
-                            "Pin/check `{}` in the lockfile and upgrade if {} still applies.",
-                            package, vuln.id
-                        )),
-                        evidence: Some(format!("{}: {}", vuln.id, vuln.summary)),
-                        codemod: None,
-                        confidence: Some(3),
-                        judge_rationale: None,
-                        reachability: Some(MANIFEST_ONLY.to_string()),
-                    });
-                }
-            }
-        }
-    }
-
     findings
 }
 
@@ -229,22 +148,6 @@ mod tests {
         assert_eq!(hits[0].severity, "warning");
         assert_eq!(hits[0].confidence, Some(5));
         assert_eq!(hits[1].severity, "info");
-    }
-
-    #[test]
-    fn manifest_only_dep_is_info() {
-        crate::registry::seed_osv_cache("PyPI", "flask", vec![vuln("GHSA-3", "HIGH")]);
-        let parsed = vec![
-            parse_file("requirements.txt", "flask==2.0.0\n").unwrap(),
-            parse_file("app.py", "print('no imports')\n").unwrap(),
-        ];
-        let findings = detect(&parsed, true);
-        let hit = findings.iter().find(|f| f.message.contains("GHSA-3"));
-        assert!(hit.is_some(), "{findings:?}");
-        let hit = hit.unwrap();
-        assert_eq!(hit.reachability.as_deref(), Some("manifest_only"));
-        assert_eq!(hit.severity, "info");
-        assert_eq!(hit.confidence, Some(3));
     }
 
     #[test]

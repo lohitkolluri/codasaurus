@@ -97,6 +97,14 @@ pub struct CheckConfig {
     #[serde(default = "default_true")]
     pub iac: bool,
 
+    /// Known CVEs/advisories for manifest-pinned dependency versions via OSV.dev
+    #[serde(default = "default_true")]
+    pub dependency_vulns: bool,
+
+    /// Nudge when a PR changes functions but touches no test files
+    #[serde(default = "default_true")]
+    pub test_coverage: bool,
+
     /// Glob patterns for files/directories to skip during scanning
     #[serde(default = "default_exclude_patterns")]
     pub exclude_patterns: Vec<String>,
@@ -387,6 +395,8 @@ impl Default for Config {
                 guidelines: true,
                 graph: true,
                 iac: true,
+                dependency_vulns: true,
+                test_coverage: true,
                 exclude_patterns: default_exclude_patterns(),
             },
             behavior: BehaviorConfig {
@@ -429,6 +439,8 @@ fn apply_enabled_flag(checks: &mut CheckConfig, key: &str, value: &str) {
         "guidelines_enabled" => checks.guidelines = enabled,
         "graph_enabled" => checks.graph = enabled,
         "iac_enabled" => checks.iac = enabled,
+        "dependency_vulns_enabled" => checks.dependency_vulns = enabled,
+        "test_coverage_enabled" => checks.test_coverage = enabled,
         _ => {}
     }
 }
@@ -613,6 +625,8 @@ fn apply_detector_key(checks: &mut CheckConfig, key: &str, enabled: bool) {
         "guidelines" => checks.guidelines = enabled,
         "graph" => checks.graph = enabled,
         "iac" => checks.iac = enabled,
+        "dependency_vulns" => checks.dependency_vulns = enabled,
+        "test_coverage" => checks.test_coverage = enabled,
         _ => {}
     }
 }
