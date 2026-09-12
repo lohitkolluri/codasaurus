@@ -101,7 +101,9 @@ pub(crate) fn extract_token(headers: &axum::http::HeaderMap) -> Option<String> {
 }
 
 /// Secure cookies by default. Opt out with `CODASAURUS_INSECURE_COOKIES=1` or
-/// when `PUBLIC_URL` is `http://localhost*` / `http://127.0.0.1*`.
+/// whenever `PUBLIC_URL` isn't `https://` (plain `http://` can't store a
+/// `Secure` cookie at all — the browser silently drops it, so anything short
+/// of explicitly opting into HTTPS would just log everyone out after login).
 fn cookie_should_be_secure() -> bool {
     if std::env::var("CODASAURUS_SECURE_COOKIES")
         .ok()
@@ -116,8 +118,7 @@ fn cookie_should_be_secure() -> bool {
         return false;
     }
     if let Ok(url) = std::env::var("PUBLIC_URL") {
-        let u = url.to_ascii_lowercase();
-        if u.starts_with("http://localhost") || u.starts_with("http://127.0.0.1") {
+        if !url.to_ascii_lowercase().starts_with("https://") {
             return false;
         }
     }
