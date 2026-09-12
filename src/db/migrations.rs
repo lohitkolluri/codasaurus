@@ -339,6 +339,12 @@ async fn migrate_v19_symbol_index(pool: &PgPool) -> Result<(), sqlx::Error> {
     .await;
 
     let _ = sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_repo_symbols_name ON repo_symbols(repo_full_name, symbol_name)",
+    )
+    .execute(pool)
+    .await;
+
+    let _ = sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS repo_edges (
             repo_full_name TEXT NOT NULL,
