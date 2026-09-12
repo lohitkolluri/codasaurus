@@ -6,7 +6,11 @@ pub(crate) fn severity_at_least(sev: &str, min: &str) -> bool {
         match s {
             "blocking" => 3,
             "warning" => 2,
-            _ => 1,
+            "info" => 1,
+            other => {
+                tracing::warn!(severity = other, "unknown finding severity; treating as lowest tier");
+                1
+            }
         }
     }
     rank(sev) >= rank(min)

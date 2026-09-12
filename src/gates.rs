@@ -21,11 +21,6 @@ impl Default for QualityGate {
                     threshold: 0.0,
                 },
                 GateCondition {
-                    metric: GateMetric::NewHighIssues,
-                    operator: GateOperator::Gt,
-                    threshold: 0.0,
-                },
-                GateCondition {
                     metric: GateMetric::NewMediumIssues,
                     operator: GateOperator::Gt,
                     threshold: 5.0,
@@ -42,6 +37,10 @@ pub struct GateCondition {
     pub threshold: f64,
 }
 
+/// Findings only carry three severities ("blocking"/"warning"/"info"), so
+/// `NewHighIssues` is an alias for `NewBlockerIssues` and `NewMediumIssues`
+/// is an alias for `NewWarningIssues`. Kept as separate variants for
+/// backward-compatible config (`new_high_issues` / `new_medium_issues`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GateMetric {
@@ -258,7 +257,7 @@ mod tests {
         let gate = QualityGate::default();
         let r = evaluate_gate(&gate, &sample(1, 0, 0));
         assert!(!r.passed);
-        assert_eq!(r.failed_conditions.len(), 2); // blocker + high
+        assert_eq!(r.failed_conditions.len(), 1); // blocker (high is an alias, deduped from defaults)
     }
 
     #[test]

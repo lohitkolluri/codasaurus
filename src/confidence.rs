@@ -37,9 +37,13 @@ pub fn apply_base(findings: &mut [Finding]) {
     }
 }
 
-/// Drop findings the pipeline cannot ground: confidence <= 1.
+/// Drop findings the pipeline cannot ground. Blocking findings request changes
+/// on a PR, so they need a higher confidence floor than warning/info notes.
 pub fn retain_grounded(findings: &mut Vec<Finding>) {
-    findings.retain(|f| f.confidence.unwrap_or(0) >= 2);
+    findings.retain(|f| {
+        let floor = if f.severity == "blocking" { 3 } else { 2 };
+        f.confidence.unwrap_or(0) >= floor
+    });
 }
 
 #[cfg(test)]

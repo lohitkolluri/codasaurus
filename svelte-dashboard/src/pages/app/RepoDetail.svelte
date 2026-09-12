@@ -397,8 +397,8 @@
   }
   .badge-private {
     font-size: 11px;
-    background: #fef3cd;
-    color: #856404;
+    background: color-mix(in srgb, var(--warning) 15%, var(--surface));
+    color: var(--warning);
     padding: 2px 8px;
     border-radius: 4px;
   }

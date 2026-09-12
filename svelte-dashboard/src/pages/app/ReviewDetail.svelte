@@ -194,6 +194,9 @@
       <header class="rd-hero">
         <div class="rd-hero-top">
           <a class="rd-back" href="#/app/reviews" use:link>← Reviews</a>
+          {#if review.repo_id}
+            <a class="rd-back" href={`#/app/repos/${review.repo_id}`} use:link>{review.repo_full_name ?? "Repo"}</a>
+          {/if}
           {#if review.repo_full_name && review.pr_number}
             <a
               class="btn sm"

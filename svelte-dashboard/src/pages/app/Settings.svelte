@@ -1801,15 +1801,15 @@
   }
 
   .rule-status.approved {
-    color: #34d399;
+    color: var(--success);
   }
 
   .rule-status.suggested {
-    color: #fbbf24;
+    color: var(--warning);
   }
 
   .rule-status.archived {
-    color: #6b7280;
+    color: var(--text-muted);
   }
 
   .detector-row:last-child {

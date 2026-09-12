@@ -911,40 +911,58 @@ pub async fn review_pr_with_options(
         )
         .await?;
         if repo_flags.auto_approve {
-            let sha_short = head_sha.get(..7).unwrap_or(head_sha);
-            let review_body = serde_json::json!({
-                "body": format!(
-                    "### Codasaurus\n\nCommit `{sha_short}` looks clear on Tier-1 checks. \
-                     A maintainer still needs to merge."
-                ),
-                "event": "APPROVE",
-            });
-            let review_url =
-                format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews");
-            match retry_async(
-                &RetryConfig::api_default(),
-                "post_pr_approve",
-                &is_reqwest_error_retryable,
-                || async {
-                    client
-                        .post(&review_url)
-                        .header("Authorization", &auth_header)
-                        .header("Accept", "application/vnd.github+json")
-                        .header(
-                            "User-Agent",
-                            concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
-                        )
-                        .json(&review_body)
-                        .send()
-                        .await
-                        .map_err(Into::into)
-                },
+            let already_approved = super::github::review_exists_for_commit(
+                client,
+                &auth_header,
+                repo_name,
+                pr_number,
+                head_sha,
             )
             .await
-            {
-                Ok(resp) if resp.status().is_success() => {}
-                Ok(resp) => tracing::warn!(status = %resp.status(), "auto APPROVE failed"),
-                Err(e) => tracing::warn!(error = %e, "auto APPROVE failed"),
+            .unwrap_or(false);
+            if already_approved {
+                tracing::info!(
+                    repo = repo_name,
+                    pr_number,
+                    sha = head_sha,
+                    "PR review already exists for commit; skipping duplicate APPROVE"
+                );
+            } else {
+                let sha_short = head_sha.get(..7).unwrap_or(head_sha);
+                let review_body = serde_json::json!({
+                    "body": format!(
+                        "### Codasaurus\n\nCommit `{sha_short}` looks clear on Tier-1 checks. \
+                         A maintainer still needs to merge."
+                    ),
+                    "event": "APPROVE",
+                });
+                let review_url =
+                    format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews");
+                match retry_async(
+                    &RetryConfig::api_default(),
+                    "post_pr_approve",
+                    &is_reqwest_error_retryable,
+                    || async {
+                        client
+                            .post(&review_url)
+                            .header("Authorization", &auth_header)
+                            .header("Accept", "application/vnd.github+json")
+                            .header(
+                                "User-Agent",
+                                concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+                            )
+                            .json(&review_body)
+                            .send()
+                            .await
+                            .map_err(Into::into)
+                    },
+                )
+                .await
+                {
+                    Ok(resp) if resp.status().is_success() => {}
+                    Ok(resp) => tracing::warn!(status = %resp.status(), "auto APPROVE failed"),
+                    Err(e) => tracing::warn!(error = %e, "auto APPROVE failed"),
+                }
             }
         }
         if !head_sha.is_empty() {

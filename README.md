@@ -131,6 +131,8 @@ export CODASAURUS_MODEL="qwen2.5-coder:7b"
 
 Toggle per repo in the dashboard. `offline_mode` / `CODASAURUS_OFFLINE=1` never opens an LLM socket. Details: [configuration.md](docs/configuration.md).
 
+**Multi-provider / fallback:** `CODASAURUS_BASE_URL` accepts any OpenAI-compatible `/v1` endpoint, including a self-hosted [LiteLLM](https://docs.litellm.ai/docs/proxy/quick_start) proxy — point Codasaurus at LiteLLM and it handles routing across OpenAI/Anthropic/Azure/Bedrock/etc. For a lighter setup with no extra service, set `CODASAURUS_FALLBACK_BASE_URL` (+ optional `CODASAURUS_FALLBACK_API_KEY` / `CODASAURUS_FALLBACK_MODEL`) to a second provider — Codasaurus automatically retries there if the primary endpoint fails.
+
 ---
 
 ## Config sketch

@@ -43,12 +43,8 @@
       <p class="eyebrow">Overview</p>
       <h1 class="page-title">Dashboard</h1>
       <p class="page-description">
-        Active repos, today's reviews, and recent PRs. Charts are on Stats.
+        Active repos, today's reviews, and recent PRs.
       </p>
-    </div>
-    <div class="dashboard-hero-actions">
-      <a class="btn" href="#/app/stats" use:link>Stats</a>
-      <a class="btn" href="#/app/repos" use:link>Repositories</a>
     </div>
   </div>
 
