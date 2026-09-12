@@ -19,6 +19,7 @@ pub mod security;
 pub mod slop;
 pub mod stale_api;
 pub mod style;
+pub mod test_coverage;
 pub mod vulnerabilities;
 
 /// Cached LearningStore — opened once and reused against the shared Postgres pool.
@@ -171,6 +172,10 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config, repo: Option<&str>)
 
         if config.checks.iac {
             handles.push(s.spawn(|| iac::detect(parsed_files)));
+        }
+
+        if config.checks.test_coverage {
+            handles.push(s.spawn(|| test_coverage::detect(parsed_files)));
         }
 
         for handle in handles {
