@@ -8,6 +8,7 @@ pub mod auth;
 pub mod errors;
 pub mod github;
 pub mod learning;
+pub mod rate_limit;
 pub mod rbac;
 pub mod repos;
 pub mod reviews;
@@ -59,6 +60,10 @@ pub fn build_router(state: AppState) -> Router {
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::auth_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit::api_rate_limit_middleware,
         ))
         .with_state(state.clone());
 

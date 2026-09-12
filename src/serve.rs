@@ -174,7 +174,10 @@ fn build_router(pool: crate::db::DbPool, bot_config: Option<bot::BotConfig>) -> 
     // to avoid any Axum trailing-slash normalization issues.
     let webhook_handler = post(
         |headers: axum::http::HeaderMap, body: axum::body::Bytes| async move {
-            bot::handle_webhook(headers, body).await
+            if let Err(err) = api::rate_limit::check_webhook_rate_limit(&headers) {
+                return err.into_response();
+            }
+            bot::handle_webhook(headers, body).await.into_response()
         },
     );
 

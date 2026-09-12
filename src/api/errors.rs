@@ -11,20 +11,32 @@ pub enum ApiError {
     Internal(String),
     Unauthorized(String),
     Forbidden(String),
-    TooManyRequests(String),
+    /// message, `Retry-After` seconds (0 = omit the header)
+    TooManyRequests(String, u64),
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let (status, message) = match &self {
-            ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
-            ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
-            ApiError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
-            ApiError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
-            ApiError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
-            ApiError::TooManyRequests(msg) => (StatusCode::TOO_MANY_REQUESTS, msg),
+        let (status, message, retry_after) = match &self {
+            ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, msg, 0),
+            ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg, 0),
+            ApiError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg, 0),
+            ApiError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg, 0),
+            ApiError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg, 0),
+            ApiError::TooManyRequests(msg, secs) => (StatusCode::TOO_MANY_REQUESTS, msg, *secs),
         };
-        (status, Json(json!({ "error": message }))).into_response()
+        let body = (status, Json(json!({ "error": message }))).into_response();
+        if retry_after > 0 {
+            let mut body = body;
+            body.headers_mut().insert(
+                axum::http::header::RETRY_AFTER,
+                axum::http::HeaderValue::from_str(&retry_after.to_string())
+                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("60")),
+            );
+            body
+        } else {
+            body
+        }
     }
 }
 
@@ -57,6 +69,10 @@ impl ApiError {
     }
 
     pub fn too_many_requests(msg: impl Into<String>) -> Self {
-        ApiError::TooManyRequests(msg.into())
+        ApiError::TooManyRequests(msg.into(), 0)
+    }
+
+    pub fn too_many_requests_after(msg: impl Into<String>, retry_after_secs: u64) -> Self {
+        ApiError::TooManyRequests(msg.into(), retry_after_secs)
     }
 }

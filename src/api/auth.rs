@@ -89,7 +89,7 @@ pub fn router() -> Router<AppState> {
 // ---------------------------------------------------------------------------
 
 /// Extract the session token from the Cookie header.
-fn extract_token(headers: &axum::http::HeaderMap) -> Option<String> {
+pub(crate) fn extract_token(headers: &axum::http::HeaderMap) -> Option<String> {
     let cookie = headers.get(header::COOKIE)?.to_str().ok()?;
     for pair in cookie.split(';') {
         let pair = pair.trim();
@@ -142,23 +142,7 @@ fn clear_cookie() -> String {
     cookie
 }
 
-fn client_ip(headers: &axum::http::HeaderMap) -> String {
-    if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
-        if let Some(first) = xff.split(',').next() {
-            let t = first.trim();
-            if !t.is_empty() {
-                return t.to_string();
-            }
-        }
-    }
-    if let Some(rip) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
-        let t = rip.trim();
-        if !t.is_empty() {
-            return t.to_string();
-        }
-    }
-    "unknown".into()
-}
+pub(crate) use super::rate_limit::client_ip;
 
 fn check_auth_rate_limit(headers: &axum::http::HeaderMap, email: &str) -> Result<(), ApiError> {
     let key = format!("{}/{}", client_ip(headers), email.trim().to_lowercase());
@@ -170,8 +154,10 @@ fn check_auth_rate_limit(headers: &axum::http::HeaderMap, email: &str) -> Result
         *entry = (0, now);
     }
     if entry.0 >= LOGIN_RATE_LIMIT {
-        return Err(ApiError::too_many_requests(
+        let retry_after = LOGIN_RATE_WINDOW.saturating_sub(now.duration_since(entry.1));
+        return Err(ApiError::too_many_requests_after(
             "Too many attempts. Try again in 15 minutes.",
+            retry_after.as_secs().max(1),
         ));
     }
     entry.0 += 1;
