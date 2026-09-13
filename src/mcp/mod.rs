@@ -13,6 +13,27 @@ use crate::db::DbPool;
 use anyhow::{bail, Result};
 use serde_json::Value;
 
+/// Heuristic classification of a tool as state-mutating from its name. There is no
+/// standard MCP field for this, and remote servers are third-party (GitHub, Linear,
+/// Notion, Jira, Sentry, or an operator-supplied custom URL) — so tool calls are
+/// steerable by whatever a reviewing PR's diff/description says, including a
+/// jailbroken or hallucinating model. Default-deny anything that looks like a write
+/// so a prompt-injected diff can only ever reach read-only tools; this is a
+/// heuristic safety net, not a substitute for per-tool allowlisting by the operator.
+fn is_write_tool(name: &str) -> bool {
+    const WRITE_PREFIXES: &[&str] = &[
+        "create", "update", "delete", "remove", "write", "put", "post", "patch", "set", "archive",
+        "close", "merge", "publish", "send", "edit", "add", "invite", "revoke", "ban", "execute",
+        "run", "trigger", "deploy", "assign", "move", "rename", "restore", "approve", "reject",
+        "comment", "reply", "upload", "commit", "push", "fork", "star", "watch", "subscribe",
+        "unsubscribe", "cancel", "resolve", "reopen", "lock", "unlock", "pin", "unpin",
+    ];
+    let lower = name.to_ascii_lowercase();
+    WRITE_PREFIXES
+        .iter()
+        .any(|p| lower.starts_with(p) || lower.contains(&format!("_{p}")))
+}
+
 /// One tool exposed to the LLM, qualified with its server so names never collide.
 #[derive(Debug, Clone)]
 pub struct McpToolSpec {
@@ -132,6 +153,9 @@ pub async fn list_enabled_tools(pool: &DbPool) -> Vec<McpToolSpec> {
             let Some(name) = tool.get("name").and_then(|v| v.as_str()) else {
                 continue;
             };
+            if is_write_tool(name) {
+                continue;
+            }
             specs.push(McpToolSpec {
                 qualified_name: format!("{}__{name}", server.id),
                 description: tool
@@ -158,19 +182,37 @@ pub async fn call_tool(pool: &DbPool, qualified_name: &str, arguments: &Value) -
         bail!("malformed MCP tool name: {qualified_name}");
     };
 
-    let base_url = crate::db::config::get_config(pool, &format!("mcp_{server_id}_base_url"))
+    // Re-validate against the currently enabled server + its live tool list before
+    // executing anything — the model only sees this list when tools are *offered*,
+    // but a jailbroken/hallucinating model can still emit a call for a name it was
+    // never given (e.g. lifted from injected PR content), or for a server that was
+    // disabled after tools were listed for this review. Never trust the tool call
+    // in isolation from the current allowlist.
+    let server = list_servers(pool)
         .await
-        .ok()
-        .flatten()
-        .or_else(|| catalog::find(server_id).map(|e| e.base_url.to_string()))
+        .into_iter()
+        .find(|s| s.id == server_id)
         .ok_or_else(|| anyhow::anyhow!("unknown MCP server: {server_id}"))?;
+    if !server.enabled || server.base_url.is_empty() {
+        bail!("MCP server {server_id} is not enabled");
+    }
     let api_key = crate::db::config::get_config(pool, &format!("mcp_{server_id}_api_key"))
         .await
         .ok()
         .flatten()
         .unwrap_or_default();
+    let available = cache::get_or_fetch_tools(&server.id, &server.base_url, &api_key).await;
+    let allowed = available
+        .iter()
+        .any(|t| t.get("name").and_then(|v| v.as_str()) == Some(tool_name));
+    if !allowed {
+        bail!("tool {tool_name} is not in {server_id}'s current tool list");
+    }
+    if is_write_tool(tool_name) {
+        bail!("tool {qualified_name} looks state-mutating; write tools are not permitted");
+    }
 
-    let result = client::tools_call(&base_url, &api_key, tool_name, arguments).await;
+    let result = client::tools_call(&server.base_url, &api_key, tool_name, arguments).await;
 
     crate::db::audit::log_event(pool, "mcp.tool_called", None, Some(qualified_name), None).await;
 
