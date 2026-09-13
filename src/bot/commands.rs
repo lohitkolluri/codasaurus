@@ -33,6 +33,7 @@ pub(crate) enum BotCommand {
     Wiki,
     ApproveRule(Option<String>),
     Help,
+    GenerateTests,
 }
 
 pub(crate) fn parse_bot_command(body: &str) -> Option<BotCommand> {
@@ -85,6 +86,9 @@ pub(crate) fn parse_bot_command(body: &str) -> Option<BotCommand> {
     }
     if lower.contains("describe") {
         return Some(BotCommand::Describe);
+    }
+    if lower.contains("generate-tests") || lower.contains("generate_tests") {
+        return Some(BotCommand::GenerateTests);
     }
     if lower.contains("improve") {
         return Some(BotCommand::Improve);
@@ -249,6 +253,7 @@ pub(crate) async fn handle_bot_command(
         BotCommand::Retry => spawn_review(ctx, pr_number, timeout_secs).await,
         BotCommand::Wiki => spawn_wiki_comment(ctx, pr_number).await,
         BotCommand::ApproveRule(id) => spawn_approve_rule(ctx, pr_number, id).await,
+        BotCommand::GenerateTests => spawn_generate_tests(ctx, pr_number, timeout_secs).await,
     }
 }
 
@@ -983,6 +988,154 @@ async fn spawn_add_docs(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) 
             pr_number,
             &text,
             Some("add_docs"),
+        )
+        .await
+    })
+    .await;
+}
+
+async fn spawn_generate_tests(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
+    let pool = bot_db_pool();
+    let config = crate::config::Config::load_for_bot(pool).await;
+    if !config.checks.test_generation {
+        spawn_simple_comment(
+            ctx,
+            pr_number,
+            "### Codasaurus generate-tests\n\n> Test generation is disabled for this repo. Enable `checks.test_generation` in `.codasaurus.toml` to use this command.\n".to_string(),
+        )
+        .await;
+        return;
+    }
+    let Some(llm) = crate::llm::LlmConfig::from_db_or_env(pool).await else {
+        spawn_simple_comment(
+            ctx,
+            pr_number,
+            "### Codasaurus generate-tests\n\n> No LLM configured for this repo.\n".to_string(),
+        )
+        .await;
+        return;
+    };
+
+    let Ok(_permit) = REVIEW_PERMITS.acquire().await else {
+        tracing::error!("review semaphore closed");
+        return;
+    };
+    let _ = timeout(Duration::from_secs(timeout_secs), async move {
+        let token = get_installation_token(&ctx.cfg, ctx.inst_id).await?;
+        let pr = fetch_pull_request(&token, &ctx.repo_full_name, pr_number).await?;
+        let head_sha = pr["head"]["sha"].as_str().unwrap_or("").to_string();
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(60))
+            .build()?;
+        let auth = format!("Bearer {token}");
+        let files_url = format!(
+            "https://api.github.com/repos/{}/pulls/{}/files?per_page=100",
+            ctx.repo_full_name, pr_number
+        );
+        let files: Vec<serde_json::Value> = client
+            .get(&files_url)
+            .header("Authorization", &auth)
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", USER_AGENT)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        let changed_paths: std::collections::HashSet<String> = files
+            .iter()
+            .filter_map(|f| f["filename"].as_str().map(str::to_string))
+            .collect();
+
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::AUTHORIZATION,
+            reqwest::header::HeaderValue::from_str(&auth)?,
+        );
+        headers.insert(
+            reqwest::header::ACCEPT,
+            reqwest::header::HeaderValue::from_static("application/vnd.github+json"),
+        );
+        headers.insert(
+            reqwest::header::USER_AGENT,
+            reqwest::header::HeaderValue::from_static(USER_AGENT),
+        );
+
+        let mut sections: Vec<String> = Vec::new();
+        for f in files.iter().take(20) {
+            let Some(path) = f["filename"].as_str() else {
+                continue;
+            };
+            let Some(patch) = f["patch"].as_str() else {
+                continue;
+            };
+            if patch.is_empty() {
+                continue;
+            }
+            let Some(idx) = crate::index::extract::extract_file(path, patch) else {
+                continue;
+            };
+            let has_functions = idx.symbols.iter().any(|s| {
+                s.kind == crate::index::extract::SYMBOL_FUNCTION
+                    || s.kind == crate::index::extract::SYMBOL_METHOD
+            });
+            if !has_functions {
+                continue;
+            }
+            let candidates = crate::detectors::test_coverage::sibling_test_candidates(path);
+            let already_covered = candidates.iter().any(|c| changed_paths.contains(c));
+            if already_covered {
+                continue;
+            }
+
+            let Ok(Some(source)) =
+                crate::bot::github_files::fetch_repo_file(&client, &headers, &ctx.repo_full_name, path, &head_sha)
+                    .await
+            else {
+                continue;
+            };
+            let mut existing_test = None;
+            for cand in &candidates {
+                if let Ok(Some(t)) = crate::bot::github_files::fetch_repo_file(
+                    &client,
+                    &headers,
+                    &ctx.repo_full_name,
+                    cand,
+                    &head_sha,
+                )
+                .await
+                {
+                    existing_test = Some(t);
+                    break;
+                }
+            }
+
+            match crate::llm::generate_tests(path, &source, existing_test.as_deref(), &llm).await {
+                Ok(tests) => sections.push(format!("### `{path}`\n\n{tests}\n")),
+                Err(e) => tracing::warn!(error = %e, path, "generate_tests failed"),
+            }
+            if sections.len() >= 3 {
+                break;
+            }
+        }
+
+        let text = if sections.is_empty() {
+            "### Codasaurus generate-tests\n\n> No uncovered changed functions found in this PR.\n".to_string()
+        } else {
+            format!(
+                "### Codasaurus generate-tests\n\nDrafted tests for changed functions without existing coverage. \
+                 Review and copy-paste — not auto-committed.\n\n{}",
+                sections.join("\n")
+            )
+        };
+        post_issue_comment_kind(
+            &token,
+            &ctx.repo_full_name,
+            pr_number,
+            &text,
+            Some("generated_tests"),
         )
         .await
     })

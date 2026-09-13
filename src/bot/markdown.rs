@@ -1045,6 +1045,7 @@ pub fn help_body() -> String {
          | `labels` | Suggest and apply PR labels |\n\
          | `changelog` / `update_changelog` | Keep a Changelog draft |\n\
          | `add_docs` | README / docs stubs |\n\
+         | `generate-tests` | Draft tests for uncovered changed functions (opt-in) |\n\
          | `similar` | Related PRs by path history |\n\
          | `impact` | Blast-radius estimate |\n\
          | `fix` / `fix <fp>` | Apply available codemods (opt-in) |\n\

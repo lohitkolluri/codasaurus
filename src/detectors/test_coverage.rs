@@ -44,6 +44,35 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
     }]
 }
 
+/// Guess sibling test file path(s) for a source file, by language convention.
+/// Used only to decide whether a plausible test file already exists, not to
+/// generate paths blindly.
+pub fn sibling_test_candidates(path: &str) -> Vec<String> {
+    let Some((dir, file)) = path.rsplit_once('/') else {
+        return sibling_test_candidates(&format!("./{path}"))
+            .into_iter()
+            .map(|p| p.trim_start_matches("./").to_string())
+            .collect();
+    };
+    let Some((stem, ext)) = file.rsplit_once('.') else {
+        return Vec::new();
+    };
+    match ext {
+        "py" => vec![
+            format!("{dir}/test_{stem}.py"),
+            format!("{dir}/{stem}_test.py"),
+        ],
+        "ts" | "tsx" | "js" | "jsx" => vec![
+            format!("{dir}/{stem}.test.{ext}"),
+            format!("{dir}/{stem}.spec.{ext}"),
+            format!("{dir}/__tests__/{stem}.test.{ext}"),
+        ],
+        "go" => vec![format!("{dir}/{stem}_test.go")],
+        "rs" => vec![path.to_string()], // same-file #[cfg(test)] mod tests
+        _ => Vec::new(),
+    }
+}
+
 fn is_test_file(file: &ParsedFile) -> bool {
     let path = file.path.to_lowercase().replace('\\', "/");
     path.contains("/test/")
@@ -102,6 +131,14 @@ mod tests {
         let files = [parse("README.md", "# hello\n")];
         let findings = detect(&files);
         assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn sibling_test_candidates_cover_major_languages() {
+        assert!(sibling_test_candidates("src/foo.py").contains(&"src/test_foo.py".to_string()));
+        assert!(sibling_test_candidates("src/foo.ts").contains(&"src/foo.test.ts".to_string()));
+        assert!(sibling_test_candidates("pkg/foo.go").contains(&"pkg/foo_test.go".to_string()));
+        assert_eq!(sibling_test_candidates("src/foo.rs"), vec!["src/foo.rs"]);
     }
 
     #[test]
