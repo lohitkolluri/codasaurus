@@ -46,6 +46,7 @@ pub fn router() -> Router<AppState> {
         .route("/", get(list_reviews))
         .route("/{id}", get(get_review))
         .route("/{id}/findings", get(get_review_findings))
+        .route("/{id}/sarif", get(get_review_sarif))
         .route("/dismiss", post(dismiss_finding))
 }
 
@@ -232,6 +233,39 @@ async fn get_review_findings(
         "findings_by_file": grouped,
         "total_findings": grouped.values().map(|v| v.len()).sum::<usize>(),
     })))
+}
+
+/// GET /api/reviews/:id/sarif — SARIF 2.1.0 export for external tooling (e.g. GitHub code scanning).
+async fn get_review_sarif(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<axum::response::Response, ApiError> {
+    let review = db::reviews::get_review(&state.pool, id)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("Review {id} not found")))?;
+
+    let findings = db::reviews::get_findings_for_review(&state.pool, id).await?;
+
+    let repo_full_name: String = crate::db::db_scalar_optional!(
+        &state.pool,
+        String,
+        "SELECT full_name FROM repos WHERE id = ?",
+        review.repo_id
+    )
+    .ok()
+    .flatten()
+    .unwrap_or_default();
+
+    let commit_sha = review.pr_head_sha.clone().unwrap_or_default();
+    let sarif =
+        crate::detectors::sarif::db_findings_to_sarif(&findings, &repo_full_name, &commit_sha);
+
+    Ok(axum::response::Response::builder()
+        .header("content-type", "application/sarif+json")
+        .body(axum::body::Body::from(
+            serde_json::to_vec(&sarif).unwrap_or_default(),
+        ))
+        .unwrap())
 }
 
 /// POST /api/reviews/dismiss — dismiss a finding into the learning store

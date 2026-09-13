@@ -16,6 +16,7 @@ pub mod license_drift;
 pub mod lockfile_drift;
 pub mod phantom_deps;
 pub mod risky_patterns;
+pub mod sarif;
 pub mod secret_verify;
 pub mod security;
 pub mod slop;
