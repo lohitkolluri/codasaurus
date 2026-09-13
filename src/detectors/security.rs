@@ -1,3 +1,4 @@
+use crate::detectors::secret_verify as verify;
 use crate::detectors::Finding;
 use crate::parser::ParsedFile;
 use aho_corasick::AhoCorasick;
@@ -90,20 +91,42 @@ pub fn detect_secrets(parsed_files: &[ParsedFile]) -> Vec<Finding> {
 
             for pattern in SECRET_PATTERNS.iter() {
                 if let Some(captures) = pattern.regex.captures(trimmed) {
+                    let full_match = captures.get(0).map(|m| m.as_str()).unwrap_or("");
                     let value = captures
                         .get(1)
                         .or_else(|| captures.get(2))
                         .map(|m| m.as_str())
-                        .unwrap_or("");
+                        .unwrap_or(full_match);
                     let masked = mask_value(value);
+
+                    let (severity, message) = match verify::verify_secret(pattern.name, value) {
+                        Some(true) => (
+                            "blocking",
+                            format!(
+                                "Live {} detected: `{masked}` — this credential is currently active.",
+                                pattern.name
+                            ),
+                        ),
+                        Some(false) => (
+                            "info",
+                            format!(
+                                "Revoked/invalid {} detected: `{masked}` — no longer a live credential, but still remove it from history.",
+                                pattern.name
+                            ),
+                        ),
+                        None => (
+                            "blocking",
+                            format!("Potential {} detected: `{masked}`", pattern.name),
+                        ),
+                    };
 
                     findings.push(Finding {
                         detector: "secrets".to_string(),
-                        severity: "blocking",
+                        severity,
                         file: file.path.clone(),
                         line: line.number,
                         column: 0,
-                        message: format!("Potential {} detected: `{}`", pattern.name, masked),
+                        message,
                         suggestion: Some(format!(
                             "Remove this {} and use environment variables instead.",
                             pattern.name
