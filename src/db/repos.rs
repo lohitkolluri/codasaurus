@@ -87,38 +87,38 @@ pub async fn delete_repo(pool: &DbPool, id: i64) -> Result<(), sqlx::Error> {
         .await?;
     if let Some((ref name,)) = full_name {
         let like = format!("{name}/%");
-        let _ = sqlx::query("DELETE FROM review_jobs WHERE repo = $1")
+        sqlx::query("DELETE FROM review_jobs WHERE repo = $1")
             .bind(name)
             .execute(&mut *tx)
-            .await;
-        let _ = sqlx::query("DELETE FROM review_comments WHERE repo_pr LIKE $1")
+            .await?;
+        sqlx::query("DELETE FROM review_comments WHERE repo_pr LIKE $1")
             .bind(&like)
             .execute(&mut *tx)
-            .await;
-        let _ = sqlx::query("DELETE FROM reviewed_commits WHERE repo_pr LIKE $1")
+            .await?;
+        sqlx::query("DELETE FROM reviewed_commits WHERE repo_pr LIKE $1")
             .bind(&like)
             .execute(&mut *tx)
-            .await;
-        let _ = sqlx::query("DELETE FROM dismissed_findings WHERE repo_full_name = $1")
+            .await?;
+        sqlx::query("DELETE FROM dismissed_findings WHERE repo_full_name = $1")
             .bind(name)
             .execute(&mut *tx)
-            .await;
-        let _ = sqlx::query("DELETE FROM learned_rules WHERE repo_full_name = $1")
+            .await?;
+        sqlx::query("DELETE FROM learned_rules WHERE repo_full_name = $1")
             .bind(name)
             .execute(&mut *tx)
-            .await;
+            .await?;
     }
     // Prefer explicit cleanup so installs without ON DELETE CASCADE still succeed.
-    let _ = sqlx::query(
+    sqlx::query(
         "DELETE FROM findings WHERE review_id IN (SELECT id FROM reviews WHERE repo_id = $1)",
     )
     .bind(id)
     .execute(&mut *tx)
-    .await;
-    let _ = sqlx::query("DELETE FROM reviews WHERE repo_id = $1")
+    .await?;
+    sqlx::query("DELETE FROM reviews WHERE repo_id = $1")
         .bind(id)
         .execute(&mut *tx)
-        .await;
+        .await?;
     sqlx::query("DELETE FROM repos WHERE id = $1")
         .bind(id)
         .execute(&mut *tx)
