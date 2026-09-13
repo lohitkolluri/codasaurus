@@ -7,6 +7,7 @@
   import LoadingSpinner from "../../lib/LoadingSpinner.svelte";
   import ErrorState from "../../lib/ErrorState.svelte";
   import Pagination from "../../lib/Pagination.svelte";
+  import McpConnectors from "../../lib/McpConnectors.svelte";
 
   const RULES_PAGE_SIZE = 20;
 
@@ -1370,6 +1371,8 @@
               </div>
             {/if}
           </section>
+
+          <McpConnectors canEdit={canEditSettings} />
         </div>
 
       {:else if activeTab === "system"}
