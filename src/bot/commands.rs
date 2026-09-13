@@ -1722,7 +1722,7 @@ async fn spawn_fix(
                 parsed.push(p);
             }
         }
-        let findings = crate::detectors::run_all(&parsed, &config, None);
+        let findings = crate::detectors::run_all(&parsed, &config, Some(&ctx.repo_full_name));
         let fp_filter = fingerprint.as_deref();
         let with_codemod: Vec<_> = findings
             .findings

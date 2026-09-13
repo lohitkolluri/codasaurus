@@ -41,18 +41,17 @@ impl LearningStore {
         is_maintainer: bool,
     ) -> Result<()> {
         let fingerprint = finding.fingerprint();
-        let repo: Option<String> = None;
+        let repo = String::new();
         let by = dismissed_by.map(str::to_string);
         db_execute!(
             &self.pool,
             "INSERT INTO dismissed_findings (fingerprint, detector, file, line, message, repo_full_name, pr_number, dismissed_by, is_maintainer)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(fingerprint) DO UPDATE SET
+             ON CONFLICT(repo_full_name, fingerprint) DO UPDATE SET
                detector = excluded.detector,
                file = excluded.file,
                line = excluded.line,
                message = excluded.message,
-               repo_full_name = COALESCE(excluded.repo_full_name, dismissed_findings.repo_full_name),
                pr_number = COALESCE(excluded.pr_number, dismissed_findings.pr_number),
                dismissed_by = COALESCE(excluded.dismissed_by, dismissed_findings.dismissed_by),
                is_maintainer = dismissed_findings.is_maintainer OR excluded.is_maintainer",
@@ -110,17 +109,16 @@ impl LearningStore {
         dismissed_by: Option<&str>,
         is_maintainer: bool,
     ) -> Result<()> {
-        let repo = repo_full_name.map(str::to_string);
+        let repo = repo_full_name.unwrap_or("").to_string();
         let by = dismissed_by.map(str::to_string);
         db_execute!(
             &self.pool,
             "INSERT INTO dismissed_findings (fingerprint, detector, file, line, message, repo_full_name, pr_number, dismissed_by, is_maintainer)
              VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?)
-             ON CONFLICT(fingerprint) DO UPDATE SET
+             ON CONFLICT(repo_full_name, fingerprint) DO UPDATE SET
                detector = excluded.detector,
                file = excluded.file,
                message = excluded.message,
-               repo_full_name = COALESCE(excluded.repo_full_name, dismissed_findings.repo_full_name),
                pr_number = COALESCE(excluded.pr_number, dismissed_findings.pr_number),
                dismissed_by = COALESCE(excluded.dismissed_by, dismissed_findings.dismissed_by),
                is_maintainer = dismissed_findings.is_maintainer OR excluded.is_maintainer",
@@ -145,11 +143,17 @@ impl LearningStore {
         Ok(())
     }
 
-    pub async fn un_dismiss_fingerprint(&self, fingerprint: &str) -> Result<bool> {
+    pub async fn un_dismiss_fingerprint(
+        &self,
+        fingerprint: &str,
+        repo_full_name: Option<&str>,
+    ) -> Result<bool> {
+        let repo = repo_full_name.unwrap_or("");
         Ok(db_execute!(
             &self.pool,
-            "DELETE FROM dismissed_findings WHERE fingerprint = ?",
-            fingerprint
+            "DELETE FROM dismissed_findings WHERE fingerprint = ? AND repo_full_name = ?",
+            fingerprint,
+            repo
         )? > 0)
     }
 

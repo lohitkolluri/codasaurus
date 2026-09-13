@@ -55,7 +55,9 @@ pub async fn handle_thread_event(
             Ok(true)
         }
         "unresolved" => {
-            let removed = store.un_dismiss_fingerprint(&fp).await?;
+            let removed = store
+                .un_dismiss_fingerprint(&fp, Some(repo_full_name))
+                .await?;
             tracing::info!(
                 repo = %repo_full_name,
                 fingerprint = %fp,

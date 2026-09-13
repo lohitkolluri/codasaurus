@@ -162,7 +162,8 @@ CREATE INDEX IF NOT EXISTS idx_reviewed_commits_in_progress
     ON reviewed_commits (created_at ASC) WHERE status = 'in_progress';
 
 CREATE TABLE IF NOT EXISTS dismissed_findings (
-    fingerprint TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL,
+    repo_full_name TEXT NOT NULL DEFAULT '',
     detector TEXT NOT NULL,
     file TEXT NOT NULL,
     line INTEGER NOT NULL,
@@ -170,7 +171,8 @@ CREATE TABLE IF NOT EXISTS dismissed_findings (
     dismissed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     pr_number BIGINT,
     dismissed_by TEXT,
-    is_maintainer BOOLEAN NOT NULL DEFAULT FALSE
+    is_maintainer BOOLEAN NOT NULL DEFAULT FALSE,
+    PRIMARY KEY (repo_full_name, fingerprint)
 );
 
 CREATE TABLE IF NOT EXISTS learned_rules (
@@ -256,6 +258,58 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     migrate_v20_pre_merge_checks(pool).await?;
     migrate_v21_learning_rule_status(pool).await?;
     migrate_v22_symbol_embeddings(pool).await?;
+    migrate_v23_dismissed_findings_repo_key(pool).await?;
+    Ok(())
+}
+
+/// v23: `dismissed_findings` was keyed on `fingerprint` alone, so the same
+/// finding shape (detector+file+line+message) in two different repos shared
+/// one row — dismissing it in repo B silently overwrote/removed repo A's
+/// dismissal. Re-key to `(repo_full_name, fingerprint)`, using `''` as the
+/// "global" sentinel since a PRIMARY KEY column can't hold NULL.
+async fn migrate_v23_dismissed_findings_repo_key(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
+    if current.unwrap_or(0) >= 23 {
+        return Ok(());
+    }
+    sqlx::query(
+        "UPDATE dismissed_findings SET repo_full_name = '' WHERE repo_full_name IS NULL",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "ALTER TABLE dismissed_findings ALTER COLUMN repo_full_name SET DEFAULT ''",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query("ALTER TABLE dismissed_findings ALTER COLUMN repo_full_name SET NOT NULL")
+        .execute(pool)
+        .await?;
+    // Collapse any pre-existing cross-repo collisions (keep the most recent) before
+    // the new composite PK is enforced.
+    sqlx::query(
+        "DELETE FROM dismissed_findings a USING dismissed_findings b
+         WHERE a.fingerprint = b.fingerprint
+           AND a.repo_full_name = b.repo_full_name
+           AND a.ctid < b.ctid",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query("ALTER TABLE dismissed_findings DROP CONSTRAINT IF EXISTS dismissed_findings_pkey")
+        .execute(pool)
+        .await?;
+    sqlx::query(
+        "ALTER TABLE dismissed_findings ADD PRIMARY KEY (repo_full_name, fingerprint)",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (23) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -276,7 +330,7 @@ async fn migrate_v22_symbol_embeddings(pool: &PgPool) -> Result<(), sqlx::Error>
         tracing::warn!(error = %e, "pgvector extension unavailable; semantic index disabled");
         return Ok(());
     }
-    let _ = sqlx::query(
+    sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS repo_symbol_embeddings (
             id BIGSERIAL PRIMARY KEY,
@@ -293,13 +347,13 @@ async fn migrate_v22_symbol_embeddings(pool: &PgPool) -> Result<(), sqlx::Error>
         "#,
     )
     .execute(pool)
-    .await;
-    let _ = sqlx::query(
+    .await?;
+    sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_repo_symbol_embeddings_ivfflat \
          ON repo_symbol_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)",
     )
     .execute(pool)
-    .await;
+    .await?;
     sqlx::query(
         "INSERT INTO schema_version (version) VALUES (22) ON CONFLICT (version) DO NOTHING",
     )
@@ -316,7 +370,7 @@ async fn migrate_v21_learning_rule_status(pool: &PgPool) -> Result<(), sqlx::Err
     if current.unwrap_or(0) >= 21 {
         return Ok(());
     }
-    let _ = sqlx::query(
+    sqlx::query(
         r#"
         ALTER TABLE learned_rules
             ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'approved',
@@ -326,7 +380,7 @@ async fn migrate_v21_learning_rule_status(pool: &PgPool) -> Result<(), sqlx::Err
         "#,
     )
     .execute(pool)
-    .await;
+    .await?;
     Ok(())
 }
 
@@ -338,7 +392,7 @@ async fn migrate_v20_pre_merge_checks(pool: &PgPool) -> Result<(), sqlx::Error> 
     if current.unwrap_or(0) >= 20 {
         return Ok(());
     }
-    let _ = sqlx::query(
+    sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS pre_merge_check_runs (
             repo_full_name TEXT NOT NULL,
@@ -353,7 +407,7 @@ async fn migrate_v20_pre_merge_checks(pool: &PgPool) -> Result<(), sqlx::Error> 
         "#,
     )
     .execute(pool)
-    .await;
+    .await?;
     Ok(())
 }
 
@@ -366,7 +420,7 @@ async fn migrate_v19_symbol_index(pool: &PgPool) -> Result<(), sqlx::Error> {
         return Ok(());
     }
 
-    let _ = sqlx::query(
+    sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS repo_symbols (
             repo_full_name TEXT NOT NULL,
@@ -380,21 +434,21 @@ async fn migrate_v19_symbol_index(pool: &PgPool) -> Result<(), sqlx::Error> {
         "#,
     )
     .execute(pool)
-    .await;
+    .await?;
 
-    let _ = sqlx::query(
+    sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_repo_symbols_lookup ON repo_symbols(repo_full_name, file_path)",
     )
     .execute(pool)
-    .await;
+    .await?;
 
-    let _ = sqlx::query(
+    sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_repo_symbols_name ON repo_symbols(repo_full_name, symbol_name)",
     )
     .execute(pool)
-    .await;
+    .await?;
 
-    let _ = sqlx::query(
+    sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS repo_edges (
             repo_full_name TEXT NOT NULL,
@@ -406,21 +460,21 @@ async fn migrate_v19_symbol_index(pool: &PgPool) -> Result<(), sqlx::Error> {
         "#,
     )
     .execute(pool)
-    .await;
+    .await?;
 
-    let _ = sqlx::query(
+    sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_repo_edges_lookup ON repo_edges(repo_full_name, from_symbol)",
     )
     .execute(pool)
-    .await;
+    .await?;
 
-    let _ = sqlx::query(
+    sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_repo_edges_target ON repo_edges(repo_full_name, to_symbol)",
     )
     .execute(pool)
-    .await;
+    .await?;
 
-    let _ = sqlx::query(
+    sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS index_status (
             repo_full_name TEXT PRIMARY KEY,
@@ -431,7 +485,7 @@ async fn migrate_v19_symbol_index(pool: &PgPool) -> Result<(), sqlx::Error> {
         "#,
     )
     .execute(pool)
-    .await;
+    .await?;
 
     sqlx::query(
         "INSERT INTO schema_version (version) VALUES (19) ON CONFLICT (version) DO NOTHING",
@@ -451,13 +505,13 @@ async fn migrate_v18_confidence(pool: &PgPool) -> Result<(), sqlx::Error> {
         return Ok(());
     }
 
-    let _ = sqlx::query("ALTER TABLE findings ADD COLUMN IF NOT EXISTS confidence INTEGER")
+    sqlx::query("ALTER TABLE findings ADD COLUMN IF NOT EXISTS confidence INTEGER")
         .execute(pool)
-        .await;
+        .await?;
 
-    let _ = sqlx::query("ALTER TABLE findings ADD COLUMN IF NOT EXISTS judge_rationale TEXT")
+    sqlx::query("ALTER TABLE findings ADD COLUMN IF NOT EXISTS judge_rationale TEXT")
         .execute(pool)
-        .await;
+        .await?;
 
     sqlx::query(
         "INSERT INTO schema_version (version) VALUES (18) ON CONFLICT (version) DO NOTHING",
@@ -476,7 +530,7 @@ async fn migrate_v17_baseline_and_gates(pool: &PgPool) -> Result<(), sqlx::Error
         return Ok(());
     }
 
-    let _ = sqlx::query(
+    sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS finding_baseline (
             repo_full_name TEXT NOT NULL,
@@ -489,15 +543,15 @@ async fn migrate_v17_baseline_and_gates(pool: &PgPool) -> Result<(), sqlx::Error
         "#,
     )
     .execute(pool)
-    .await;
+    .await?;
 
-    let _ = sqlx::query(
+    sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_finding_baseline_repo ON finding_baseline(repo_full_name)",
     )
     .execute(pool)
-    .await;
+    .await?;
 
-    let _ = sqlx::query(
+    sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS pr_diff_lines (
             repo_full_name TEXT NOT NULL,
@@ -509,15 +563,15 @@ async fn migrate_v17_baseline_and_gates(pool: &PgPool) -> Result<(), sqlx::Error
         "#,
     )
     .execute(pool)
-    .await;
+    .await?;
 
-    let _ = sqlx::query(
+    sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_pr_diff_lines_lookup ON pr_diff_lines(repo_full_name, pr_number, file_path)",
     )
     .execute(pool)
-    .await;
+    .await?;
 
-    let _ = sqlx::query(
+    sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS quality_gates (
             repo_full_name TEXT PRIMARY KEY,
@@ -527,7 +581,7 @@ async fn migrate_v17_baseline_and_gates(pool: &PgPool) -> Result<(), sqlx::Error
         "#,
     )
     .execute(pool)
-    .await;
+    .await?;
 
     sqlx::query(
         "INSERT INTO schema_version (version) VALUES (17) ON CONFLICT (version) DO NOTHING",
@@ -546,23 +600,23 @@ async fn migrate_v16_dismissal_provenance(pool: &PgPool) -> Result<(), sqlx::Err
         return Ok(());
     }
 
-    let _ = sqlx::query("ALTER TABLE dismissed_findings ADD COLUMN IF NOT EXISTS pr_number BIGINT")
+    sqlx::query("ALTER TABLE dismissed_findings ADD COLUMN IF NOT EXISTS pr_number BIGINT")
         .execute(pool)
-        .await;
+        .await?;
     let _ =
         sqlx::query("ALTER TABLE dismissed_findings ADD COLUMN IF NOT EXISTS dismissed_by TEXT")
             .execute(pool)
-            .await;
-    let _ = sqlx::query(
+            .await?;
+    sqlx::query(
         "ALTER TABLE dismissed_findings ADD COLUMN IF NOT EXISTS is_maintainer BOOLEAN NOT NULL DEFAULT FALSE",
     )
     .execute(pool)
-    .await;
-    let _ = sqlx::query(
+    .await?;
+    sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_dismissed_detector_pr ON dismissed_findings (detector, pr_number)",
     )
     .execute(pool)
-    .await;
+    .await?;
 
     sqlx::query(
         "INSERT INTO schema_version (version) VALUES (16) ON CONFLICT (version) DO NOTHING",
@@ -581,11 +635,11 @@ async fn migrate_v15_invites_email_index(pool: &PgPool) -> Result<(), sqlx::Erro
         return Ok(());
     }
 
-    let _ = sqlx::query(
+    sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_invites_email_pending ON invites (lower(email)) WHERE accepted_at IS NULL",
     )
     .execute(pool)
-    .await;
+    .await?;
 
     sqlx::query(
         "INSERT INTO schema_version (version) VALUES (15) ON CONFLICT (version) DO NOTHING",
@@ -607,19 +661,19 @@ async fn migrate_v14_repo_scoped_learning(pool: &PgPool) -> Result<(), sqlx::Err
     let _ =
         sqlx::query("ALTER TABLE dismissed_findings ADD COLUMN IF NOT EXISTS repo_full_name TEXT")
             .execute(pool)
-            .await;
-    let _ = sqlx::query("ALTER TABLE learned_rules ADD COLUMN IF NOT EXISTS repo_full_name TEXT")
+            .await?;
+    sqlx::query("ALTER TABLE learned_rules ADD COLUMN IF NOT EXISTS repo_full_name TEXT")
         .execute(pool)
-        .await;
-    let _ = sqlx::query(
+        .await?;
+    sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_dismissed_repo ON dismissed_findings(repo_full_name)",
     )
     .execute(pool)
-    .await;
+    .await?;
     let _ =
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_learned_repo ON learned_rules(repo_full_name)")
             .execute(pool)
-            .await;
+            .await?;
 
     sqlx::query(
         "INSERT INTO schema_version (version) VALUES (14) ON CONFLICT (version) DO NOTHING",
@@ -638,14 +692,14 @@ async fn migrate_v13_bootstrap_owner(pool: &PgPool) -> Result<(), sqlx::Error> {
         return Ok(());
     }
 
-    let _ = sqlx::query(
+    sqlx::query(
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_bootstrap BOOLEAN NOT NULL DEFAULT FALSE",
     )
     .execute(pool)
-    .await;
+    .await?;
 
     // Existing installs: earliest owner becomes the bootstrap account.
-    let _ = sqlx::query(
+    sqlx::query(
         r#"
         UPDATE users SET is_bootstrap = TRUE
         WHERE id = (
@@ -658,7 +712,7 @@ async fn migrate_v13_bootstrap_owner(pool: &PgPool) -> Result<(), sqlx::Error> {
         "#,
     )
     .execute(pool)
-    .await;
+    .await?;
 
     sqlx::query(
         "INSERT INTO schema_version (version) VALUES (13) ON CONFLICT (version) DO NOTHING",
@@ -678,9 +732,9 @@ async fn migrate_v12_roles_and_invites(pool: &PgPool) -> Result<(), sqlx::Error>
     }
 
     // Drop old CHECK, migrate roles, re-add CHECK for new role set.
-    let _ = sqlx::query("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check")
+    sqlx::query("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check")
         .execute(pool)
-        .await;
+        .await?;
     sqlx::query("UPDATE users SET role = 'owner' WHERE role = 'admin'")
         .execute(pool)
         .await?;
@@ -693,11 +747,11 @@ async fn migrate_v12_roles_and_invites(pool: &PgPool) -> Result<(), sqlx::Error>
     sqlx::query("ALTER TABLE users ALTER COLUMN role SET DEFAULT 'owner'")
         .execute(pool)
         .await?;
-    let _ = sqlx::query(
+    sqlx::query(
         "ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('owner', 'maintainer', 'viewer'))",
     )
     .execute(pool)
-    .await;
+    .await?;
 
     sqlx::query(
         r#"
@@ -715,11 +769,11 @@ async fn migrate_v12_roles_and_invites(pool: &PgPool) -> Result<(), sqlx::Error>
     )
     .execute(pool)
     .await?;
-    let _ = sqlx::query(
+    sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_invites_pending ON invites (expires_at ASC) WHERE accepted_at IS NULL",
     )
     .execute(pool)
-    .await;
+    .await?;
 
     sqlx::query(
         "INSERT INTO schema_version (version) VALUES (12) ON CONFLICT (version) DO NOTHING",
@@ -762,7 +816,7 @@ async fn migrate_v11_timestamptz_and_indexes(pool: &PgPool) -> Result<(), sqlx::
         alter_ts("review_jobs", "updated_at", false),
         alter_ts("agent_events", "ts", false),
     ] {
-        let _ = sqlx::query(stmt).execute(pool).await;
+        sqlx::query(stmt).execute(pool).await?;
     }
 
     for stmt in [
@@ -782,7 +836,7 @@ async fn migrate_v11_timestamptz_and_indexes(pool: &PgPool) -> Result<(), sqlx::
         "ALTER TABLE findings DROP CONSTRAINT IF EXISTS findings_review_id_fkey",
         "ALTER TABLE findings ADD CONSTRAINT findings_review_id_fkey FOREIGN KEY (review_id) REFERENCES reviews(id) ON DELETE CASCADE",
     ] {
-        let _ = sqlx::query(stmt).execute(pool).await;
+        sqlx::query(stmt).execute(pool).await?;
     }
 
     sqlx::query(
