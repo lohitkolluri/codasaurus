@@ -41,6 +41,7 @@
   <div class="dashboard-hero">
     <div>
       <p class="eyebrow">Overview</p>
+      <div class="scan-rule"></div>
       <h1 class="page-title">Dashboard</h1>
       <p class="page-description">
         Active repos, today's reviews, and recent PRs.

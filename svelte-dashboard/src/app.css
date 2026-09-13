@@ -16,16 +16,17 @@
     --text-3xl: 32px;
     --text-4xl: 48px;
 
-    /* Font families — system stack (no webfont round-trip) */
+    /* Font families — Manrope carries UI text, Fraunces (an optical-size
+       variable serif) is the signature: reserved for display headings only,
+       echoing the "excavated fossil" mark against an otherwise clean grid. */
     --font-body:
-        ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-        sans-serif;
+        "Manrope", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
     --font-mono:
         ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo,
         monospace;
     --font-display:
-        ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-        sans-serif;
+        "Fraunces", ui-serif, Georgia, serif;
 
     /* Motion (keep short — transform/opacity only) */
     --dur-fast: 120ms;
@@ -974,11 +975,58 @@ body,
 /* ── 13. Pages ──────────────────────────────────────────────────── */
 
 .page-title {
+    font-family: var(--font-display);
     font-size: var(--text-2xl);
-    font-weight: var(--weight-bold);
+    font-weight: 600;
     margin-bottom: var(--space-6);
-    letter-spacing: -0.03em;
+    letter-spacing: -0.01em;
     line-height: 1.15;
+}
+
+/* Signature: a thin scanning rule — the detector "sweeping" the page,
+   echoed from the landing hero down into every section header. */
+.scan-rule {
+    position: relative;
+    height: 2px;
+    width: 100%;
+    max-width: 220px;
+    margin: var(--space-3) 0 var(--space-5);
+    background: var(--border);
+    overflow: hidden;
+    border-radius: 2px;
+}
+
+.scan-rule::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    width: 40%;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        var(--accent-soft),
+        transparent
+    );
+    animation: scan-sweep 3.2s ease-in-out infinite;
+}
+
+@keyframes scan-sweep {
+    0% {
+        transform: translateX(-120%);
+    }
+    100% {
+        transform: translateX(320%);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .scan-rule::after {
+        animation: none;
+        inset: 0;
+        width: 100%;
+        transform: none;
+        background: var(--accent-soft);
+    }
 }
 
 .page-toolbar {
@@ -1824,9 +1872,10 @@ body,
 }
 
 .auth-heading {
+    font-family: var(--font-display);
     font-size: var(--text-2xl);
-    font-weight: var(--weight-bold);
-    letter-spacing: -0.04em;
+    font-weight: 600;
+    letter-spacing: -0.01em;
     margin: 0 0 var(--space-2);
 }
 
@@ -1996,9 +2045,10 @@ body,
 }
 
 .wizard-title {
-    font-size: 1.375rem;
-    font-weight: 650;
-    letter-spacing: -0.03em;
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
     margin: 0 0 var(--space-2);
     color: var(--text-primary);
 }
@@ -2459,12 +2509,20 @@ body,
 }
 
 .center-page h1 {
+    font-family: var(--font-display);
     font-size: var(--text-4xl);
-    font-weight: var(--weight-bold);
+    font-weight: 600;
+    letter-spacing: -0.01em;
 }
 
 .center-page p {
     color: var(--text-muted);
+    max-width: 32ch;
+    text-align: center;
+}
+
+.center-page .primary {
+    margin-top: var(--space-2);
 }
 
 /* ── 30. Page with Sidebar (Review Detail) ─────────────────────── */

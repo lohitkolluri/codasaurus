@@ -61,6 +61,7 @@
 
     <main class="landing-hero">
       <p class="landing-eyebrow">GitHub App</p>
+      <div class="scan-rule" style="margin-inline:auto"></div>
       <h1>Codasaurus</h1>
       <p class="landing-lead">
         Self-hosted PR review. Detectors run on every diff; your LLM stays optional (BYOK).

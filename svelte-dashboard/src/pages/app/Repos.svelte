@@ -205,7 +205,18 @@
           </thead>
           <tbody>
             {#each pageRepos as repo}
-              <tr onclick={() => openRepo(repo.id)}>
+              <tr
+                class="repo-row"
+                role="button"
+                tabindex="0"
+                onclick={() => openRepo(repo.id)}
+                onkeydown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    openRepo(repo.id);
+                  }
+                }}
+              >
                 <td class="repo-cell">
                   <span class="repo-icon" aria-hidden="true">
                     <svg
@@ -347,6 +358,10 @@
   }
   tbody tr:hover {
     background: var(--bg-secondary);
+  }
+  tbody tr:focus-visible {
+    outline: 2px solid var(--accent-soft);
+    outline-offset: -2px;
   }
   th,
   td {

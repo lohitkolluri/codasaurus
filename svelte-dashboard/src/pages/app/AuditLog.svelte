@@ -54,6 +54,7 @@
       <div class="page-toolbar compact" style="margin-bottom: 0">
         <div>
           <p class="eyebrow">Security</p>
+          <div class="scan-rule"></div>
           <h1 class="page-title">Audit log</h1>
           <p class="page-description">
             Security and configuration events for this instance.

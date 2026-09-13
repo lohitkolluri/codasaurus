@@ -177,6 +177,7 @@
   <div class="page-toolbar compact stats-hero">
     <div>
       <p class="eyebrow">Analytics</p>
+      <div class="scan-rule"></div>
       <h1 class="page-title">Stats</h1>
       <p class="page-description">
         Week-over-week KPIs, then trends and detector mix.
@@ -374,7 +375,7 @@
             {#if detectors.length > DETECTOR_PAGE}
               <div class="detector-page-meta">
                 <span>
-                  {detectors.length} detectors · page {detectorPageSafe} of {detectorPages}
+                  {detectors.length} detectors ï¿½ page {detectorPageSafe} of {detectorPages}
                 </span>
                 <Pagination
                   page={detectorPageSafe}

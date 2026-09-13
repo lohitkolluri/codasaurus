@@ -204,6 +204,7 @@
   <div class="page-toolbar">
     <div>
       <p class="eyebrow">Access</p>
+      <div class="scan-rule"></div>
       <h1 class="page-title">Team</h1>
       <p class="page-description">
         Owners, maintainers, and viewers. Invite with a shareable link (no SMTP).
