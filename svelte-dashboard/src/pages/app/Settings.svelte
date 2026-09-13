@@ -436,10 +436,12 @@
         jiraEmail = data.jira_email ?? "";
         jiraApiToken = data.jira_api_token ?? "";
         linearApiKey = data.linear_api_key ?? "";
-        try {
-          const lr = await api.get("/api/learning/rules");
-          learnedRules = lr.rules || [];
-        } catch { learnedRules = []; }
+        if ($isMaintainer) {
+          try {
+            const lr = await api.get("/api/learning/rules");
+            learnedRules = lr.rules || [];
+          } catch { learnedRules = []; }
+        }
       } catch (err) {
         error = err.message || "Failed to load settings";
       } finally {
@@ -1542,7 +1544,9 @@
             <h3 class="section-heading">Learning</h3>
             <p class="section-desc">Ignore rules taught by dismissing findings.</p>
           </header>
-          {#if learnedRules.length === 0}
+          {#if !$isMaintainer}
+            <p class="empty-note">Only maintainers can view learned rules.</p>
+          {:else if learnedRules.length === 0}
             <p class="empty-note">No learned ignore rules yet.</p>
           {:else}
             <div class="detector-list">
