@@ -17,6 +17,7 @@ pub(crate) async fn maybe_post_auto_improve(
     state: &Option<ReviewState>,
     max_diff_chars: usize,
     max_issues: usize,
+    mcp_tools: &[crate::mcp::McpToolSpec],
 ) -> Result<()> {
     let llm_files = crate::llm::filter_llm_files(files);
     if llm_files.is_empty() {
@@ -62,7 +63,7 @@ pub(crate) async fn maybe_post_auto_improve(
         });
     }
 
-    let output = crate::llm::review_diff(&diff, llm_cfg, Some(&grounded_ctx)).await?;
+    let output = crate::llm::review_diff(&diff, llm_cfg, Some(&grounded_ctx), mcp_tools).await?;
     let known_paths: Vec<String> = files
         .iter()
         .filter_map(|f| f["filename"].as_str().map(str::to_string))

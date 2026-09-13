@@ -14,6 +14,7 @@ pub mod graph;
 pub mod index;
 pub mod learning;
 pub mod llm;
+pub mod mcp;
 pub mod metrics;
 pub mod oidc;
 pub mod parser;

@@ -110,6 +110,11 @@ pub struct CheckConfig {
     #[serde(default = "default_true")]
     pub dependency_confusion: bool,
 
+    /// Allow the review LLM to call configured MCP connector tools
+    /// (e.g. Context7) during review. Off by default — a repo must opt in.
+    #[serde(default)]
+    pub mcp_tools: bool,
+
     /// Glob patterns for files/directories to skip during scanning
     #[serde(default = "default_exclude_patterns")]
     pub exclude_patterns: Vec<String>,
@@ -403,6 +408,7 @@ impl Default for Config {
                 dependency_vulns: true,
                 test_coverage: true,
                 dependency_confusion: true,
+                mcp_tools: false,
                 exclude_patterns: default_exclude_patterns(),
             },
             behavior: BehaviorConfig {
@@ -448,6 +454,7 @@ fn apply_enabled_flag(checks: &mut CheckConfig, key: &str, value: &str) {
         "dependency_vulns_enabled" => checks.dependency_vulns = enabled,
         "test_coverage_enabled" => checks.test_coverage = enabled,
         "dependency_confusion_enabled" => checks.dependency_confusion = enabled,
+        "mcp_tools_enabled" => checks.mcp_tools = enabled,
         _ => {}
     }
 }
@@ -635,6 +642,7 @@ fn apply_detector_key(checks: &mut CheckConfig, key: &str, enabled: bool) {
         "dependency_vulns" => checks.dependency_vulns = enabled,
         "test_coverage" => checks.test_coverage = enabled,
         "dependency_confusion" => checks.dependency_confusion = enabled,
+        "mcp_tools" => checks.mcp_tools = enabled,
         _ => {}
     }
 }

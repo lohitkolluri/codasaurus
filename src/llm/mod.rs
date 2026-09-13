@@ -470,10 +470,16 @@ impl fmt::Display for ReviewContext {
     }
 }
 
+/// Bounded tool-calling round-trips per review. Always terminates: the final
+/// allowed round is sent with `tool_choice: "none"` so a parseable structured
+/// output comes back even if the model still wants to call a tool.
+const MAX_TOOL_ITERATIONS: usize = 4;
+
 pub async fn review_diff(
     diff: &str,
     config: &LlmConfig,
     context: Option<&ReviewContext>,
+    mcp_tools: &[crate::mcp::McpToolSpec],
 ) -> Result<LlmReviewOutput> {
     let pool = crate::bot::CONFIG_POOL.get();
     budget::assert_within_budget(pool).await?;
@@ -495,6 +501,7 @@ pub async fn review_diff(
         config,
         &prompt,
         prompt_chars,
+        mcp_tools,
     )
     .await;
 
@@ -510,6 +517,7 @@ pub async fn review_diff(
                 config,
                 &prompt,
                 prompt_chars,
+                mcp_tools,
             )
             .await
         }
@@ -526,6 +534,7 @@ async fn review_diff_once(
     config: &LlmConfig,
     prompt: &str,
     prompt_chars: usize,
+    mcp_tools: &[crate::mcp::McpToolSpec],
 ) -> Result<LlmReviewOutput> {
     let pool = crate::bot::CONFIG_POOL.get();
     let started = std::time::Instant::now();
@@ -577,70 +586,135 @@ suggestion (concrete fix ≤40 words), confidence, and rationale citing symbols/
 - If the PR description states requirements, verify the diff actually implements them
 - Empty issues + verdict \"ship\" is an excellent outcome when the change is solid";
 
-    let body = json!({
-        "model": model,
-        "messages": [
-            {
-                "role": "system",
-                "content": system_message_content(system_prompt, model, base_url)
+    let mut messages = vec![
+        json!({
+            "role": "system",
+            "content": system_message_content(system_prompt, model, base_url)
+        }),
+        json!({
+            "role": "user",
+            "content": prompt
+        }),
+    ];
+
+    let tool_specs: Vec<serde_json::Value> = mcp_tools
+        .iter()
+        .map(|t| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": t.qualified_name,
+                    "description": t.description,
+                    "parameters": t.input_schema,
+                }
+            })
+        })
+        .collect();
+
+    let resp_json = loop {
+        let iteration_budget_ok = if messages.len() > 2 {
+            budget::assert_within_budget(pool).await.is_ok()
+        } else {
+            true
+        };
+        let force_final = messages.len() > 2 * MAX_TOOL_ITERATIONS || !iteration_budget_ok;
+
+        let mut body = json!({
+            "model": model,
+            "messages": messages,
+            "response_format": response_format,
+            "max_tokens": config.max_tokens,
+            "temperature": config.temperature
+        });
+        if !tool_specs.is_empty() {
+            let obj = body.as_object_mut().expect("body is an object");
+            obj.insert("tools".to_string(), json!(tool_specs));
+            obj.insert(
+                "tool_choice".to_string(),
+                json!(if force_final { "none" } else { "auto" }),
+            );
+        }
+
+        let resp = retry_async(
+            &RetryConfig::api_default(),
+            "llm_chat_completion",
+            &is_reqwest_error_retryable,
+            || async {
+                let mut request = client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .json(&body);
+                if !api_key.is_empty() {
+                    request = request.bearer_auth(api_key);
+                }
+                if base_url.trim_end_matches('/') == default_base_url() {
+                    request = request
+                        .header("HTTP-Referer", "https://github.com/lohitkolluri/codasaurus")
+                        .header("X-Title", "Codasaurus");
+                }
+                request.send().await.map_err(Into::into)
             },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        "response_format": response_format,
-        "max_tokens": config.max_tokens,
-        "temperature": config.temperature
-    });
-
-    let resp = retry_async(
-        &RetryConfig::api_default(),
-        "llm_chat_completion",
-        &is_reqwest_error_retryable,
-        || async {
-            let mut request = client
-                .post(&url)
-                .header("Content-Type", "application/json")
-                .json(&body);
-            if !api_key.is_empty() {
-                request = request.bearer_auth(api_key);
-            }
-            if base_url.trim_end_matches('/') == default_base_url() {
-                request = request
-                    .header("HTTP-Referer", "https://github.com/lohitkolluri/codasaurus")
-                    .header("X-Title", "Codasaurus");
-            }
-            request.send().await.map_err(Into::into)
-        },
-    )
-    .await;
-
-    let latency_ms = started.elapsed().as_millis() as u64;
-    let outcome = if resp.is_ok() { "ok" } else { "error" };
-    if let Some(pool) = pool {
-        crate::db::events::emit_llm_call(
-            pool,
-            "review_diff",
-            model,
-            prompt_chars,
-            config.max_tokens,
-            true,
-            latency_ms,
-            outcome,
         )
         .await;
-    }
 
-    let resp = resp?;
-    let status = resp.status();
-    if !status.is_success() {
-        crate::metrics::record_llm_error();
-        let error_text = resp.text().await.unwrap_or_default();
-        bail!("LLM API returned {status}: {error_text}");
-    }
+        let latency_ms = started.elapsed().as_millis() as u64;
+        let outcome = if resp.is_ok() { "ok" } else { "error" };
+        if let Some(pool) = pool {
+            crate::db::events::emit_llm_call(
+                pool,
+                "review_diff",
+                model,
+                prompt_chars,
+                config.max_tokens,
+                true,
+                latency_ms,
+                outcome,
+            )
+            .await;
+        }
 
-    let resp_json: serde_json::Value = resp.json().await?;
+        let resp = resp?;
+        let status = resp.status();
+        if !status.is_success() {
+            crate::metrics::record_llm_error();
+            let error_text = resp.text().await.unwrap_or_default();
+            bail!("LLM API returned {status}: {error_text}");
+        }
+
+        let resp_json: serde_json::Value = resp.json().await?;
+        let message = &resp_json["choices"][0]["message"];
+        let tool_calls = message["tool_calls"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+
+        if tool_calls.is_empty() || force_final {
+            break resp_json;
+        }
+
+        messages.push(message.clone());
+        for call in &tool_calls {
+            let call_id = call["id"].as_str().unwrap_or_default().to_string();
+            let name = call["function"]["name"].as_str().unwrap_or_default();
+            let args_str = call["function"]["arguments"].as_str().unwrap_or("{}");
+            let args: serde_json::Value = serde_json::from_str(args_str).unwrap_or(json!({}));
+
+            let result_text = match pool {
+                Some(pool) => match crate::mcp::call_tool(pool, name, &args).await {
+                    Ok(text) => text,
+                    Err(e) => format!("error calling tool: {e}"),
+                },
+                None => "error: no database pool available for tool calls".to_string(),
+            };
+
+            messages.push(json!({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": result_text,
+            }));
+        }
+    };
+
     let content = resp_json["choices"][0]["message"]["content"]
         .as_str()
         .context("LLM response missing content")?;
@@ -692,7 +766,6 @@ pub async fn summarize_pr(
 ) -> Result<String> {
     assert_endpoint_safe(config).await?;
     let client = llm_client()?;
-
 
     let system_prompt = "\
 You write a very short PR review summary for engineers. Plain prose only. \
@@ -1153,7 +1226,8 @@ Empty verdicts when nothing is grounded.";
     let max_tokens = 1024;
     crate::metrics::record_llm_request(user_prompt.len() + system_prompt.len(), max_tokens, false);
 
-    let text = chat_completion_text(client, config, system_prompt, &user_prompt, max_tokens).await?;
+    let text =
+        chat_completion_text(client, config, system_prompt, &user_prompt, max_tokens).await?;
     parse_judge_verdicts(&text)
 }
 

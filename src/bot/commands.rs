@@ -563,7 +563,7 @@ async fn spawn_improve(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) {
             )),
         };
 
-        let output = crate::llm::review_diff(&diff, &llm, Some(&review_ctx)).await?;
+        let output = crate::llm::review_diff(&diff, &llm, Some(&review_ctx), &[]).await?;
         let known_paths: Vec<String> = files
             .iter()
             .filter_map(|f| f["filename"].as_str().map(str::to_string))

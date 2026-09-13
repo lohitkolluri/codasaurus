@@ -28,6 +28,7 @@ fn all_checks_config() -> Config {
             dependency_vulns: true,
             test_coverage: false,
             dependency_confusion: true,
+            mcp_tools: false,
             exclude_patterns: vec![],
         },
         ..Config::default()

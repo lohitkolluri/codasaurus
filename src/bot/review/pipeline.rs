@@ -1330,6 +1330,17 @@ pub async fn review_pr_with_options(
                 files.len(),
                 runtime.auto_improve_max_files,
             ) {
+                // Per-repo opt-in choke point: only fetch MCP tools when this
+                // repo's config explicitly enables them. Empty elsewhere.
+                let mcp_tools = if config.checks.mcp_tools {
+                    match pool {
+                        Some(pool) => crate::mcp::list_enabled_tools(pool).await,
+                        None => Vec::new(),
+                    }
+                } else {
+                    Vec::new()
+                };
+
                 if let Err(e) = maybe_post_auto_improve(
                     client,
                     &auth_header,
@@ -1341,6 +1352,7 @@ pub async fn review_pr_with_options(
                     &state,
                     runtime.auto_improve_max_diff_chars,
                     crate::bot::agent_mode::agent_llm_issue_cap(agent_signal.is_agent),
+                    &mcp_tools,
                 )
                 .await
                 {
