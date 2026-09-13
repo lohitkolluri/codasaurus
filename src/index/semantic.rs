@@ -137,7 +137,10 @@ pub async fn related_symbols(
     if changed_symbols.is_empty() {
         return Ok(Vec::new());
     }
-    let embeddings = crate::index::embed::embed_texts(llm_cfg, changed_symbols).await?;
+    // embed_texts forwards the whole slice in one request; cap at the provider's
+    // documented batch limit (see index::embed) instead of erroring out on large PRs.
+    let symbols_capped = &changed_symbols[..changed_symbols.len().min(100)];
+    let embeddings = crate::index::embed::embed_texts(llm_cfg, symbols_capped).await?;
     if embeddings.is_empty() {
         return Ok(Vec::new());
     }
@@ -175,7 +178,7 @@ pub async fn related_symbols(
             });
         }
     }
-    out.sort_by(|a, b| a.distance.partial_cmp(&b.distance).unwrap());
+    out.sort_by(|a, b| a.distance.total_cmp(&b.distance));
     out.truncate(k);
     Ok(out)
 }

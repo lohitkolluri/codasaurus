@@ -18,7 +18,11 @@ pub fn router() -> Router<AppState> {
         .route("/rules/{id}/archive", post(archive_rule))
 }
 
-async fn list_rules(State(state): State<AppState>) -> Result<Json<serde_json::Value>, ApiError> {
+async fn list_rules(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    super::rbac::require_maintainer(&state, &headers).await?;
     let store = LearningStore::from_pool(&state.pool);
     let rules = store
         .list_rules()

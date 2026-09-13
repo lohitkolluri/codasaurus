@@ -260,12 +260,12 @@ async fn get_review_sarif(
     let sarif =
         crate::detectors::sarif::db_findings_to_sarif(&findings, &repo_full_name, &commit_sha);
 
-    Ok(axum::response::Response::builder()
+    axum::response::Response::builder()
         .header("content-type", "application/sarif+json")
         .body(axum::body::Body::from(
             serde_json::to_vec(&sarif).unwrap_or_default(),
         ))
-        .unwrap())
+        .map_err(|e| ApiError::internal(e.to_string()))
 }
 
 /// POST /api/reviews/dismiss — dismiss a finding into the learning store

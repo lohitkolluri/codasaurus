@@ -53,11 +53,14 @@ pub async fn embed_texts(
                     a.iter()
                         .filter_map(|v| v.as_f64())
                         .map(|v| v as f32)
-                        .collect()
+                        .collect::<Vec<f32>>()
                 })
                 .unwrap_or_default()
         })
         .collect();
-    out.retain(|v| !v.is_empty());
+    // Reject vectors containing non-finite values (NaN/Inf) — these come from an
+    // external, untrusted embeddings endpoint and would otherwise corrupt pgvector
+    // distance comparisons downstream.
+    out.retain(|v| !v.is_empty() && v.iter().all(|f| f.is_finite()));
     Ok(out)
 }

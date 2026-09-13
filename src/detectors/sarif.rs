@@ -103,7 +103,7 @@ fn sarif_from(findings: &[SarifFinding], repo_full_name: &str, commit_sha: &str)
             let mut result = json!({
                 "ruleId": f.detector,
                 "level": sarif_level(f.severity),
-                "message": { "text": f.message },
+                "message": { "text": f.message.chars().take(2000).collect::<String>() },
                 "locations": [{
                     "physicalLocation": {
                         "artifactLocation": { "uri": f.file },
