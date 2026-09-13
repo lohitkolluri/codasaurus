@@ -39,7 +39,28 @@ pub fn detect(parsed_files: &[ParsedFile]) -> Vec<Finding> {
                 continue;
             }
             match registry::check_package(registry_name, &package) {
-                Ok(Some(true)) => {} // package exists
+                Ok(Some(true)) => {
+                    if let Some(popular) = typosquat_match(registry_name, &package) {
+                        findings.push(Finding {
+                            file: file.path.clone(),
+                            line: import.line,
+                            column: import.column,
+                            severity: "warning",
+                            detector: "hallucinated-imports".to_string(),
+                            message: format!(
+                                "Package `{package}` is one edit away from popular package `{popular}` — possible typosquat."
+                            ),
+                            suggestion: Some(format!(
+                                "Confirm `{package}` is intentional, not a misspelling of `{popular}`."
+                            )),
+                            codemod: None,
+                            confidence: None,
+                            judge_rationale: None,
+                            reachability: None,
+                            evidence: None,
+                        });
+                    }
+                }
                 Ok(Some(false)) => {
                     findings.push(Finding {
                         file: file.path.clone(),
@@ -239,6 +260,139 @@ fn is_go_stdlib(path: &str) -> bool {
     std_roots.contains(&root)
 }
 
+/// Popular packages per registry — typosquat targets attackers actually impersonate.
+static POPULAR_PACKAGES: LazyLock<std::collections::HashMap<&'static str, HashSet<&'static str>>> =
+    LazyLock::new(|| {
+        std::collections::HashMap::from([
+            (
+                "npm",
+                HashSet::from([
+                    "react",
+                    "lodash",
+                    "express",
+                    "axios",
+                    "chalk",
+                    "commander",
+                    "webpack",
+                    "eslint",
+                    "typescript",
+                    "jest",
+                    "babel",
+                    "moment",
+                    "request",
+                    "async",
+                    "underscore",
+                    "debug",
+                    "colors",
+                    "yargs",
+                    "dotenv",
+                    "uuid",
+                    "next",
+                    "vue",
+                    "prettier",
+                    "mocha",
+                    "socket.io",
+                ]),
+            ),
+            (
+                "pypi",
+                HashSet::from([
+                    "requests",
+                    "numpy",
+                    "pandas",
+                    "flask",
+                    "django",
+                    "boto3",
+                    "pytest",
+                    "urllib3",
+                    "pyyaml",
+                    "setuptools",
+                    "pillow",
+                    "cryptography",
+                    "click",
+                    "jinja2",
+                    "scipy",
+                    "matplotlib",
+                    "sqlalchemy",
+                    "attrs",
+                    "certifi",
+                ]),
+            ),
+            (
+                "crates.io",
+                HashSet::from([
+                    "serde",
+                    "tokio",
+                    "rand",
+                    "clap",
+                    "regex",
+                    "reqwest",
+                    "anyhow",
+                    "log",
+                    "thiserror",
+                    "futures",
+                    "chrono",
+                    "bytes",
+                    "hyper",
+                    "syn",
+                    "quote",
+                    "serde_json",
+                    "uuid",
+                    "async-trait",
+                ]),
+            ),
+            (
+                "go",
+                HashSet::from([
+                    "gin-gonic/gin",
+                    "gorilla/mux",
+                    "sirupsen/logrus",
+                    "spf13/cobra",
+                    "stretchr/testify",
+                    "gorm.io/gorm",
+                    "google/uuid",
+                    "pkg/errors",
+                ]),
+            ),
+        ])
+    });
+
+/// Flags `package` if it's within edit distance 1-2 of a popular package it isn't.
+/// Distance scales with name length so short names (e.g. "gin") don't false-positive
+/// against every 4-letter package.
+fn typosquat_match(registry: &str, package: &str) -> Option<&'static str> {
+    let popular = POPULAR_PACKAGES.get(registry)?;
+    if popular.contains(package) {
+        return None;
+    }
+    let max_distance = if package.len() <= 4 { 1 } else { 2 };
+    popular
+        .iter()
+        .find(|&&p| {
+            let dist = levenshtein(package, p);
+            dist > 0 && dist <= max_distance
+        })
+        .copied()
+}
+
+/// Standard Levenshtein edit distance (insert/delete/substitute), O(n*m).
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (n, m) = (a.len(), b.len());
+    let mut prev: Vec<usize> = (0..=m).collect();
+    let mut curr = vec![0; m + 1];
+    for i in 1..=n {
+        curr[0] = i;
+        for j in 1..=m {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[m]
+}
+
 pub(crate) fn is_builtin(package: &str, registry: &str) -> bool {
     match registry {
         "npm" => NPM_BUILTINS.contains(package),
@@ -260,6 +414,13 @@ pub(crate) fn is_builtin(package: &str, registry: &str) -> bool {
 #[cfg(test)]
 mod url_tests {
     use super::*;
+
+    #[test]
+    fn typosquat_flags_close_misspelling() {
+        assert_eq!(typosquat_match("pypi", "reqeusts"), Some("requests"));
+        assert_eq!(typosquat_match("pypi", "requests"), None);
+        assert_eq!(typosquat_match("npm", "lodash"), None);
+    }
 
     #[test]
     fn registry_urls_are_real_hosts() {
