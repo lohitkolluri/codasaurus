@@ -40,6 +40,7 @@ fn all_checks_config() -> Config {
             iac: true,
             dependency_vulns: true,
             test_coverage: false,
+            dependency_confusion: true,
             exclude_patterns: vec![],
         },
         ..Config::default()

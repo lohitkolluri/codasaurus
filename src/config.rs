@@ -105,6 +105,11 @@ pub struct CheckConfig {
     #[serde(default = "default_true")]
     pub test_coverage: bool,
 
+    /// Flag scoped npm deps (@company/foo) that also resolve on the public
+    /// registry — classic dependency-confusion supply-chain attack surface.
+    #[serde(default = "default_true")]
+    pub dependency_confusion: bool,
+
     /// Glob patterns for files/directories to skip during scanning
     #[serde(default = "default_exclude_patterns")]
     pub exclude_patterns: Vec<String>,
@@ -397,6 +402,7 @@ impl Default for Config {
                 iac: true,
                 dependency_vulns: true,
                 test_coverage: true,
+                dependency_confusion: true,
                 exclude_patterns: default_exclude_patterns(),
             },
             behavior: BehaviorConfig {
@@ -441,6 +447,7 @@ fn apply_enabled_flag(checks: &mut CheckConfig, key: &str, value: &str) {
         "iac_enabled" => checks.iac = enabled,
         "dependency_vulns_enabled" => checks.dependency_vulns = enabled,
         "test_coverage_enabled" => checks.test_coverage = enabled,
+        "dependency_confusion_enabled" => checks.dependency_confusion = enabled,
         _ => {}
     }
 }
@@ -627,6 +634,7 @@ fn apply_detector_key(checks: &mut CheckConfig, key: &str, enabled: bool) {
         "iac" => checks.iac = enabled,
         "dependency_vulns" => checks.dependency_vulns = enabled,
         "test_coverage" => checks.test_coverage = enabled,
+        "dependency_confusion" => checks.dependency_confusion = enabled,
         _ => {}
     }
 }

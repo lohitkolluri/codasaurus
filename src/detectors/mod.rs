@@ -6,6 +6,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
+pub mod dependency_confusion;
 pub mod dependency_vulns;
 pub mod graph;
 pub mod guidelines;
@@ -176,6 +177,10 @@ pub fn run_all(parsed_files: &[ParsedFile], config: &Config, repo: Option<&str>)
 
         if config.checks.test_coverage {
             handles.push(s.spawn(|| test_coverage::detect(parsed_files)));
+        }
+
+        if config.checks.dependency_confusion {
+            handles.push(s.spawn(|| dependency_confusion::detect(parsed_files)));
         }
 
         for handle in handles {
