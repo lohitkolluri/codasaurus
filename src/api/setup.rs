@@ -490,14 +490,26 @@ async fn resolve_public_url(state: &AppState, headers: &axum::http::HeaderMap) -
     if let Ok(url) = std::env::var("PUBLIC_URL") {
         return url;
     }
-    // Auto-detect from request Host header
+    // Auto-detect from request Host header. This is client-controlled and only
+    // used as a last-resort fallback before an operator sets `public_url`/`PUBLIC_URL`
+    // explicitly — reject anything that isn't a plain `host[:port]` so a spoofed
+    // Host can't smuggle a scheme, path, or userinfo into the generated GitHub App
+    // manifest (which would point the webhook/OAuth callback at an attacker's domain).
     if let Some(host) = headers.get("host").and_then(|v| v.to_str().ok()) {
-        let scheme = if host.starts_with("localhost") || host.starts_with("127.") {
-            "http"
-        } else {
-            "https"
-        };
-        return format!("{scheme}://{host}");
+        let valid = !host.is_empty()
+            && host.len() <= 253
+            && host
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'));
+        if valid {
+            let scheme = if host.starts_with("localhost") || host.starts_with("127.") {
+                "http"
+            } else {
+                "https"
+            };
+            return format!("{scheme}://{host}");
+        }
+        tracing::warn!(%host, "rejected malformed Host header while resolving public URL");
     }
     "http://localhost:3000".to_string()
 }
