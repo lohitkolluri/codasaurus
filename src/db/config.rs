@@ -172,6 +172,16 @@ pub async fn get_config(pool: &DbPool, key: &str) -> Result<Option<String>, sqlx
     Ok(value)
 }
 
+/// Prefer a non-empty DB-backed setting, fall back to an environment variable.
+pub async fn config_or_env(pool: &DbPool, db_key: &str, env_key: &str) -> Option<String> {
+    if let Ok(Some(v)) = get_config(pool, db_key).await {
+        if !v.is_empty() {
+            return Some(v);
+        }
+    }
+    std::env::var(env_key).ok().filter(|v| !v.is_empty())
+}
+
 pub async fn set_config(pool: &DbPool, key: &str, value: &str) -> Result<(), sqlx::Error> {
     db_execute!(
         pool,

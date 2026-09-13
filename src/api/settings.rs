@@ -449,14 +449,7 @@ async fn clear_mirrored_keys(pool: &db::DbPool, keys: &[&str]) -> Result<(), Api
     Ok(())
 }
 
-async fn config_or_env(pool: &db::DbPool, db_key: &str, env_key: &str) -> Option<String> {
-    if let Ok(Some(v)) = db::config::get_config(pool, db_key).await {
-        if !v.is_empty() {
-            return Some(v);
-        }
-    }
-    std::env::var(env_key).ok().filter(|v| !v.is_empty())
-}
+use db::config::config_or_env;
 
 fn http_client(secs: u64) -> Result<reqwest::Client, ApiError> {
     reqwest::Client::builder()

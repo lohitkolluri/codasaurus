@@ -372,16 +372,29 @@ pub async fn fetch_external_tickets(pr_title: &str, pr_body: &str) -> Vec<IssueC
     }
     linear_ids.truncate(5);
 
-    let jira_configured = std::env::var("JIRA_BASE_URL").is_ok()
-        && std::env::var("JIRA_EMAIL").is_ok()
-        && std::env::var("JIRA_API_TOKEN").is_ok();
-    let linear_configured = std::env::var("LINEAR_API_KEY").is_ok();
+    let (jira_base, jira_email, jira_token, linear_key) =
+        if let Some(pool) = crate::bot::CONFIG_POOL.get() {
+            tokio::join!(
+                crate::db::config::config_or_env(pool, "jira_base_url", "JIRA_BASE_URL"),
+                crate::db::config::config_or_env(pool, "jira_email", "JIRA_EMAIL"),
+                crate::db::config::config_or_env(pool, "jira_api_token", "JIRA_API_TOKEN"),
+                crate::db::config::config_or_env(pool, "linear_api_key", "LINEAR_API_KEY"),
+            )
+        } else {
+            (
+                std::env::var("JIRA_BASE_URL").ok(),
+                std::env::var("JIRA_EMAIL").ok(),
+                std::env::var("JIRA_API_TOKEN").ok(),
+                std::env::var("LINEAR_API_KEY").ok(),
+            )
+        };
 
-    if let (Ok(base), Ok(email), Ok(token)) = (
-        std::env::var("JIRA_BASE_URL"),
-        std::env::var("JIRA_EMAIL"),
-        std::env::var("JIRA_API_TOKEN"),
-    ) {
+    let jira_configured = jira_base.is_some() && jira_email.is_some() && jira_token.is_some();
+    let linear_configured = linear_key.is_some();
+
+    if let (Some(base), Some(email), Some(token)) =
+        (jira_base.clone(), jira_email.clone(), jira_token.clone())
+    {
         if crate::ssrf::validate_http_url(base.trim(), false).is_ok() {
             let client = match reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(8))
@@ -422,7 +435,7 @@ pub async fn fetch_external_tickets(pr_title: &str, pr_body: &str) -> Vec<IssueC
         );
     }
 
-    if let Ok(api_key) = std::env::var("LINEAR_API_KEY") {
+    if let Some(api_key) = linear_key {
         let client = match reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(8))
             .build()
