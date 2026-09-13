@@ -1346,6 +1346,7 @@ pub async fn review_pr_with_options(
                     &auth_header,
                     repo_name,
                     pr_number,
+                    head_sha,
                     &files,
                     &llm_cfg,
                     &review_ctx,
@@ -1353,6 +1354,8 @@ pub async fn review_pr_with_options(
                     runtime.auto_improve_max_diff_chars,
                     crate::bot::agent_mode::agent_llm_issue_cap(agent_signal.is_agent),
                     &mcp_tools,
+                    pool,
+                    config.checks.semantic_index,
                 )
                 .await
                 {

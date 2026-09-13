@@ -16,6 +16,23 @@ const MAX_SYMBOLS: usize = 24;
 const MAX_NEIGHBORS: usize = 8;
 const MAX_GROUNDING_CHARS: usize = 2_500;
 
+/// Symbol names touched by one patch (added/context lines), for feeding into
+/// the semantic index's `related_symbols` lookup.
+pub fn extract_symbols(patch: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for cap in SYMBOL_RE.captures_iter(patch) {
+        for i in 1..=4 {
+            if let Some(m) = cap.get(i) {
+                let name = m.as_str();
+                if name.len() >= 2 && name != "self" {
+                    out.push(name.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Build a short grounding block from changed paths + patch text.
 pub fn build_grounding_block(changed_paths: &[String], patches: &[(String, String)]) -> String {
     let mut symbols: BTreeSet<String> = BTreeSet::new();

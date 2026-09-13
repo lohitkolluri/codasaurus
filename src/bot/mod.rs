@@ -615,10 +615,16 @@ pub(crate) async fn handle_webhook(
                 let Some(pool) = bot_db_pool() else {
                     return;
                 };
-                let index_cfg = crate::config::Config::load_for_bot(Some(pool)).await.index;
+                let full_cfg = crate::config::Config::load_for_bot(Some(pool)).await;
+                let index_cfg = full_cfg.index;
                 if !index_cfg.enabled {
                     return;
                 }
+                let llm_cfg = if full_cfg.checks.semantic_index {
+                    crate::llm::LlmConfig::from_db_or_env(Some(pool)).await
+                } else {
+                    None
+                };
                 let Some(client) = crate::bot::review::github::GITHUB_CLIENT.as_ref() else {
                     return;
                 };
@@ -641,6 +647,7 @@ pub(crate) async fn handle_webhook(
                         &after_sha,
                         path,
                         &index_cfg,
+                        llm_cfg.as_ref(),
                     )
                     .await
                     {

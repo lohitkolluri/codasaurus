@@ -255,6 +255,56 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     migrate_v19_symbol_index(pool).await?;
     migrate_v20_pre_merge_checks(pool).await?;
     migrate_v21_learning_rule_status(pool).await?;
+    migrate_v22_symbol_embeddings(pool).await?;
+    Ok(())
+}
+
+/// v22: pgvector-backed semantic index on top of the v19 symbol graph. Fails
+/// open (warns, skips) when the `vector` extension isn't installed, so a
+/// plain Postgres instance stays fully functional without it.
+async fn migrate_v22_symbol_embeddings(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
+    if current.unwrap_or(0) >= 22 {
+        return Ok(());
+    }
+    if let Err(e) = sqlx::query("CREATE EXTENSION IF NOT EXISTS vector")
+        .execute(pool)
+        .await
+    {
+        tracing::warn!(error = %e, "pgvector extension unavailable; semantic index disabled");
+        return Ok(());
+    }
+    let _ = sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS repo_symbol_embeddings (
+            id BIGSERIAL PRIMARY KEY,
+            repo_full_name TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            symbol_name TEXT NOT NULL,
+            line INT NOT NULL,
+            content_hash TEXT NOT NULL,
+            embedding vector(1536) NOT NULL,
+            model TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (repo_full_name, file_path, symbol_name, line)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await;
+    let _ = sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_repo_symbol_embeddings_ivfflat \
+         ON repo_symbol_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)",
+    )
+    .execute(pool)
+    .await;
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (22) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

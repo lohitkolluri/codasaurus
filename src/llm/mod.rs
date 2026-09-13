@@ -29,6 +29,17 @@ fn llm_client() -> Result<&'static reqwest::Client> {
         .ok_or_else(|| anyhow::anyhow!("LLM HTTP client failed to initialize"))
 }
 
+/// Shared HTTP client for other LLM-adjacent modules (e.g. `index::embed`) that
+/// need the same timeout/pooling behavior without standing up a second client.
+pub fn shared_client() -> Result<&'static reqwest::Client> {
+    llm_client()
+}
+
+/// Public wrapper so non-review LLM calls (embeddings) get the same SSRF gate.
+pub async fn assert_embedding_endpoint_safe(config: &LlmConfig) -> Result<()> {
+    assert_endpoint_safe(config).await
+}
+
 /// Reject private/metadata LLM endpoints at request time (DNS-resolved).
 async fn assert_base_url_safe(base_url: &str) -> Result<()> {
     let host = base_url.to_ascii_lowercase();
@@ -88,6 +99,19 @@ pub struct LlmConfig {
     /// provider) tried automatically when the primary endpoint's request fails.
     #[serde(default)]
     pub fallback: Option<LlmFallback>,
+
+    /// Model used for `/embeddings` calls (semantic index). BYOK — if the
+    /// configured `base_url` doesn't support embeddings, the feature fails
+    /// open per-repo rather than failing the review.
+    #[serde(default = "default_embedding_model")]
+    pub embedding_model: String,
+}
+
+fn default_embedding_model() -> String {
+    std::env::var("CODASAURUS_EMBEDDING_MODEL")
+        .ok()
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| "text-embedding-3-small".to_string())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,6 +202,7 @@ impl LlmConfig {
             temperature: default_temperature(),
             base_url,
             fallback,
+            embedding_model: default_embedding_model(),
         })
     }
 
@@ -263,6 +288,7 @@ impl LlmConfig {
                             temperature: default_temperature(),
                             base_url: base,
                             fallback,
+                            embedding_model: default_embedding_model(),
                         });
                     }
                 }

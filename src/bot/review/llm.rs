@@ -3,7 +3,11 @@ use crate::state::ReviewState;
 use anyhow::Result;
 use std::fmt::Write;
 
-use super::github::post_or_update_comment;
+use super::github::{post_or_update_comment, review_exists_with_marker};
+
+/// Marks the body of the LLM auto-fix suggestion review so its own idempotency
+/// check never collides with the Tier-1 review already posted for the same commit.
+const AUTO_FIX_MARKER: &str = "<!-- codasaurus:auto-fix -->";
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn maybe_post_auto_improve(
@@ -11,6 +15,7 @@ pub(crate) async fn maybe_post_auto_improve(
     auth_header: &str,
     repo_name: &str,
     pr_number: i64,
+    head_sha: &str,
     files: &[serde_json::Value],
     llm_cfg: &crate::llm::LlmConfig,
     review_ctx: &crate::llm::ReviewContext,
@@ -18,6 +23,8 @@ pub(crate) async fn maybe_post_auto_improve(
     max_diff_chars: usize,
     max_issues: usize,
     mcp_tools: &[crate::mcp::McpToolSpec],
+    pool: Option<&crate::db::DbPool>,
+    semantic_index_enabled: bool,
 ) -> Result<()> {
     let llm_files = crate::llm::filter_llm_files(files);
     if llm_files.is_empty() {
@@ -55,7 +62,42 @@ pub(crate) async fn maybe_post_auto_improve(
         })
         .collect();
     let paths: Vec<String> = patches.iter().map(|(p, _)| p.clone()).collect();
-    let grounding = crate::bot::grounding::build_grounding_block(&paths, &patches);
+    let mut grounding = crate::bot::grounding::build_grounding_block(&paths, &patches);
+    if semantic_index_enabled {
+        if let Some(pool) = pool {
+            let changed_symbols: Vec<String> = patches
+                .iter()
+                .flat_map(|(_, patch)| crate::bot::grounding::extract_symbols(patch).into_iter())
+                .collect();
+            if !changed_symbols.is_empty() {
+                let semantic_block = crate::index::semantic::related_symbols(
+                    pool,
+                    llm_cfg,
+                    repo_name,
+                    &changed_symbols,
+                    &paths,
+                    8,
+                )
+                .await
+                .unwrap_or_default();
+                if !semantic_block.is_empty() {
+                    let mut block = String::from(
+                        "## Cross-repo context (semantically related, not directly imported)\n",
+                    );
+                    for s in &semantic_block {
+                        let _ =
+                            writeln!(block, "- `{}:{}` `{}`", s.file_path, s.line, s.symbol_name);
+                    }
+                    if grounding.is_empty() {
+                        grounding = block;
+                    } else {
+                        grounding.push('\n');
+                        grounding.push_str(&block);
+                    }
+                }
+            }
+        }
+    }
     if !grounding.is_empty() {
         grounded_ctx.repo_context = Some(match grounded_ctx.repo_context.take() {
             Some(existing) if !existing.trim().is_empty() => format!("{existing}\n\n{grounding}"),

@@ -1,6 +1,8 @@
 //! Whole-repo symbol graph index: tree-sitter extraction + Postgres store.
 
+pub mod embed;
 pub mod extract;
+pub mod semantic;
 pub mod store;
 
 use crate::config::IndexConfig;
@@ -58,6 +60,7 @@ pub async fn build_repo_index(
     repo_full_name: &str,
     git_ref: &str,
     config: &IndexConfig,
+    llm_cfg: Option<&crate::llm::LlmConfig>,
 ) -> Result<usize, anyhow::Error> {
     let paths = list_repo_files(client, headers, repo_full_name, git_ref, config.max_files).await?;
     let mut files: Vec<FileIndex> = Vec::new();
@@ -93,6 +96,13 @@ pub async fn build_repo_index(
     }
 
     store::replace_repo_index(pool, repo_full_name, &files).await?;
+
+    if let Some(llm_cfg) = llm_cfg {
+        if let Err(e) = semantic::reindex_repo_embeddings(pool, llm_cfg, repo_full_name, &files).await {
+            tracing::warn!(error = %e, repo = repo_full_name, "semantic index embedding failed");
+        }
+    }
+
     Ok(files.len())
 }
 
@@ -156,6 +166,7 @@ pub async fn reindex_file(
     git_ref: &str,
     path: &str,
     config: &IndexConfig,
+    llm_cfg: Option<&crate::llm::LlmConfig>,
 ) -> Result<(), anyhow::Error> {
     let Some(lang) = extract::language_name(path) else {
         return Ok(());
@@ -171,6 +182,13 @@ pub async fn reindex_file(
     };
     if let Some(idx) = extract::extract_file(path, &content) {
         store::replace_file_index(pool, repo_full_name, &idx).await?;
+        if let Some(llm_cfg) = llm_cfg {
+            if let Err(e) =
+                semantic::reindex_repo_embeddings(pool, llm_cfg, repo_full_name, std::slice::from_ref(&idx)).await
+            {
+                tracing::warn!(error = %e, repo = repo_full_name, path, "semantic index embedding failed");
+            }
+        }
     }
     Ok(())
 }
