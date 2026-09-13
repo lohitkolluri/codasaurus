@@ -161,6 +161,21 @@ pub fn reverify_llm_issues(
             if sev == "blocking" && out.severity == "blocking" {
                 out.severity = "critical".into();
             }
+
+            // A suggestion fence only applies cleanly if `original` matches the file
+            // verbatim; otherwise GitHub silently fails to apply it, so drop the
+            // structured fix (keep the plain-text suggestion) rather than post a broken one.
+            if let Some(repl) = out.replacement.take() {
+                let matches = file_contents
+                    .iter()
+                    .find(|(p, _)| path_matches(p, &issue.file))
+                    .is_some_and(|(_, content)| content.contains(&repl.original));
+                if matches {
+                    out.replacement = Some(repl);
+                } else {
+                    tracing::debug!(file = %issue.file, "dropping LLM replacement: original not found verbatim");
+                }
+            }
             Some(out)
         })
         .collect()
@@ -181,6 +196,7 @@ mod tests {
             suggestion: None,
             confidence: conf.into(),
             rationale: None,
+            replacement: None,
         }
     }
 
@@ -265,5 +281,50 @@ mod tests {
         let issues = vec![issue("src/a.rs", "high", "warning", 1, "bad")];
         let kept = reverify_llm_issues(&issues, &["src/a.rs".into()], &[]);
         assert!(kept.is_empty());
+    }
+
+    #[test]
+    fn drops_replacement_when_original_not_verbatim() {
+        let mut i = issue(
+            "src/a.rs",
+            "high",
+            "warning",
+            3,
+            "unwrap on user-controlled option value",
+        );
+        i.replacement = Some(crate::llm::LlmReplacement {
+            original: "let x = value.unwrap();".into(),
+            replacement: "let x = value?;".into(),
+        });
+        let contents = [("src/a.rs".to_string(), "fn f() { let y = 1; }".to_string())];
+        let kept = reverify_llm_issues(&issues_slice(&i), &["src/a.rs".into()], &contents);
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].replacement.is_none());
+    }
+
+    #[test]
+    fn keeps_replacement_when_original_matches_verbatim() {
+        let mut i = issue(
+            "src/a.rs",
+            "high",
+            "warning",
+            3,
+            "unwrap on user-controlled option value",
+        );
+        i.replacement = Some(crate::llm::LlmReplacement {
+            original: "let x = value.unwrap();".into(),
+            replacement: "let x = value?;".into(),
+        });
+        let contents = [(
+            "src/a.rs".to_string(),
+            "fn f() { let x = value.unwrap(); }".to_string(),
+        )];
+        let kept = reverify_llm_issues(&issues_slice(&i), &["src/a.rs".into()], &contents);
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].replacement.is_some());
+    }
+
+    fn issues_slice(i: &LlmIssue) -> Vec<LlmIssue> {
+        vec![i.clone()]
     }
 }

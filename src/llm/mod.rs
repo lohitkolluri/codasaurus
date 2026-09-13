@@ -342,6 +342,16 @@ pub struct LlmIssue {
     /// Why the model believes this (citation / rationale). Optional for older models.
     #[serde(default)]
     pub rationale: Option<String>,
+    /// Structured one-click fix: `original` must appear verbatim in the file for
+    /// this to survive re-verification (see `bot::provenance::reverify_llm_issues`).
+    #[serde(default)]
+    pub replacement: Option<LlmReplacement>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmReplacement {
+    pub original: String,
+    pub replacement: String,
 }
 
 fn default_confidence() -> String {
@@ -397,6 +407,22 @@ pub fn review_schema() -> serde_json::Value {
                         "rationale": {
                             "type": "string",
                             "description": "Evidence citing specific symbols/lines from the diff"
+                        },
+                        "replacement": {
+                            "type": ["object", "null"],
+                            "description": "Optional one-click fix. `original` MUST be copied verbatim (exact whitespace) from the diff's + side; only set this when you are certain of the exact existing text.",
+                            "properties": {
+                                "original": {
+                                    "type": "string",
+                                    "description": "Exact existing line(s) to replace, copied verbatim from the diff"
+                                },
+                                "replacement": {
+                                    "type": "string",
+                                    "description": "The replacement line(s)"
+                                }
+                            },
+                            "required": ["original", "replacement"],
+                            "additionalProperties": false
                         }
                     },
                     "required": [

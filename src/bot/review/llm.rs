@@ -166,6 +166,94 @@ pub(crate) async fn maybe_post_auto_improve(
         "auto_improve",
     )
     .await?;
+
+    post_auto_fix_suggestions(client, auth_header, repo_name, pr_number, head_sha, &issues).await?;
+
+    Ok(())
+}
+
+/// Post verified LLM `replacement`s as a GitHub suggestion-fence review, reusing the
+/// same rendering the Tier-1 pipeline uses for `Finding.codemod` (`inline_finding_comment`).
+/// This is a second, independent review from Tier-1's — see `AUTO_FIX_MARKER` for why its
+/// idempotency check can't reuse `review_exists_for_commit`.
+async fn post_auto_fix_suggestions(
+    client: &reqwest::Client,
+    auth_header: &str,
+    repo_name: &str,
+    pr_number: i64,
+    head_sha: &str,
+    issues: &[crate::llm::LlmIssue],
+) -> Result<()> {
+    let comments: Vec<serde_json::Value> = issues
+        .iter()
+        .filter_map(|issue| {
+            let repl = issue.replacement.as_ref()?;
+            let finding = Finding {
+                detector: format!("llm-{}", issue.category),
+                severity: "info",
+                file: issue.file.clone(),
+                line: issue.line,
+                column: 0,
+                message: issue.description.clone(),
+                suggestion: issue.suggestion.clone(),
+                evidence: None,
+                codemod: Some(repl.replacement.clone()),
+                confidence: None,
+                judge_rationale: None,
+                reachability: None,
+            };
+            Some(serde_json::json!({
+                "path": finding.file,
+                "line": finding.line,
+                "side": "RIGHT",
+                "body": crate::bot::markdown::inline_finding_comment(&finding),
+            }))
+        })
+        .collect();
+    if comments.is_empty() || head_sha.is_empty() {
+        return Ok(());
+    }
+
+    if review_exists_with_marker(
+        client,
+        auth_header,
+        repo_name,
+        pr_number,
+        head_sha,
+        AUTO_FIX_MARKER,
+    )
+    .await
+    .unwrap_or(false)
+    {
+        return Ok(());
+    }
+
+    let review_body = serde_json::json!({
+        "body": format!(
+            "{AUTO_FIX_MARKER}\n### Codasaurus auto-fix\n\n{} one-click suggestion{} from re-verified LLM findings.",
+            comments.len(),
+            if comments.len() == 1 { "" } else { "s" }
+        ),
+        "event": "COMMENT",
+        "comments": comments,
+    });
+    let review_url = format!("https://api.github.com/repos/{repo_name}/pulls/{pr_number}/reviews");
+    let resp = client
+        .post(&review_url)
+        .header("Authorization", auth_header)
+        .header("Accept", "application/vnd.github+json")
+        .header(
+            "User-Agent",
+            concat!("codasaurus/", env!("CARGO_PKG_VERSION")),
+        )
+        .json(&review_body)
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        tracing::warn!(status = %status, body = %body.chars().take(400).collect::<String>(), "auto-fix suggestion review POST failed");
+    }
     Ok(())
 }
 
