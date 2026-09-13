@@ -863,10 +863,14 @@ fn alter_ts(table: &str, column: &str, nullable: bool) -> &'static str {
             "ALTER TABLE repos ALTER COLUMN updated_at DROP DEFAULT, ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at::timestamptz, ALTER COLUMN updated_at SET DEFAULT NOW()"
         }
         ("reviews", "started_at", true) => {
-            "ALTER TABLE reviews ALTER COLUMN started_at TYPE TIMESTAMPTZ USING NULLIF(started_at, '')::timestamptz"
+            // Cast through text first: on legacy installs this column is TEXT
+            // (possibly holding ''), on fresh installs it is already
+            // TIMESTAMPTZ. A bare NULLIF(col, '') const-folds '' to
+            // timestamptz at plan time and aborts fresh installs.
+            "ALTER TABLE reviews ALTER COLUMN started_at TYPE TIMESTAMPTZ USING NULLIF(started_at::text, '')::timestamptz"
         }
         ("reviews", "completed_at", true) => {
-            "ALTER TABLE reviews ALTER COLUMN completed_at TYPE TIMESTAMPTZ USING NULLIF(completed_at, '')::timestamptz"
+            "ALTER TABLE reviews ALTER COLUMN completed_at TYPE TIMESTAMPTZ USING NULLIF(completed_at::text, '')::timestamptz"
         }
         ("reviews", "created_at", false) => {
             "ALTER TABLE reviews ALTER COLUMN created_at DROP DEFAULT, ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at::timestamptz, ALTER COLUMN created_at SET DEFAULT NOW()"
