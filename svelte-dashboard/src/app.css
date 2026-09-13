@@ -94,11 +94,6 @@
     --shadow-lg: 0 4px 24px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04);
     --ring-soft: 0 0 0 3px
         color-mix(in srgb, var(--accent-soft) 18%, transparent);
-    --surface-glow: radial-gradient(
-        1200px 500px at 10% -10%,
-        color-mix(in srgb, var(--accent-soft) 8%, transparent),
-        transparent 55%
-    );
 }
 
 /* Dark */
@@ -126,11 +121,6 @@
     --shadow-lg: 0 4px 24px rgba(0, 0, 0, 0.5);
     --ring-soft: 0 0 0 3px
         color-mix(in srgb, var(--accent-soft) 22%, transparent);
-    --surface-glow: radial-gradient(
-        1000px 480px at 8% -8%,
-        color-mix(in srgb, var(--accent-soft) 12%, transparent),
-        transparent 50%
-    );
 }
 
 /* ── 3. Reset & Base ───────────────────────────────────────────── */
@@ -652,8 +642,6 @@ body,
     display: flex;
     flex-direction: column;
     animation: content-enter var(--dur-med) var(--ease-spring) both;
-    background-image: var(--surface-glow);
-    background-repeat: no-repeat;
 }
 
 /* List pages: toolbar + scrollable table + pinned footer (pagination) */
