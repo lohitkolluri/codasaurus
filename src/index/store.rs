@@ -34,11 +34,8 @@ pub async fn replace_file_index(
     file: &FileIndex,
 ) -> Result<(), sqlx::Error> {
     let mut tx = pool.as_pg().begin().await?;
-    sqlx::query("DELETE FROM repo_symbols WHERE repo_full_name = $1 AND file_path = $2")
-        .bind(repo_full_name)
-        .bind(&file.file_path)
-        .execute(&mut *tx)
-        .await?;
+    // Edges first: the subquery reads the very rows the symbol DELETE removes,
+    // so deleting symbols first would leave every stale edge behind forever.
     sqlx::query(
         "DELETE FROM repo_edges WHERE repo_full_name = $1 AND
          (from_symbol = $2 OR
@@ -48,6 +45,11 @@ pub async fn replace_file_index(
     .bind(&file.file_path)
     .execute(&mut *tx)
     .await?;
+    sqlx::query("DELETE FROM repo_symbols WHERE repo_full_name = $1 AND file_path = $2")
+        .bind(repo_full_name)
+        .bind(&file.file_path)
+        .execute(&mut *tx)
+        .await?;
     insert_files(&mut tx, repo_full_name, std::slice::from_ref(file)).await?;
     upsert_status(&mut tx, repo_full_name, INDEX_READY, None).await?;
     tx.commit().await
@@ -55,36 +57,64 @@ pub async fn replace_file_index(
 
 type Tx<'a> = sqlx::Transaction<'a, sqlx::Postgres>;
 
+/// Bulk-insert via `UNNEST` arrays: one round-trip for the whole index instead
+/// of one per symbol/edge (a full repo build is tens of thousands of rows).
 async fn insert_files(tx: &mut Tx<'_>, repo: &str, files: &[FileIndex]) -> Result<(), sqlx::Error> {
+    let sym_total: usize = files.iter().map(|f| f.symbols.len()).sum();
+    let mut paths = Vec::with_capacity(sym_total);
+    let mut names = Vec::with_capacity(sym_total);
+    let mut kinds = Vec::with_capacity(sym_total);
+    let mut signatures: Vec<Option<String>> = Vec::with_capacity(sym_total);
+    let mut lines = Vec::with_capacity(sym_total);
+
+    let edge_total: usize = files.iter().map(|f| f.edges.len()).sum();
+    let mut from_symbols = Vec::with_capacity(edge_total);
+    let mut to_symbols = Vec::with_capacity(edge_total);
+    let mut edge_kinds = Vec::with_capacity(edge_total);
+
     for file in files {
         for sym in &file.symbols {
-            sqlx::query(
-                "INSERT INTO repo_symbols (repo_full_name, file_path, symbol_name, kind, signature, line)
-                 VALUES ($1, $2, $3, $4, $5, $6)
-                 ON CONFLICT (repo_full_name, file_path, symbol_name, line) DO NOTHING",
-            )
-            .bind(repo)
-            .bind(&file.file_path)
-            .bind(&sym.name)
-            .bind(&sym.kind)
-            .bind(&sym.signature)
-            .bind(sym.line)
-            .execute(&mut **tx)
-            .await?;
+            paths.push(file.file_path.clone());
+            names.push(sym.name.clone());
+            kinds.push(sym.kind.clone());
+            signatures.push(sym.signature.clone());
+            lines.push(sym.line);
         }
         for edge in &file.edges {
-            sqlx::query(
-                "INSERT INTO repo_edges (repo_full_name, from_symbol, to_symbol, edge_kind)
-                 VALUES ($1, $2, $3, $4)
-                 ON CONFLICT (repo_full_name, from_symbol, to_symbol, edge_kind) DO NOTHING",
-            )
-            .bind(repo)
-            .bind(&edge.from_symbol)
-            .bind(&edge.to_symbol)
-            .bind(&edge.edge_kind)
-            .execute(&mut **tx)
-            .await?;
+            from_symbols.push(edge.from_symbol.clone());
+            to_symbols.push(edge.to_symbol.clone());
+            edge_kinds.push(edge.edge_kind.clone());
         }
+    }
+
+    if !names.is_empty() {
+        sqlx::query(
+            "INSERT INTO repo_symbols (repo_full_name, file_path, symbol_name, kind, signature, line)
+             SELECT $1, * FROM UNNEST($2::text[], $3::text[], $4::text[], $5::text[], $6::bigint[])
+             ON CONFLICT (repo_full_name, file_path, symbol_name, line) DO NOTHING",
+        )
+        .bind(repo)
+        .bind(&paths)
+        .bind(&names)
+        .bind(&kinds)
+        .bind(&signatures)
+        .bind(&lines)
+        .execute(&mut **tx)
+        .await?;
+    }
+
+    if !from_symbols.is_empty() {
+        sqlx::query(
+            "INSERT INTO repo_edges (repo_full_name, from_symbol, to_symbol, edge_kind)
+             SELECT $1, * FROM UNNEST($2::text[], $3::text[], $4::text[])
+             ON CONFLICT (repo_full_name, from_symbol, to_symbol, edge_kind) DO NOTHING",
+        )
+        .bind(repo)
+        .bind(&from_symbols)
+        .bind(&to_symbols)
+        .bind(&edge_kinds)
+        .execute(&mut **tx)
+        .await?;
     }
     Ok(())
 }

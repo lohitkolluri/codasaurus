@@ -58,23 +58,38 @@ pub async fn reindex_repo_embeddings(
         hash: String,
     }
 
+    // One bulk read of the current hashes for these files, then O(1) lookups —
+    // the per-symbol SELECT it replaces was one round-trip per symbol.
+    let file_paths: Vec<String> = files.iter().map(|f| f.file_path.clone()).collect();
+    let existing: std::collections::HashMap<(String, String, i64), String> = sqlx::query(
+        "SELECT file_path, symbol_name, line, content_hash FROM repo_symbol_embeddings
+         WHERE repo_full_name = $1 AND file_path = ANY($2)",
+    )
+    .bind(repo_full_name)
+    .bind(&file_paths)
+    .fetch_all(pool.as_pg())
+    .await
+    .unwrap_or_else(|e| {
+        // Not fatal: an empty map just re-embeds everything, at a cost.
+        tracing::warn!(error = %e, repo = repo_full_name, "embedding hash lookup failed; re-embedding all symbols");
+        Vec::new()
+    })
+    .into_iter()
+    .map(|r| ((r.get(0), r.get(1), r.get(2)), r.get(3)))
+    .collect();
+
+    let mut seen = std::collections::HashSet::new();
     let mut pending: Vec<Pending> = Vec::new();
     for file in files {
         for sym in &file.symbols {
+            let key = (file.file_path.clone(), sym.name.clone(), sym.line);
+            // A repeated key in one batch would break the INSERT's DO UPDATE.
+            if !seen.insert(key.clone()) {
+                continue;
+            }
             let text = embed_text_for(&sym.name, sym.signature.as_deref());
             let hash = content_hash(&text);
-            let existing: Option<String> = sqlx::query_scalar(
-                "SELECT content_hash FROM repo_symbol_embeddings
-                 WHERE repo_full_name = $1 AND file_path = $2 AND symbol_name = $3 AND line = $4",
-            )
-            .bind(repo_full_name)
-            .bind(&file.file_path)
-            .bind(&sym.name)
-            .bind(sym.line)
-            .fetch_optional(pool.as_pg())
-            .await
-            .unwrap_or(None);
-            if existing.as_deref() == Some(hash.as_str()) {
+            if existing.get(&key).map(String::as_str) == Some(hash.as_str()) {
                 continue;
             }
             pending.push(Pending {
@@ -90,7 +105,11 @@ pub async fn reindex_repo_embeddings(
         return Ok(());
     }
 
-    for batch in pending.chunks(100) {
+    let batch_size = crate::config::load(None)
+        .unwrap_or_default()
+        .index
+        .batch_size();
+    for batch in pending.chunks(batch_size) {
         let texts: Vec<String> = batch.iter().map(|p| p.text.clone()).collect();
         let embeddings = crate::index::embed::embed_texts(llm_cfg, &texts).await?;
         if embeddings.len() != batch.len() {
@@ -98,26 +117,42 @@ pub async fn reindex_repo_embeddings(
             // open for this batch rather than the whole review.
             continue;
         }
-        for (p, emb) in batch.iter().zip(embeddings.iter()) {
-            let _ = sqlx::query(
-                "INSERT INTO repo_symbol_embeddings
-                    (repo_full_name, file_path, symbol_name, line, content_hash, embedding, model)
-                 VALUES ($1, $2, $3, $4, $5, $6::vector, $7)
-                 ON CONFLICT (repo_full_name, file_path, symbol_name, line)
-                 DO UPDATE SET content_hash = EXCLUDED.content_hash,
-                               embedding = EXCLUDED.embedding,
-                               model = EXCLUDED.model,
-                               created_at = now()",
-            )
-            .bind(repo_full_name)
-            .bind(p.file_path)
-            .bind(p.symbol_name)
-            .bind(p.line)
-            .bind(&p.hash)
-            .bind(vector_literal(emb))
-            .bind(&llm_cfg.embedding_model)
-            .execute(pool.as_pg())
-            .await;
+        let paths: Vec<String> = batch.iter().map(|p| p.file_path.to_string()).collect();
+        let names: Vec<String> = batch.iter().map(|p| p.symbol_name.to_string()).collect();
+        let lines: Vec<i64> = batch.iter().map(|p| p.line).collect();
+        let hashes: Vec<String> = batch.iter().map(|p| p.hash.clone()).collect();
+        let vectors: Vec<String> = embeddings.iter().map(|e| vector_literal(e)).collect();
+
+        let written = sqlx::query(
+            "INSERT INTO repo_symbol_embeddings
+                (repo_full_name, file_path, symbol_name, line, content_hash, embedding, model)
+             SELECT $1, f, s, l, h, v::vector, $7
+             FROM UNNEST($2::text[], $3::text[], $4::bigint[], $5::text[], $6::text[])
+                  AS t(f, s, l, h, v)
+             ON CONFLICT (repo_full_name, file_path, symbol_name, line)
+             DO UPDATE SET content_hash = EXCLUDED.content_hash,
+                           embedding = EXCLUDED.embedding,
+                           model = EXCLUDED.model,
+                           created_at = now()",
+        )
+        .bind(repo_full_name)
+        .bind(&paths)
+        .bind(&names)
+        .bind(&lines)
+        .bind(&hashes)
+        .bind(&vectors)
+        .bind(&llm_cfg.embedding_model)
+        .execute(pool.as_pg())
+        .await;
+        if let Err(e) = written {
+            // Silently dropping this leaves the semantic index permanently empty
+            // while every review pays to re-embed the same symbols.
+            tracing::warn!(
+                error = %e,
+                repo = repo_full_name,
+                batch = batch.len(),
+                "persisting symbol embeddings failed; semantic grounding will be incomplete"
+            );
         }
     }
     Ok(())
@@ -139,46 +174,59 @@ pub async fn related_symbols(
     }
     // embed_texts forwards the whole slice in one request; cap at the provider's
     // documented batch limit (see index::embed) instead of erroring out on large PRs.
-    let symbols_capped = &changed_symbols[..changed_symbols.len().min(100)];
-    let embeddings = crate::index::embed::embed_texts(llm_cfg, symbols_capped).await?;
+    // Duplicate symbol names are common across a diff and cost tokens to re-embed.
+    let index_cfg = crate::config::load(None).unwrap_or_default().index;
+    let mut seen = std::collections::HashSet::new();
+    let unique: Vec<String> = changed_symbols
+        .iter()
+        .filter(|s| seen.insert(s.as_str()))
+        .take(index_cfg.max_query_symbols())
+        .cloned()
+        .collect();
+    let embeddings = crate::index::embed::embed_texts(llm_cfg, &unique).await?;
     if embeddings.is_empty() {
         return Ok(Vec::new());
     }
 
-    const DISTANCE_THRESHOLD: f64 = 0.5;
-    let mut out: Vec<RelatedSymbol> = Vec::new();
-    for emb in &embeddings {
-        let lit = vector_literal(emb);
-        let rows = sqlx::query(
-            "SELECT file_path, symbol_name, line,
-                    embedding <=> $1::vector AS distance
+    // One round-trip: a LATERAL ANN lookup per query vector (each still index-backed),
+    // deduplicated to the best distance per symbol. Looping in Rust instead returned
+    // the same symbol once per changed symbol, so the top-k could be k copies of one hit.
+    let vectors: Vec<String> = embeddings.iter().map(|e| vector_literal(e)).collect();
+    let rows = sqlx::query(
+        "SELECT nn.file_path, nn.symbol_name, nn.line, MIN(nn.distance) AS distance
+         FROM UNNEST($1::text[]) AS q(vec),
+         LATERAL (
+             SELECT file_path, symbol_name, line, embedding <=> q.vec::vector AS distance
              FROM repo_symbol_embeddings
              WHERE repo_full_name = $2 AND NOT (file_path = ANY($3))
-             ORDER BY distance ASC
-             LIMIT $4",
-        )
-        .bind(&lit)
-        .bind(repo_full_name)
-        .bind(changed_files)
-        .bind(k as i64)
-        .fetch_all(pool.as_pg())
-        .await
-        .unwrap_or_default();
-        for row in rows {
-            let distance: f64 = row.get("distance");
-            if distance > DISTANCE_THRESHOLD {
-                continue;
-            }
-            out.push(RelatedSymbol {
-                file_path: row.get("file_path"),
-                symbol_name: row.get("symbol_name"),
-                line: row.get("line"),
-                signature: String::new(),
-                distance,
-            });
-        }
-    }
-    out.sort_by(|a, b| a.distance.total_cmp(&b.distance));
-    out.truncate(k);
-    Ok(out)
+             ORDER BY embedding <=> q.vec::vector ASC
+             LIMIT $4
+         ) nn
+         GROUP BY nn.file_path, nn.symbol_name, nn.line
+         HAVING MIN(nn.distance) <= $5
+         ORDER BY distance ASC
+         LIMIT $4",
+    )
+    .bind(&vectors)
+    .bind(repo_full_name)
+    .bind(changed_files)
+    .bind(k as i64)
+    .bind(index_cfg.distance_threshold())
+    .fetch_all(pool.as_pg())
+    .await
+    .unwrap_or_else(|e| {
+        tracing::warn!(error = %e, repo = repo_full_name, "related-symbol search failed; review loses semantic grounding");
+        Vec::new()
+    });
+
+    Ok(rows
+        .into_iter()
+        .map(|row| RelatedSymbol {
+            file_path: row.get("file_path"),
+            symbol_name: row.get("symbol_name"),
+            line: row.get("line"),
+            signature: String::new(),
+            distance: row.get("distance"),
+        })
+        .collect())
 }

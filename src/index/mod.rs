@@ -98,7 +98,9 @@ pub async fn build_repo_index(
     store::replace_repo_index(pool, repo_full_name, &files).await?;
 
     if let Some(llm_cfg) = llm_cfg {
-        if let Err(e) = semantic::reindex_repo_embeddings(pool, llm_cfg, repo_full_name, &files).await {
+        if let Err(e) =
+            semantic::reindex_repo_embeddings(pool, llm_cfg, repo_full_name, &files).await
+        {
             tracing::warn!(error = %e, repo = repo_full_name, "semantic index embedding failed");
         }
     }
@@ -183,8 +185,13 @@ pub async fn reindex_file(
     if let Some(idx) = extract::extract_file(path, &content) {
         store::replace_file_index(pool, repo_full_name, &idx).await?;
         if let Some(llm_cfg) = llm_cfg {
-            if let Err(e) =
-                semantic::reindex_repo_embeddings(pool, llm_cfg, repo_full_name, std::slice::from_ref(&idx)).await
+            if let Err(e) = semantic::reindex_repo_embeddings(
+                pool,
+                llm_cfg,
+                repo_full_name,
+                std::slice::from_ref(&idx),
+            )
+            .await
             {
                 tracing::warn!(error = %e, repo = repo_full_name, path, "semantic index embedding failed");
             }
@@ -203,6 +210,7 @@ mod tests {
             enabled: true,
             languages: vec!["python".into()],
             max_files: 1000,
+            ..Default::default()
         };
         assert_eq!(extract::language_name("a.py"), Some("python"));
         assert_eq!(extract::language_name("a.rs"), Some("rust"));
