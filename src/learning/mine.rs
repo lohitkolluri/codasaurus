@@ -9,46 +9,12 @@ use uuid::Uuid;
 
 const USER_AGENT: &str = concat!("codasaurus/", env!("CARGO_PKG_VERSION"));
 
-/// Patterns that suggest a finding was a false positive / should be ignored.
-const FALSE_POSITIVE_HINTS: &[&str] = &[
-    "false positive",
-    "false-positive",
-    "not a bug",
-    "not an issue",
-    "ignore this",
-    "won't fix",
-    "wont fix",
-    "noise",
-    "not relevant",
-];
-
-/// Patterns that suggest the team wants the class of finding kept (always warn).
-const PUSHBACK_HINTS: &[&str] = &[
-    "please fix",
-    "must fix",
-    "blocking",
-    "do not merge",
-    "request changes",
-    "needs fix",
-];
-
-/// Patterns that suggest overall approval (used for telemetry / soft rules only).
-const LGTM_HINTS: &[&str] = &["lgtm", "looks good", "ship it", "approved"];
-
-/// Security-class detectors never auto-promote from non-maintainer signals alone.
-fn is_security_detector(detector: &str) -> bool {
-    matches!(
-        detector,
-        "secrets" | "vulnerabilities" | "iac" | "risky-patterns" | "risky_patterns"
-    )
-}
-
 /// After a dashboard/comment dismissal, promote repeated detector noise into a rule.
 ///
 /// Poisoning guard:
 /// - Security detectors require at least one maintainer dismissal.
 /// - Other detectors require a maintainer dismissal, or dismissals across
-///   [`MIN_DISTINCT_PRS`] distinct PRs **within the same repo**.
+///   `learning.min_dismissals_for_rule` distinct PRs **within the same repo**.
 /// - Learned rules are always scoped to `repo_full_name` when provided.
 pub async fn promote_dismissal_to_rule(
     store: &LearningStore,
@@ -76,20 +42,19 @@ pub async fn promote_dismissal_to_rule(
         return Ok(());
     }
 
-    let threshold = crate::config::load(None)
-        .map(|c| c.learning.min_dismissals_for_rule)
-        .unwrap_or(MIN_DISTINCT_PRS as usize) as i64;
-    let allow = if is_security_detector(detector) {
+    // One load for every decision below: `config::load` re-reads and re-parses the
+    // file, so calling it per predicate also let the three answers disagree if the
+    // file changed mid-call.
+    let cfg = crate::config::load(None).unwrap_or_default().learning;
+    let allow = if cfg.is_security_detector(detector) {
         maintainer_hit >= 1
     } else {
-        maintainer_hit >= 1 || distinct_prs >= threshold
+        maintainer_hit >= 1 || distinct_prs >= cfg.min_dismissals()
     };
     if !allow {
         return Ok(());
     }
-    let auto_approve = crate::config::load(None)
-        .map(|c| c.learning.auto_approve_rules)
-        .unwrap_or(false);
+    let auto_approve = cfg.auto_approve_rules;
 
     let file_stem = file_pattern_from_path(file);
     let msg_pat = message_pattern_hint(message);
@@ -114,20 +79,21 @@ pub async fn promote_dismissal_to_rule(
         }
         .into(),
         source_count: maintainer_hit.max(distinct_prs).max(1),
+        match_count: 0,
+        last_matched_at: None,
     };
     store.add_rule_async(&rule).await?;
     Ok(())
 }
 
-/// Distinct PRs required before a non-maintainer dismissal stream can auto-learn
-/// (non-security detectors only, and always repo-scoped).
-pub const MIN_DISTINCT_PRS: i64 = 3;
-
 fn file_pattern_from_path(file: &str) -> Option<String> {
     if file.is_empty() || file == "unknown" {
         return None;
     }
-    // Prefer directory prefix for broader learning.
+    // Prefer the directory prefix for broader learning: one dismissal in
+    // `src/api/auth.rs` usually means the detector is wrong about `src/api`.
+    // `store::path_matches_pattern` anchors this at the repo root, so the
+    // widening stops at that directory rather than every path containing it.
     if let Some((dir, _)) = file.rsplit_once('/') {
         if !dir.is_empty() {
             return Some(dir.to_string());
@@ -136,21 +102,32 @@ fn file_pattern_from_path(file: &str) -> Option<String> {
     Some(file.to_string())
 }
 
+/// Shortest message worth deriving a `message_pattern` from. Below this a
+/// pattern is so generic it matches unrelated findings from the same detector.
+const MIN_MESSAGE_LEN: usize = 12;
+/// Window the pattern is cut from, and the word cap inside it. Detector messages
+/// put the variable part (a path, a symbol, a count) last, so an early prefix is
+/// the stable half; taking more of it makes the rule match only the one finding
+/// it was learned from.
+const PATTERN_WINDOW_CHARS: usize = 48;
+const PATTERN_MAX_WORDS: usize = 5;
+/// A pattern shorter than this is a word or two — too broad to suppress on.
+const MIN_PATTERN_LEN: usize = 8;
+
 fn message_pattern_hint(message: &str) -> Option<String> {
     let m = message.trim();
-    if m.len() < 12 {
+    if m.len() < MIN_MESSAGE_LEN {
         return None;
     }
-    // Take a stable-ish substring (first ~40 chars of alphanumeric words).
     let cleaned: String = m
         .chars()
-        .take(48)
+        .take(PATTERN_WINDOW_CHARS)
         .collect::<String>()
         .split_whitespace()
-        .take(5)
+        .take(PATTERN_MAX_WORDS)
         .collect::<Vec<_>>()
         .join(" ");
-    if cleaned.len() >= 8 {
+    if cleaned.len() >= MIN_PATTERN_LEN {
         Some(cleaned)
     } else {
         None
@@ -181,6 +158,12 @@ pub async fn mine_pr_comment_feedback(
     all.extend(issue_comments.unwrap_or_default());
     all.extend(review_comments.unwrap_or_default());
 
+    let cfg = crate::config::load(None).unwrap_or_default();
+    let (fp_hints, pushback_hints) = (
+        cfg.learning.false_positive_hints(),
+        cfg.learning.pushback_hints(),
+    );
+
     for body in all {
         let lower = body.to_ascii_lowercase();
         // Skip our own command traffic.
@@ -190,11 +173,11 @@ pub async fn mine_pr_comment_feedback(
 
         let detector = extract_detector_mention(&lower);
 
-        if FALSE_POSITIVE_HINTS.iter().any(|h| lower.contains(h)) {
+        if fp_hints.iter().any(|h| lower.contains(h.as_str())) {
             if let Some(det) = detector {
                 // Record as a dismissal signal; promote only via the poisoning guard.
                 // Never auto-promote security detectors from mined (unauthenticated) comments.
-                if is_security_detector(&det) {
+                if cfg.learning.is_security_detector(&det) {
                     continue;
                 }
                 let fp = format!("mined-fp:{pr_number}:{det}");
@@ -212,7 +195,7 @@ pub async fn mine_pr_comment_feedback(
                     .await?;
                 learned += 1;
             }
-        } else if PUSHBACK_HINTS.iter().any(|h| lower.contains(h)) {
+        } else if pushback_hints.iter().any(|h| lower.contains(h.as_str())) {
             if let Some(det) = detector {
                 let rule = LearnedRule {
                     id: format!("pb-{}", Uuid::new_v4()),
@@ -225,14 +208,15 @@ pub async fn mine_pr_comment_feedback(
                     repo_full_name: Some(repo.to_string()),
                     status: "approved".into(),
                     source_count: 1,
+                    match_count: 0,
+                    last_matched_at: None,
                 };
                 store.add_rule_async(&rule).await?;
                 learned += 1;
             }
-        } else if LGTM_HINTS.iter().any(|h| lower.contains(h)) {
-            // Soft: no rule — approval doesn't suppress detectors.
-            let _ = lower;
         }
+        // Approval phrases are deliberately not mined: approval doesn't suppress
+        // detectors, so there is nothing to learn from them.
     }
 
     Ok(learned)
@@ -268,28 +252,21 @@ async fn fetch_comment_bodies(
         .collect())
 }
 
+/// Resolve a detector name mentioned in a PR comment.
+///
+/// Matches longest-name-first so `dependency-vulns` isn't shadowed by a shorter
+/// name that happens to be a substring of it.
 fn extract_detector_mention(lower: &str) -> Option<String> {
-    const DETECTORS: &[&str] = &[
-        "secrets",
-        "vulnerabilities",
-        "hallucinated-imports",
-        "phantom-deps",
-        "todo-leaks",
-        "over-engineering",
-        "boilerplate",
-        "stale-api",
-        "guidelines",
-        "graph",
-        "slop",
-        "policy",
-    ];
-    for d in DETECTORS {
-        if lower.contains(d) {
-            return Some((*d).to_string());
-        }
-    }
-    // `fingerprint: abc` near false-positive → treat as generic ignore via dismissal path only.
-    None
+    let mut names: Vec<&str> = crate::detectors::DETECTOR_REGISTRY
+        .iter()
+        .map(|d| d.name)
+        .collect();
+    names.sort_by_key(|n| std::cmp::Reverse(n.len()));
+    names
+        .into_iter()
+        .find(|d| lower.contains(d))
+        .map(str::to_string)
+    // `fingerprint: abc` near false-positive → generic ignore via dismissal path only.
 }
 
 #[cfg(test)]
@@ -314,8 +291,9 @@ mod tests {
 
     #[test]
     fn security_detectors_flagged() {
-        assert!(is_security_detector("secrets"));
-        assert!(is_security_detector("vulnerabilities"));
-        assert!(!is_security_detector("boilerplate"));
+        let cfg = crate::config::LearningConfig::default();
+        assert!(cfg.is_security_detector("secrets"));
+        assert!(cfg.is_security_detector("vulnerabilities"));
+        assert!(!cfg.is_security_detector("boilerplate"));
     }
 }

@@ -44,4 +44,8 @@ pub struct LearnedRule {
     pub status: String,
     /// Number of dismissals behind the rule.
     pub source_count: i64,
+    /// How many findings this rule has acted on since v25. A long-lived rule
+    /// sitting at 0 is suppressing nothing and can be pruned.
+    pub match_count: i64,
+    pub last_matched_at: Option<chrono::DateTime<chrono::Utc>>,
 }

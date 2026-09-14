@@ -28,6 +28,95 @@ pub mod vulnerabilities;
 /// Cached LearningStore — opened once and reused against the shared Postgres pool.
 static LEARNING_STORE: LazyLock<Mutex<Option<LearningStore>>> = LazyLock::new(|| Mutex::new(None));
 
+/// A detector's canonical name and whether it is security-class.
+pub struct DetectorInfo {
+    pub name: &'static str,
+    /// Security-class detectors never auto-suppress from crowd/unauthenticated
+    /// signals — they require an authenticated maintainer dismissal.
+    pub security: bool,
+}
+
+/// Every detector name the detectors actually emit, with its class.
+///
+/// Single source of truth. The feedback miner used to keep a private copy that
+/// had drifted: it listed `slop` (emitted name is `slop-detection`) and `policy`
+/// (never existed), and was missing eight real detectors — so mined feedback for
+/// those silently did nothing.
+pub const DETECTOR_REGISTRY: &[DetectorInfo] = &[
+    DetectorInfo {
+        name: "boilerplate",
+        security: false,
+    },
+    DetectorInfo {
+        name: "dependency-confusion",
+        security: true,
+    },
+    DetectorInfo {
+        name: "dependency-vulns",
+        security: true,
+    },
+    DetectorInfo {
+        name: "graph",
+        security: false,
+    },
+    DetectorInfo {
+        name: "guidelines",
+        security: false,
+    },
+    DetectorInfo {
+        name: "hallucinated-imports",
+        security: true,
+    },
+    DetectorInfo {
+        name: "iac",
+        security: true,
+    },
+    DetectorInfo {
+        name: "license-drift",
+        security: false,
+    },
+    DetectorInfo {
+        name: "lockfile-drift",
+        security: true,
+    },
+    DetectorInfo {
+        name: "over-engineering",
+        security: false,
+    },
+    DetectorInfo {
+        name: "phantom-deps",
+        security: true,
+    },
+    DetectorInfo {
+        name: "risky-patterns",
+        security: true,
+    },
+    DetectorInfo {
+        name: "secrets",
+        security: true,
+    },
+    DetectorInfo {
+        name: "slop-detection",
+        security: false,
+    },
+    DetectorInfo {
+        name: "stale-api",
+        security: false,
+    },
+    DetectorInfo {
+        name: "test-coverage",
+        security: false,
+    },
+    DetectorInfo {
+        name: "todo-leaks",
+        security: false,
+    },
+    DetectorInfo {
+        name: "vulnerabilities",
+        security: true,
+    },
+];
+
 /// A single finding from a detector
 #[derive(Debug, Clone, Serialize)]
 pub struct Finding {
@@ -74,6 +163,11 @@ pub struct Finding {
 }
 
 impl Finding {
+    /// Length of a full fingerprint: SHA-256 as hex.
+    ///
+    /// The dismissal prefix lookup keys off this, so it must move with the hash.
+    pub const FINGERPRINT_LEN: usize = 64;
+
     /// Stable fingerprint for deduplication and dismissal tracking.
     pub fn fingerprint(&self) -> String {
         let mut hasher = Sha256::new();
@@ -98,6 +192,15 @@ impl Findings {
     }
 
     pub fn extend(&mut self, findings: Vec<Finding>) {
+        // Drift guard: the miner and the security classifier key off
+        // DETECTOR_REGISTRY, so a detector emitting an unregistered name would
+        // silently opt out of both. Detector unit tests run this in debug.
+        debug_assert!(
+            findings
+                .iter()
+                .all(|f| DETECTOR_REGISTRY.iter().any(|d| d.name == f.detector)),
+            "detector emitted a name missing from DETECTOR_REGISTRY"
+        );
         self.findings.extend(findings);
     }
 
