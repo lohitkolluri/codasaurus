@@ -60,7 +60,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_repo_pr_sha
 CREATE TABLE IF NOT EXISTS findings (
     id BIGSERIAL PRIMARY KEY,
     review_id BIGINT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
-    fingerprint TEXT UNIQUE,
+    -- Per review, not global: the same finding recurs on every push, and a
+    -- global UNIQUE made the second review's whole batch insert fail.
+    fingerprint TEXT,
     file_path TEXT NOT NULL,
     line_start INTEGER,
     line_end INTEGER,
@@ -77,6 +79,8 @@ CREATE TABLE IF NOT EXISTS findings (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_findings_review_fingerprint
+    ON findings(review_id, fingerprint);
 CREATE INDEX IF NOT EXISTS idx_findings_review ON findings(review_id);
 CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
 CREATE INDEX IF NOT EXISTS idx_findings_detector ON findings(detector);
@@ -182,11 +186,23 @@ CREATE TABLE IF NOT EXISTS learned_rules (
     message_pattern TEXT,
     action TEXT NOT NULL DEFAULT 'ignore',
     reason TEXT NOT NULL DEFAULT '',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    match_count BIGINT NOT NULL DEFAULT 0,
+    last_matched_at TIMESTAMPTZ,
+    repo_full_name TEXT,
+    status TEXT NOT NULL DEFAULT 'approved',
+    source_count INTEGER NOT NULL DEFAULT 0,
+    approved_at TIMESTAMPTZ,
+    archived_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_dismissed_detector ON dismissed_findings(detector);
 CREATE INDEX IF NOT EXISTS idx_learned_detector ON learned_rules(detector);
+-- Learning scope chain lookups (global '' -> org 'owner/' -> repo 'owner/repo').
+CREATE INDEX IF NOT EXISTS idx_dismissed_findings_scope
+    ON dismissed_findings ((COALESCE(repo_full_name, '')), detector);
+CREATE INDEX IF NOT EXISTS idx_learned_rules_scope
+    ON learned_rules ((COALESCE(repo_full_name, '')), status, detector);
 
 CREATE TABLE IF NOT EXISTS review_jobs (
     id BIGSERIAL PRIMARY KEY,
@@ -259,6 +275,105 @@ pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::Error> {
     migrate_v21_learning_rule_status(pool).await?;
     migrate_v22_symbol_embeddings(pool).await?;
     migrate_v23_dismissed_findings_repo_key(pool).await?;
+    migrate_v24_learning_scope_indexes(pool).await?;
+    migrate_v25_rule_hit_telemetry(pool).await?;
+    migrate_v26_findings_fingerprint_per_review(pool).await?;
+    Ok(())
+}
+
+/// v26: `findings.fingerprint` was globally UNIQUE, but a finding recurs on every
+/// push until it is fixed. The second review of a PR therefore hit a unique
+/// violation, and because `persist` only logs the error, that review's findings
+/// were silently dropped — taking the "still open / newly fixed" delta with them.
+/// The fingerprint is only meant to be unique *within* a review.
+async fn migrate_v26_findings_fingerprint_per_review(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
+    if current.unwrap_or(0) >= 26 {
+        return Ok(());
+    }
+    // Older rows may already collide across reviews; drop the duplicates before
+    // the new index can be built, keeping the most recent row per pair.
+    sqlx::query(
+        "DELETE FROM findings a USING findings b
+          WHERE a.fingerprint IS NOT NULL
+            AND a.fingerprint = b.fingerprint
+            AND a.review_id = b.review_id
+            AND a.id < b.id",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query("ALTER TABLE findings DROP CONSTRAINT IF EXISTS findings_fingerprint_key")
+        .execute(pool)
+        .await?;
+    sqlx::query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_findings_review_fingerprint
+           ON findings(review_id, fingerprint)",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (26) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// v25: an approved rule suppresses findings forever with nothing recording that
+/// it ever fired, so a rule learned from one stale dismissal is indistinguishable
+/// from one carrying its weight. Track hits so dead rules can be found and pruned.
+async fn migrate_v25_rule_hit_telemetry(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
+    if current.unwrap_or(0) >= 25 {
+        return Ok(());
+    }
+    sqlx::query(
+        "ALTER TABLE learned_rules
+           ADD COLUMN IF NOT EXISTS match_count BIGINT NOT NULL DEFAULT 0,
+           ADD COLUMN IF NOT EXISTS last_matched_at TIMESTAMPTZ",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (25) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// v24: the learning scope chain (global `''` -> org `'owner/'` -> repo
+/// `'owner/repo'`) matches on `COALESCE(repo_full_name, '')`, which a plain
+/// column index can't serve. Every review runs these lookups, so index the
+/// expression itself.
+async fn migrate_v24_learning_scope_indexes(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let current: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+        .fetch_one(pool)
+        .await?;
+    if current.unwrap_or(0) >= 24 {
+        return Ok(());
+    }
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_dismissed_findings_scope
+         ON dismissed_findings ((COALESCE(repo_full_name, '')), detector)",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_learned_rules_scope
+         ON learned_rules ((COALESCE(repo_full_name, '')), status, detector)",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO schema_version (version) VALUES (24) ON CONFLICT (version) DO NOTHING",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -274,16 +389,12 @@ async fn migrate_v23_dismissed_findings_repo_key(pool: &PgPool) -> Result<(), sq
     if current.unwrap_or(0) >= 23 {
         return Ok(());
     }
-    sqlx::query(
-        "UPDATE dismissed_findings SET repo_full_name = '' WHERE repo_full_name IS NULL",
-    )
-    .execute(pool)
-    .await?;
-    sqlx::query(
-        "ALTER TABLE dismissed_findings ALTER COLUMN repo_full_name SET DEFAULT ''",
-    )
-    .execute(pool)
-    .await?;
+    sqlx::query("UPDATE dismissed_findings SET repo_full_name = '' WHERE repo_full_name IS NULL")
+        .execute(pool)
+        .await?;
+    sqlx::query("ALTER TABLE dismissed_findings ALTER COLUMN repo_full_name SET DEFAULT ''")
+        .execute(pool)
+        .await?;
     sqlx::query("ALTER TABLE dismissed_findings ALTER COLUMN repo_full_name SET NOT NULL")
         .execute(pool)
         .await?;
@@ -300,11 +411,9 @@ async fn migrate_v23_dismissed_findings_repo_key(pool: &PgPool) -> Result<(), sq
     sqlx::query("ALTER TABLE dismissed_findings DROP CONSTRAINT IF EXISTS dismissed_findings_pkey")
         .execute(pool)
         .await?;
-    sqlx::query(
-        "ALTER TABLE dismissed_findings ADD PRIMARY KEY (repo_full_name, fingerprint)",
-    )
-    .execute(pool)
-    .await?;
+    sqlx::query("ALTER TABLE dismissed_findings ADD PRIMARY KEY (repo_full_name, fingerprint)")
+        .execute(pool)
+        .await?;
     sqlx::query(
         "INSERT INTO schema_version (version) VALUES (23) ON CONFLICT (version) DO NOTHING",
     )
@@ -925,10 +1034,29 @@ fn split_sql(sql: &str) -> Vec<String> {
     let mut statements = Vec::new();
     let mut current = String::new();
     let mut in_string = false;
+    let mut in_line_comment = false;
     let mut string_char = ' ';
     let mut chars = sql.chars().peekable();
 
     while let Some(c) = chars.next() {
+        // A `--` comment runs to end of line and is not SQL. Scanning it as SQL
+        // let an apostrophe in prose ("the review's batch") open a string that
+        // never closed, so every following `;` was swallowed and the rest of the
+        // schema arrived as one multi-statement query — which Postgres rejects
+        // outright, breaking migrations on a fresh database.
+        if in_line_comment {
+            if c == '\n' {
+                in_line_comment = false;
+                current.push(c);
+            }
+            continue;
+        }
+        if !in_string && c == '-' && chars.peek() == Some(&'-') {
+            chars.next();
+            in_line_comment = true;
+            continue;
+        }
+
         if in_string {
             current.push(c);
             if c == string_char {
@@ -958,4 +1086,31 @@ fn split_sql(sql: &str) -> Vec<String> {
         statements.push(trimmed);
     }
     statements
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_sql;
+
+    #[test]
+    fn schema_splits_into_single_statements() {
+        // Postgres rejects a prepared statement carrying more than one command,
+        // so every chunk the runner executes must hold exactly one.
+        for stmt in split_sql(super::PG_SCHEMA) {
+            assert!(
+                !stmt.trim_end_matches(';').contains(';'),
+                "multi-command chunk would fail on a fresh database:\n{stmt}"
+            );
+        }
+    }
+
+    #[test]
+    fn line_comments_are_not_scanned_as_sql() {
+        // An apostrophe in a `--` comment used to open a string that never
+        // closed, swallowing every following statement separator.
+        let stmts =
+            split_sql("CREATE TABLE a (x INT); -- the review's batch\nCREATE TABLE b (y INT);");
+        assert_eq!(stmts.len(), 2);
+        assert!(stmts[1].contains("TABLE b"));
+    }
 }

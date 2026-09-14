@@ -240,7 +240,8 @@ pub async fn create_findings_batch(
             $1::bigint[], $2::text[], $3::text[], $4::int4[], $5::int4[],
             $6::int4[], $7::int4[], $8::text[], $9::text[], $10::text[],
             $11::text[], $12::text[], $13::text[], $14::text[], $15::text[]
-         )",
+         )
+         ON CONFLICT DO NOTHING",
     )
     .bind(&review_ids)
     .bind(&fingerprints)
