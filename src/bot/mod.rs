@@ -160,6 +160,34 @@ pub(crate) fn bot_db_pool() -> Option<&'static crate::db::DbPool> {
     CONFIG_POOL.get()
 }
 
+/// An opt-in boolean feature gate: org-wide DB config, overridden by the repo's
+/// own `config_json` when it names the key.
+///
+/// Both layers are settable from the dashboard (Settings and Repository detail),
+/// so a gate that consults only one silently ignores half the UI. Defaults to
+/// `false`: every caller is an opt-in that writes to the user's repo.
+pub(crate) async fn repo_or_global_flag(
+    pool: &crate::db::DbPool,
+    repo_full_name: &str,
+    key: &str,
+) -> bool {
+    let mut enabled = crate::db::config::get_config(pool, key)
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"));
+    if let Ok(Some(repo)) = crate::db::repos::get_repo_by_full_name(pool, repo_full_name).await {
+        if let Some(cfg) = repo.config_json.as_deref() {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(cfg) {
+                if let Some(b) = val.get(key).and_then(|v| v.as_bool()) {
+                    enabled = b;
+                }
+            }
+        }
+    }
+    enabled
+}
+
 async fn reload_bot_config() -> Option<BotConfig> {
     let pool = CONFIG_POOL.get()?;
     let app_id = db::config::get_config(pool, "github_app_id")

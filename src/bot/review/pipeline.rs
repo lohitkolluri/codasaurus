@@ -668,6 +668,12 @@ pub async fn review_pr_with_options(
         .findings
         .retain(|f| severity_at_least(f.severity, &policy.min_severity));
 
+    crate::bot::policy::enforce_pr_metadata(
+        &mut findings.findings,
+        &config.pre_merge,
+        &pr_title,
+        &pr_body,
+    );
     crate::bot::policy::enforce_count_caps(&mut findings.findings, &policy_pack);
 
     let agent_signal =
@@ -804,6 +810,10 @@ pub async fn review_pr_with_options(
                     Some(format!("Org custom instructions:\n{instr}\n\n{existing}"));
             }
         }
+        if let Some(memory) = prior_review_memory(pool, repo_name, pr_number).await {
+            let existing = review_ctx.repo_context.take().unwrap_or_default();
+            review_ctx.repo_context = Some(format!("{memory}\n\n{existing}"));
+        }
         let tone = strictness.llm_tone_hint();
         let existing = review_ctx.repo_context.take().unwrap_or_default();
         review_ctx.repo_context = Some(format!("{tone}\n\n{existing}"));
@@ -818,6 +828,11 @@ pub async fn review_pr_with_options(
         &review_ctx.linked_issues,
     );
     let issue_assessment_md = crate::bot::issue_assessment::assessment_markdown(&issue_assessment);
+
+    // Inline comments Codasaurus already posted on this PR, so a finding that is
+    // still open after a push doesn't get a second identical comment.
+    let already_commented =
+        super::github::posted_inline_fingerprints(client, &headers, repo_name, pr_number).await;
 
     let mut review_comments: Vec<serde_json::Value> = Vec::new();
     let mut has_blocking = false;
@@ -853,6 +868,11 @@ pub async fn review_pr_with_options(
         // Dedup: only 1 inline comment per (file, detector) pair.
         let key = (f.file.clone(), f.detector.clone());
         if !seen_detectors.insert(key) {
+            continue;
+        }
+
+        // Already commented on in an earlier push of this PR.
+        if already_commented.contains(&crate::bot::markdown::short_fp(f)) {
             continue;
         }
 
@@ -1370,6 +1390,81 @@ pub async fn review_pr_with_options(
 }
 
 /// Diff current findings against the previous completed review for this PR.
+/// What earlier reviews of this PR (and this repo) already concluded, as prompt text.
+///
+/// Two things the model otherwise rediscovers on every push, at full token cost:
+/// findings it already reported on this PR, and findings maintainers have
+/// explicitly dismissed. The learned-rule engine suppresses neither for LLM
+/// findings — it only filters the deterministic detectors — so this is the only
+/// place prior review outcomes reach the model.
+///
+/// Phrased as context, not as a ban: a dismissed class of finding can become a
+/// real problem in a later diff, and silently forbidding it would hide that.
+/// Bounded so a long-lived PR can't crowd the diff out of the prompt.
+async fn prior_review_memory(
+    pool: &crate::db::DbPool,
+    repo_name: &str,
+    pr_number: i64,
+) -> Option<String> {
+    const MAX_PRIOR_FINDINGS: usize = 25;
+    const MAX_DISMISSALS: i64 = 25;
+
+    let mut sections: Vec<String> = Vec::new();
+
+    if let Ok(Some(repo)) = crate::db::repos::get_repo_by_full_name(pool, repo_name).await {
+        if let Ok(Some(prior)) =
+            crate::db::reviews::get_latest_completed_review_for_pr(pool, repo.id, pr_number).await
+        {
+            if let Ok(rows) = crate::db::reviews::get_findings_for_review(pool, prior.id).await {
+                let lines: Vec<String> = rows
+                    .iter()
+                    .take(MAX_PRIOR_FINDINGS)
+                    .map(|f| {
+                        format!(
+                            "- [{}] {}:{} {}",
+                            f.detector,
+                            f.file_path,
+                            f.line_start.unwrap_or(0),
+                            f.message
+                        )
+                    })
+                    .collect();
+                if !lines.is_empty() {
+                    sections.push(format!(
+                        "Already reported on this PR by an earlier review. Don't repeat one \
+                         unless the new diff changed it; do say if a fix is wrong or incomplete:\n{}",
+                        lines.join("\n")
+                    ));
+                }
+            }
+        }
+    }
+
+    let store = crate::learning::store::LearningStore::from_pool(pool);
+    if let Ok(dismissed) = store
+        .recent_maintainer_dismissals(Some(repo_name), MAX_DISMISSALS)
+        .await
+    {
+        let lines: Vec<String> = dismissed
+            .iter()
+            .map(|(detector, message)| format!("- [{detector}] {message}"))
+            .collect();
+        if !lines.is_empty() {
+            sections.push(format!(
+                "Maintainers of this repo explicitly dismissed these findings. Treat them as \
+                 settled team preference and raise something of this shape only if this diff \
+                 makes it materially worse:\n{}",
+                lines.join("\n")
+            ));
+        }
+    }
+
+    if sections.is_empty() {
+        return None;
+    }
+    Some(format!("Prior review memory:\n\n{}", sections.join("\n\n")))
+}
+
 async fn load_finding_progress(
     repo_name: &str,
     pr_number: i64,

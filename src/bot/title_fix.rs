@@ -11,6 +11,14 @@ use regex::Regex;
 use crate::context::guidelines::GuidelineFile;
 use crate::context::rules::ExtractedRule;
 
+/// Does `title` already follow conventional-commit form (`type(scope): subject`)?
+///
+/// Shared with `policy::enforce_pr_metadata` so the `require_title_convention`
+/// gate blocks exactly the titles this module would offer to rewrite.
+pub fn is_conventional_title(title: &str) -> bool {
+    CONVENTIONAL_COMMIT_RE.is_match(title.trim())
+}
+
 static CONVENTIONAL_COMMIT_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(\([^)]+\))?!?: .+")
         .expect("invalid conventional commit regex")

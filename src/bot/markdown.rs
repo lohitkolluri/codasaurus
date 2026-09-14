@@ -1186,6 +1186,8 @@ mod tests {
             repo_full_name: Some("acme/repo".into()),
             status: "approved".into(),
             source_count: 4,
+            match_count: 0,
+            last_matched_at: None,
         }];
         let md = wiki_body(&rules);
         assert!(md.contains("## Team rules"));

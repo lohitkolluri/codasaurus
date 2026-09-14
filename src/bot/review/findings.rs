@@ -8,7 +8,10 @@ pub(crate) fn severity_at_least(sev: &str, min: &str) -> bool {
             "warning" => 2,
             "info" => 1,
             other => {
-                tracing::warn!(severity = other, "unknown finding severity; treating as lowest tier");
+                tracing::warn!(
+                    severity = other,
+                    "unknown finding severity; treating as lowest tier"
+                );
                 1
             }
         }

@@ -434,24 +434,9 @@ async fn spawn_describe(ctx: WebhookContext, pr_number: i64, timeout_secs: u64) 
 
         let mut update_body = false;
         if let Some(pool) = pool {
-            if let Ok(Some(v)) = crate::db::config::get_config(pool, "update_pr_description").await {
-                update_body = matches!(
-                    v.to_ascii_lowercase().as_str(),
-                    "true" | "1" | "yes" | "on"
-                );
-            }
-            if let Ok(Some(repo)) =
-                crate::db::repos::get_repo_by_full_name(pool, &ctx.repo_full_name).await
-            {
-                if let Some(cfg) = repo.config_json.as_deref() {
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(cfg) {
-                        if let Some(b) = val.get("update_pr_description").and_then(|v| v.as_bool())
-                        {
-                            update_body = b;
-                        }
-                    }
-                }
-            }
+            update_body =
+                crate::bot::repo_or_global_flag(pool, &ctx.repo_full_name, "update_pr_description")
+                    .await;
         }
         if update_body {
             let plain = text
@@ -1639,23 +1624,8 @@ async fn spawn_fix(
         let pool = bot_db_pool();
         let mut allowed = false;
         if let Some(pool) = pool {
-            if let Ok(Some(v)) = crate::db::config::get_config(pool, "allow_auto_fix").await {
-                allowed = matches!(
-                    v.to_ascii_lowercase().as_str(),
-                    "true" | "1" | "yes" | "on"
-                );
-            }
-            if let Ok(Some(repo)) =
-                crate::db::repos::get_repo_by_full_name(pool, &ctx.repo_full_name).await
-            {
-                if let Some(cfg) = repo.config_json.as_deref() {
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(cfg) {
-                        if let Some(b) = val.get("allow_auto_fix").and_then(|v| v.as_bool()) {
-                            allowed = b;
-                        }
-                    }
-                }
-            }
+            allowed =
+                crate::bot::repo_or_global_flag(pool, &ctx.repo_full_name, "allow_auto_fix").await;
         }
         if !allowed {
             post_issue_comment(

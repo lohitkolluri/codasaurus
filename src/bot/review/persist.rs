@@ -91,7 +91,14 @@ pub(crate) async fn save_review_to_db(
         })
         .collect();
     if let Err(e) = crate::db::reviews::create_findings_batch(pool, &batch).await {
-        eprintln!("Warning: failed to persist findings batch: {e}");
+        // Not fatal to the review that is being posted, but it costs the *next*
+        // one its still-open/newly-fixed delta, so it needs to reach the operator's
+        // log rather than stdout.
+        tracing::error!(
+            error = %e,
+            findings = batch.len(),
+            "persisting findings failed; the next review of this PR loses its delta"
+        );
     }
     let tier1 = findings
         .findings

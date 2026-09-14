@@ -10,15 +10,6 @@ pub enum IssueVerdict {
 }
 
 impl IssueVerdict {
-    #[allow(dead_code)] // legacy label; walkthrough uses plain_label
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Addressed => "addressed",
-            Self::Partial => "partial",
-            Self::Unclear => "unclear",
-        }
-    }
-
     fn plain_label(self) -> &'static str {
         match self {
             Self::Addressed => "looks covered",

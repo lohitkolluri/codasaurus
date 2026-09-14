@@ -255,9 +255,82 @@ pub fn enforce_count_caps(findings: &mut Vec<Finding>, pack: &PolicyPack) {
     }
 }
 
+/// PR metadata gates from `[pre_merge]`: a missing description or an
+/// unconventional title, as blocking policy findings.
+///
+/// These are `[pre_merge]` config rather than `PolicyPack` because they gate the
+/// PR itself, not the findings — nothing in the diff can satisfy them.
+pub fn enforce_pr_metadata(
+    findings: &mut Vec<Finding>,
+    cfg: &crate::config::PreMergeConfig,
+    pr_title: &str,
+    pr_body: &str,
+) {
+    let mut push = |message: String, suggestion: &str| {
+        findings.push(Finding {
+            detector: "policy".to_string(),
+            severity: "blocking",
+            file: "POLICY".into(),
+            line: 0,
+            column: 0,
+            message,
+            suggestion: Some(suggestion.to_string()),
+            evidence: None,
+            codemod: None,
+            confidence: None,
+            judge_rationale: None,
+            reachability: None,
+        });
+    };
+
+    if cfg.require_description && pr_body.trim().is_empty() {
+        push(
+            "Policy: pull request has no description (require_description)".into(),
+            "Describe what changed and why in the PR body.",
+        );
+    }
+    if cfg.require_title_convention && !crate::bot::title_fix::is_conventional_title(pr_title) {
+        push(
+            format!(
+                "Policy: PR title \"{pr_title}\" is not a conventional commit (require_title_convention)"
+            ),
+            "Use `type(scope): subject`, e.g. `fix(api): reject empty tokens`.",
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pr_metadata_gates_are_off_by_default() {
+        let mut findings = Vec::new();
+        enforce_pr_metadata(
+            &mut findings,
+            &crate::config::PreMergeConfig::default(),
+            "random title",
+            "",
+        );
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn pr_metadata_gates_block_when_enabled() {
+        let cfg = crate::config::PreMergeConfig {
+            require_description: true,
+            require_title_convention: true,
+            ..Default::default()
+        };
+        let mut findings = Vec::new();
+        enforce_pr_metadata(&mut findings, &cfg, "random title", "   ");
+        assert_eq!(findings.len(), 2);
+        assert!(findings.iter().all(|f| f.severity == "blocking"));
+
+        let mut ok = Vec::new();
+        enforce_pr_metadata(&mut ok, &cfg, "fix(api): reject empty tokens", "Because.");
+        assert!(ok.is_empty());
+    }
 
     #[test]
     fn forbidden_matches_prefix() {

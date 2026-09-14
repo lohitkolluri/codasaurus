@@ -119,6 +119,85 @@ pub(crate) async fn fetch_pr_files(
     unreachable!("the bounded page loop always returns")
 }
 
+/// Fingerprint prefixes Codasaurus has already posted an inline comment for on
+/// this PR, read back from GitHub.
+///
+/// Without this every push re-posts an inline comment for every finding that is
+/// still open, so a PR that takes five pushes to fix accumulates five copies of
+/// the same comment. GitHub is the source of truth rather than our own findings
+/// table, because a finding can be persisted and still never have been commented
+/// on (it was past `max_inline_comments`, or had no line to anchor to).
+///
+/// Best-effort: on any failure this returns empty, which re-posts a comment.
+/// Duplicating a comment is a far better failure than silently withholding a
+/// blocking finding.
+pub(crate) async fn posted_inline_fingerprints(
+    client: &reqwest::Client,
+    headers: &reqwest::header::HeaderMap,
+    repo_name: &str,
+    pr_number: i64,
+) -> std::collections::HashSet<String> {
+    let mut seen = std::collections::HashSet::new();
+    for page in 1..=MAX_INLINE_COMMENT_PAGES {
+        let url = format!(
+            "https://api.github.com/repos/{repo_name}/pulls/{pr_number}/comments?per_page={PER_PAGE}&page={page}"
+        );
+        let fetched = retry_async(
+            &RetryConfig::api_default(),
+            "list_review_comments",
+            &is_reqwest_error_retryable,
+            || async {
+                client
+                    .get(&url)
+                    .headers(headers.clone())
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json::<Vec<serde_json::Value>>()
+                    .await
+                    .map_err(Into::into)
+            },
+        )
+        .await;
+        let Ok(comments) = fetched else {
+            tracing::warn!(
+                repo = repo_name,
+                pr_number,
+                "listing review comments failed; inline comments may be duplicated"
+            );
+            break;
+        };
+        let count = comments.len();
+        for c in comments {
+            if let Some(body) = c["body"].as_str() {
+                seen.extend(parse_fingerprint_markers(body));
+            }
+        }
+        if count < PER_PAGE {
+            break;
+        }
+    }
+    seen
+}
+
+/// Pages of inline comments to scan. Past this a PR has more review comments
+/// than we would ever post, and the scan costs more than a duplicate.
+const MAX_INLINE_COMMENT_PAGES: usize = 10;
+
+/// Pull every `fingerprint: <hex>` marker out of one comment body. The marker is
+/// written by [`crate::bot::markdown::inline_finding_comment`]; keep the two in step.
+fn parse_fingerprint_markers(body: &str) -> Vec<String> {
+    body.match_indices("fingerprint: ")
+        .map(|(i, m)| {
+            body[i + m.len()..]
+                .chars()
+                .take_while(char::is_ascii_hexdigit)
+                .collect::<String>()
+        })
+        .filter(|fp: &String| !fp.is_empty())
+        .collect()
+}
+
 /// Post or update an issue comment using a named slot for idempotency
 /// (`walkthrough`, `llm_summary`, `describe`, …) so slots never overwrite each other.
 #[allow(clippy::too_many_arguments)]
@@ -333,4 +412,40 @@ pub(crate) async fn review_exists_with_marker(
                 .and_then(|v| v.as_str())
                 .is_some_and(|b| b.contains(marker))
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_fingerprint_markers;
+
+    #[test]
+    fn reads_the_marker_inline_comments_actually_write() {
+        let f = crate::detectors::Finding {
+            detector: "secrets".into(),
+            severity: "blocking",
+            file: "a.rs".into(),
+            line: 3,
+            column: 0,
+            message: "hardcoded token".into(),
+            suggestion: None,
+            evidence: None,
+            codemod: None,
+            confidence: None,
+            judge_rationale: None,
+            reachability: None,
+        };
+        let body = crate::bot::markdown::inline_finding_comment(&f);
+        let fp = crate::bot::markdown::short_fp(&f);
+        assert_eq!(parse_fingerprint_markers(&body), vec![fp]);
+    }
+
+    #[test]
+    fn ignores_bodies_without_a_marker() {
+        assert!(parse_fingerprint_markers("nice catch, fixing now").is_empty());
+        // The trailing `</code>` must not end up in the fingerprint.
+        assert_eq!(
+            parse_fingerprint_markers("<code>fingerprint: abc123</code>"),
+            vec!["abc123".to_string()]
+        );
+    }
 }

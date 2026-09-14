@@ -155,28 +155,47 @@ pub async fn bootstrap_manifests(
 }
 
 /// Fetch guideline markdown files from the repo (up to a few known names).
+///
+/// `guidelines.contributing_guidelines` is tried first when set. It is a repo-
+/// relative path here rather than a local filesystem path: reviews read the repo
+/// over the GitHub API, never from a checkout.
 pub async fn fetch_guidelines(
     client: &reqwest::Client,
     headers: &HeaderMap,
     repo: &str,
     git_ref: &str,
 ) -> Result<Vec<GuidelineFile>> {
-    let paths: Vec<String> = GUIDELINE_PATHS.iter().map(|p| (*p).to_string()).collect();
-    let fetched = fetch_repo_files_parallel(client, headers, repo, &paths, git_ref, 5).await;
+    let configured = crate::config::load(None)
+        .ok()
+        .and_then(|c| c.guidelines.contributing_guidelines)
+        .map(|p| {
+            p.trim_start_matches("./")
+                .trim_start_matches('/')
+                .to_string()
+        })
+        .filter(|p| !p.is_empty() && !GUIDELINE_PATHS.contains(&p.as_str()));
+    let candidates: Vec<String> = configured
+        .into_iter()
+        .chain(GUIDELINE_PATHS.iter().map(|p| (*p).to_string()))
+        .collect();
+    let fetched = fetch_repo_files_parallel(client, headers, repo, &candidates, git_ref, 5).await;
 
     let mut files = Vec::new();
-    for path in GUIDELINE_PATHS {
-        if files.len() >= 3 {
+    for path in &candidates {
+        if files.len() >= MAX_GUIDELINE_FILES {
             break;
         }
         if let Some((_, content)) = fetched.iter().find(|(p, _)| p == path) {
-            if let Some(gf) = GuidelineFile::from_content(*path, path, content.clone()) {
+            if let Some(gf) = GuidelineFile::from_content(path, path, content.clone()) {
                 files.push(gf);
             }
         }
     }
     Ok(files)
 }
+
+/// Guideline files carried into the prompt. Each one costs tokens on every review.
+const MAX_GUIDELINE_FILES: usize = 3;
 
 /// CODEOWNERS → reviewer logins for changed paths.
 pub async fn fetch_codeowner_reviewers(
