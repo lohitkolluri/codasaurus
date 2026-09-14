@@ -30,7 +30,6 @@ fn all_checks_config() -> Config {
             dependency_confusion: true,
             mcp_tools: false,
             semantic_index: false,
-            sarif_upload: false,
             test_generation: false,
             exclude_patterns: vec![],
         },

@@ -41,8 +41,9 @@ cache_ttl_secs = 3600
 # contributing_guidelines = "docs/CONTRIBUTING.md"
 
 [pre_merge]
-require_description = false
-require_title_convention = false
+# Both emit a blocking `policy` finding on the review when violated.
+require_description = false          # PR body must not be empty
+require_title_convention = false     # PR title must be `type(scope): subject`
 max_blocking = 0
 max_warnings = 20
 
@@ -82,6 +83,12 @@ drop_ungrounded = false
 [index]
 languages = ["rust", "go", "python", "javascript", "typescript"]
 max_files = 50000
+# Semantic (pgvector) grounding. Every accepted neighbour costs prompt tokens.
+# Out-of-range values are clamped rather than rejected, so a typo degrades
+# the feature instead of breaking the review.
+semantic_distance_threshold = 0.5   # max cosine distance; lower = stricter (clamped to 0.0-2.0)
+semantic_max_query_symbols = 100    # cap on changed symbols embedded per query (clamped to 1-1000)
+embedding_batch_size = 100          # symbols per embedding request (clamped to 1-2048)
 
 [reachability]
 enabled = true
@@ -94,9 +101,15 @@ block_on_blockers = true
 [learning]
 # Dismissals mine candidate rules; approve them with @codasaurus approve-rule <id>.
 auto_approve_rules = false
-# Reserved: write CODASAURUS_RULES.md into the repo via a bot PR (not implemented).
-publish_wiki = false
+# Distinct PRs, within the same repo, that must dismiss a detector before its
+# rule auto-promotes. Floored at 1: a 0 would promote every first dismissal.
 min_dismissals_for_rule = 3
+# Extra detectors treated as security-class, on top of the built-in set.
+# Additive only: config can harden the default, never weaken it.
+security_detectors = []
+# Comment phrases mined from PR review. Empty uses the built-in sets.
+false_positive_hints = []
+pushback_hints = []
 ```
 
 ## Sections
@@ -110,10 +123,10 @@ min_dismissals_for_rule = 3
 | `[pre_merge]`  | Soft caps used as defaults before DB policy overlay       |
 | `[quality_gate]` | Sonar-style gate on new findings; failed gate blocks the check run when `block_on_fail` |
 | `[confidence]` | Per-finding confidence 0-5: optional LLM judge + grounding filter |
-| `[index]` | Whole-repo symbol index: enabled, languages, max_files |
+| `[index]` | Whole-repo symbol index: enabled, languages, max_files; semantic-grounding distance/batch limits |
 | `[reachability]` | OSV reachability: upgrade import-hit vulns to OSV severity, tag manifest-only as info |
 | `[readiness]` | Merge-readiness score 0-5: hard blockers zero it, soft signals weight it |
-| `[learning]` | Dismissal → rule mining: approval gate, wiki publication (reserved), threshold |
+| `[learning]` | Dismissal → rule mining: approval gate, threshold, security-detector floor, mined comment phrases |
 
 ## `review_strictness`
 

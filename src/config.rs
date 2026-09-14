@@ -121,11 +121,6 @@ pub struct CheckConfig {
     #[serde(default)]
     pub semantic_index: bool,
 
-    /// Upload the review's SARIF export to GitHub code scanning. Off by
-    /// default — requires the app to have `security_events: write`.
-    #[serde(default)]
-    pub sarif_upload: bool,
-
     /// Post LLM-generated test suggestions for uncovered changed functions.
     /// Off by default — LLM-cost-bearing like `mcp_tools`.
     #[serde(default)]
@@ -246,6 +241,39 @@ pub struct IndexConfig {
     pub languages: Vec<String>,
     #[serde(default = "default_index_max_files")]
     pub max_files: usize,
+
+    /// Max cosine distance for a symbol to count as semantically related.
+    /// Lower = stricter. Every accepted neighbor costs prompt tokens, so this is
+    /// the main dial between grounding and spend.
+    #[serde(default = "default_semantic_distance_threshold")]
+    pub semantic_distance_threshold: f64,
+
+    /// Cap on distinct changed symbols embedded per query. Large PRs otherwise
+    /// send one embedding per changed symbol.
+    #[serde(default = "default_semantic_max_query_symbols")]
+    pub semantic_max_query_symbols: usize,
+
+    /// Symbols per embedding request. Bounded by the provider's batch limit.
+    #[serde(default = "default_embedding_batch_size")]
+    pub embedding_batch_size: usize,
+}
+
+impl IndexConfig {
+    /// Cosine distance is in `[0, 2]`; a value outside that either accepts
+    /// everything or nothing, both of which look like the feature is broken.
+    pub fn distance_threshold(&self) -> f64 {
+        self.semantic_distance_threshold.clamp(0.0, 2.0)
+    }
+
+    pub fn max_query_symbols(&self) -> usize {
+        self.semantic_max_query_symbols.clamp(1, 1_000)
+    }
+
+    /// Clamped to the provider's documented ceiling: a larger batch is rejected
+    /// wholesale, which silently drops the embeddings for that chunk.
+    pub fn batch_size(&self) -> usize {
+        self.embedding_batch_size.clamp(1, 2_048)
+    }
 }
 
 impl Default for IndexConfig {
@@ -254,6 +282,9 @@ impl Default for IndexConfig {
             enabled: true,
             languages: default_index_languages(),
             max_files: default_index_max_files(),
+            semantic_distance_threshold: default_semantic_distance_threshold(),
+            semantic_max_query_symbols: default_semantic_max_query_symbols(),
+            embedding_batch_size: default_embedding_batch_size(),
         }
     }
 }
@@ -270,6 +301,18 @@ fn default_index_languages() -> Vec<String> {
 
 fn default_index_max_files() -> usize {
     50_000
+}
+
+fn default_semantic_distance_threshold() -> f64 {
+    0.5
+}
+
+fn default_semantic_max_query_symbols() -> usize {
+    100
+}
+
+fn default_embedding_batch_size() -> usize {
+    100
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -318,20 +361,95 @@ pub struct LearningConfig {
     /// Auto-approve mined rules without the `@codasaurus approve-rule` gate.
     #[serde(default)]
     pub auto_approve_rules: bool,
-    /// Reserved: write `CODASAURUS_RULES.md` into the repo via a bot PR.
-    #[serde(default)]
-    pub publish_wiki: bool,
     /// Dismissals (or distinct PRs) needed before a finding becomes a rule candidate.
     #[serde(default = "default_min_dismissals_for_rule")]
     pub min_dismissals_for_rule: usize,
+    /// Extra detectors to treat as security-class, on top of the built-in set.
+    /// Additive only — config can harden the default, never weaken it.
+    #[serde(default)]
+    pub security_detectors: Vec<String>,
+    /// Comment phrases read as "this finding was a false positive".
+    /// Empty (the default) uses the built-in set.
+    #[serde(default)]
+    pub false_positive_hints: Vec<String>,
+    /// Comment phrases read as "keep flagging this".
+    /// Empty (the default) uses the built-in set.
+    #[serde(default)]
+    pub pushback_hints: Vec<String>,
+}
+
+impl LearningConfig {
+    /// Security-class detectors never auto-promote from non-maintainer signals alone.
+    ///
+    /// The registry default is the floor; `learning.security_detectors` can only add
+    /// to it. Letting config *remove* protection would turn a config typo into a
+    /// silent suppression of supply-chain and secret findings.
+    pub fn is_security_detector(&self, detector: &str) -> bool {
+        crate::detectors::DETECTOR_REGISTRY
+            .iter()
+            .any(|d| d.name == detector && d.security)
+            || self.security_detectors.iter().any(|d| d == detector)
+    }
+
+    pub fn false_positive_hints(&self) -> Vec<String> {
+        lowercased_or_default(&self.false_positive_hints, DEFAULT_FALSE_POSITIVE_HINTS)
+    }
+
+    pub fn pushback_hints(&self) -> Vec<String> {
+        lowercased_or_default(&self.pushback_hints, DEFAULT_PUSHBACK_HINTS)
+    }
+
+    /// Distinct-PR threshold for auto-promoting a rule, floored at 1.
+    ///
+    /// A configured `0` would promote every first dismissal into a suppression
+    /// rule, which is exactly the poisoning the threshold exists to prevent.
+    pub fn min_dismissals(&self) -> i64 {
+        self.min_dismissals_for_rule.max(1) as i64
+    }
+}
+
+const DEFAULT_FALSE_POSITIVE_HINTS: &[&str] = &[
+    "false positive",
+    "false-positive",
+    "not a bug",
+    "not an issue",
+    "ignore this",
+    "won't fix",
+    "wont fix",
+    "noise",
+    "not relevant",
+];
+
+const DEFAULT_PUSHBACK_HINTS: &[&str] = &[
+    "please fix",
+    "must fix",
+    "blocking",
+    "do not merge",
+    "request changes",
+    "needs fix",
+];
+
+/// Configured values win outright; an empty list falls back to the built-ins.
+///
+/// Lowercasing is part of the contract, not a convenience: callers match these
+/// against an already-lowercased comment body, so a hint configured with any
+/// capital letter would never match.
+fn lowercased_or_default(configured: &[String], fallback: &[&str]) -> Vec<String> {
+    if configured.is_empty() {
+        fallback.iter().map(|s| s.to_lowercase()).collect()
+    } else {
+        configured.iter().map(|s| s.to_lowercase()).collect()
+    }
 }
 
 impl Default for LearningConfig {
     fn default() -> Self {
         Self {
             auto_approve_rules: false,
-            publish_wiki: false,
             min_dismissals_for_rule: default_min_dismissals_for_rule(),
+            security_detectors: Vec::new(),
+            false_positive_hints: Vec::new(),
+            pushback_hints: Vec::new(),
         }
     }
 }
@@ -426,7 +544,6 @@ impl Default for Config {
                 dependency_confusion: true,
                 mcp_tools: false,
                 semantic_index: false,
-                sarif_upload: false,
                 test_generation: false,
                 exclude_patterns: default_exclude_patterns(),
             },
@@ -475,7 +592,6 @@ fn apply_enabled_flag(checks: &mut CheckConfig, key: &str, value: &str) {
         "dependency_confusion_enabled" => checks.dependency_confusion = enabled,
         "mcp_tools_enabled" => checks.mcp_tools = enabled,
         "semantic_index_enabled" => checks.semantic_index = enabled,
-        "sarif_upload_enabled" => checks.sarif_upload = enabled,
         "test_generation_enabled" => checks.test_generation = enabled,
         _ => {}
     }
@@ -539,8 +655,10 @@ pub struct RepoBotFlags {
     pub auto_describe: bool,
     pub auto_review_diff: bool,
     pub auto_labels: bool,
-    pub update_pr_description: bool,
-    pub allow_auto_fix: bool,
+    // `update_pr_description` and `allow_auto_fix` are deliberately absent: they
+    // are read per-command through `bot::repo_or_global_flag`, which also honours
+    // the org-wide Settings toggle. Mirroring them here gave two sources of truth
+    // and this one was never consulted.
     /// Opt-in: post GitHub APPROVE on clean high-confidence PRs (merge still needs a human).
     pub auto_approve: bool,
     pub pr_title_fix: PrTitleFixMode,
@@ -554,8 +672,6 @@ impl Default for RepoBotFlags {
             // Opt-in: auto review_diff is the largest LLM cost; enable per-repo when wanted.
             auto_review_diff: false,
             auto_labels: true,
-            update_pr_description: false,
-            allow_auto_fix: false,
             auto_approve: false,
             pr_title_fix: PrTitleFixMode::Off,
         }
@@ -629,12 +745,6 @@ impl Config {
         if let Some(v) = value.get("auto_labels").and_then(|v| v.as_bool()) {
             flags.auto_labels = v;
         }
-        if let Some(v) = value.get("update_pr_description").and_then(|v| v.as_bool()) {
-            flags.update_pr_description = v;
-        }
-        if let Some(v) = value.get("allow_auto_fix").and_then(|v| v.as_bool()) {
-            flags.allow_auto_fix = v;
-        }
         if let Some(v) = value.get("auto_approve").and_then(|v| v.as_bool()) {
             flags.auto_approve = v;
         }
@@ -666,7 +776,6 @@ fn apply_detector_key(checks: &mut CheckConfig, key: &str, enabled: bool) {
         "dependency_confusion" => checks.dependency_confusion = enabled,
         "mcp_tools" => checks.mcp_tools = enabled,
         "semantic_index" => checks.semantic_index = enabled,
-        "sarif_upload" => checks.sarif_upload = enabled,
         "test_generation" => checks.test_generation = enabled,
         _ => {}
     }
