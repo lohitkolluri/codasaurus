@@ -35,3 +35,4 @@ svelte-dashboard/dist/
 .playwright-mcp/
 
 .cursor/
+docker-compose.override.yml
