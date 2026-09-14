@@ -27,8 +27,22 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 - OIDC ID-token verification pins `RS256` instead of trusting the JWT header `alg`.
 - CSP drops `'unsafe-inline'`; setup wizard detail endpoints require owner auth after bootstrap; PR review POST checks for an existing review on the same SHA before retrying.
 
+### Removed
+
+- `context::build_repo_context` and its supporting types (`RepoContext`, `LanguageStat`, `ext_to_lang`, `count_lines`, …): a local-filesystem repo scanner reached only from its own tests. The bot reads repositories over the GitHub API via `bot::repo_context`. `context::guidelines` and `context::rules` are unaffected.
+- `IssueVerdict::as_str`, a superseded label helper kept alive by `#[allow(dead_code)]`.
+- The unread `iss` / `aud` fields on the OIDC claim struct. Both are still enforced, by `Validation::set_issuer` / `set_audience` before the token is decoded.
+- Dead config keys that could be set but were never read: `learning.publish_wiki`, `checks.sarif_upload`, and the per-repo `allow_auto_fix` / `update_pr_description` duplicates (the DB-backed gate for those two remains, now shared via one helper).
+
 ### Fixed
 
+- Inline review comments are no longer re-posted on every push: Codasaurus reads back the `fingerprint:` markers on its own existing PR comments and skips findings it has already commented on.
+- `findings.fingerprint` is unique per review instead of globally (schema v26). A finding recurs on every push until it is fixed, so the second review of a PR hit a unique violation and — because the failure was only logged — silently dropped that review's entire findings batch, taking the still-open / newly-fixed delta with it.
+- Learned-rule precedence is now deterministic: the most specific scope with the most evidence wins, and only that rule adjusts severity (two `downgrade` rules could previously drop one finding two severities, in whatever order the database returned them).
+- A learned rule with an action the build doesn't recognise is ignored instead of silently suppressing the finding.
+- `file_pattern` matching is anchored and segment-aware, so a rule for `src/api` no longer suppresses findings in `src/api-v2`; hand-written patterns keep the `checks.exclude_patterns` glob syntax. A `%` or `_` inside a stored pattern is no longer treated as a SQL `LIKE` wildcard.
+- Rule decay archives the same rule the filter applied, rather than whichever one SQL happened to match first.
+- Auto-promotion counts dismissals within the repo only, as documented; it previously counted across the whole org.
 - Dashboard dismiss now sends `repo_full_name` so suppressions are not stored as global.
 - Global Settings `auto_approve` is honored by the review pipeline (in addition to per-repo config).
 - Failed GitHub PR review POSTs no longer claim the head SHA (allows retry).
@@ -39,6 +53,11 @@ Dates are UTC calendar days. Links at the bottom compare tags on GitHub.
 
 ### Added
 
+- `pre_merge.require_description` and `pre_merge.require_title_convention` are enforced: both were documented but read nowhere, and now emit a blocking `policy` finding when the PR body is empty or the title is not a conventional commit.
+- `guidelines.contributing_guidelines` is honored by the bot's guideline fetch, not just the CLI.
+- Reviews now carry prior-review memory into the LLM prompt: findings an earlier review already reported on the same PR, and findings maintainers have explicitly dismissed. The rule engine only filters deterministic detectors, so previously the model re-derived both on every push at full token cost.
+- Learned rules record `match_count` and `last_matched_at` (schema v25), so rules that suppress nothing can be found and pruned.
+- New `[index]` keys `semantic_distance_threshold`, `semantic_max_query_symbols`, and `embedding_batch_size` replace hardcoded semantic-grounding constants; all are clamped to safe ranges.
 - Go ecosystem support: `hallucinated_imports` and `phantom_deps` now verify imports and `go.mod` declarations against proxy.golang.org.
 - New Tier-1 detector `lockfile_drift`: flags dependencies declared in `package.json`, `Cargo.toml`, or `go.mod` that are missing from their lockfile (`package-lock.json`, `Cargo.lock`, `go.sum`).
 - New Tier-1 detector `license_drift`: flags declared npm / PyPI / crates.io dependencies that carry copyleft-style licenses.

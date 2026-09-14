@@ -1402,7 +1402,8 @@ mod tests {
 
     #[test]
     fn extracts_fenced_block_with_language_tag() {
-        let raw = "Here are the tests:\n```rust\nfn test_it() { assert!(true); }\n```\nHope that helps!";
+        let raw =
+            "Here are the tests:\n```rust\nfn test_it() { assert!(true); }\n```\nHope that helps!";
         let out = extract_first_fenced_block(raw).unwrap();
         assert_eq!(out, "fn test_it() { assert!(true); }");
     }

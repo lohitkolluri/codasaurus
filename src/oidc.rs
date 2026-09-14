@@ -83,15 +83,14 @@ struct TokenResponse {
     access_token: Option<String>,
 }
 
+/// The claims this code reads. `iss` and `aud` are deliberately absent: they are
+/// enforced by `Validation::set_issuer` / `set_audience` before decoding, so
+/// carrying unread copies here only invited the question of whether they were.
 #[derive(Debug, Deserialize)]
 struct IdClaims {
     email: Option<String>,
     preferred_username: Option<String>,
     email_verified: Option<bool>,
-    #[allow(dead_code)]
-    iss: Option<String>,
-    #[allow(dead_code)]
-    aud: serde_json::Value,
 }
 
 /// Short-lived CSRF state + PKCE verifier store: state -> (created_at, code_verifier).
