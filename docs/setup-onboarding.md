@@ -25,9 +25,9 @@ Codasaurus serves a Svelte SPA on the same port as the API. On a fresh install, 
 2. Open `http://localhost:3000` → **Get started**.
 3. Confirm **PostgreSQL** (Compose already wired `DATABASE_URL`). See [database.md](database.md).
 4. On LLM: use OpenRouter / Ollama, or **Skip for now** (Tier‑1 detectors still run).
-5. **Create GitHub App** opens GitHub’s manifest form in a new tab; credentials save on callback.
+5. **Create GitHub App** opens GitHub’s manifest form in a new tab; credentials save on callback. Already have an app? Use **Enter details manually** on the same screen (App ID + PEM + webhook secret — the slug auto-resolves). Set the **Public URL** first if GitHub can't reach your server (localhost shows a warning with tunnel options).
 6. Create the owner email/password (min **10** characters). This account is the instance **superuser** (bootstrap owner). There is no email reset; if you lock yourself out, run `codasaurus reset-password --email you@company.com --password '…'` against the same `DATABASE_URL`. Invite teammates later from **Team** in the sidebar.
-7. On **Setup complete**: install the App on orgs/repos, then sign in.
+7. On **Setup complete**: install the App on orgs/repos, then sign in. The install link resolves automatically; if it ever goes missing, **Settings → Connections → GitHub App → Repair install link** re-resolves it from GitHub with one click. No env vars needed at any step.
 
 ## Routing behavior
 

@@ -163,6 +163,13 @@
   let clearingGithub = $state(false);
   let confirmClearGithub = $state(false);
   let testingGithub = $state(false);
+  let repairingGithub = $state(false);
+  let showManualGithub = $state(false);
+  let savingManualGithub = $state(false);
+  let ghAppId = $state("");
+  let ghPrivateKey = $state("");
+  let ghWebhookSecret = $state("");
+  let ghSlug = $state("");
 
   let pwCurrent = $state("");
   let pwNew = $state("");
@@ -643,8 +650,52 @@
     try {
       const data = await api.get("/api/github/install-url");
       if (data.url) window.open(data.url, "_blank");
+      else githubMsg = data.error || "Install URL unavailable: GitHub App slug is unknown.";
     } catch (err) {
       githubMsg = err.message || "Failed to open install URL";
+    }
+  }
+
+  async function repairInstallLink() {
+    repairingGithub = true;
+    githubMsg = "";
+    try {
+      const res = await api.post("/api/github/resolve", {});
+      github = { ...(github ?? { configured: true }), slug: res?.slug ?? github?.slug };
+      githubMsg = res?.url ? `Install link repaired: ${res.url}` : "Install link repaired";
+    } catch (err) {
+      githubMsg = err.message || "Repair failed";
+    } finally {
+      repairingGithub = false;
+    }
+  }
+
+  function openManifestPage() {
+    window.open("/api/setup/github/manifest-page", "_blank", "noopener,noreferrer");
+  }
+
+  async function saveManualGithub() {
+    savingManualGithub = true;
+    githubMsg = "";
+    try {
+      const body = {
+        app_id: ghAppId.trim(),
+        private_key: ghPrivateKey,
+        webhook_secret: ghWebhookSecret,
+      };
+      if (ghSlug.trim()) body.slug = ghSlug.trim();
+      const res = await api.post("/api/setup/github", body);
+      githubMsg = res?.message || "GitHub App connected";
+      showManualGithub = false;
+      ghAppId = "";
+      ghPrivateKey = "";
+      ghWebhookSecret = "";
+      ghSlug = "";
+      github = await api.get("/api/settings/github").catch(() => github);
+    } catch (err) {
+      githubMsg = err.message || "Failed to save GitHub App credentials";
+    } finally {
+      savingManualGithub = false;
     }
   }
 
@@ -1192,12 +1243,24 @@
                   <span class="meta-label">App ID</span>
                   <p class="meta-value">{github.app_id ?? "-"}</p>
                 </div>
+                <div>
+                  <span class="meta-label">App slug</span>
+                  <p class="meta-value">{github.slug ?? "unknown"}</p>
+                </div>
               </div>
+              {#if !github.slug}
+                <p class="field-hint" style="margin-top:8px">
+                  No install link without the slug. Hit “Repair install link” to resolve it from GitHub automatically.
+                </p>
+              {/if}
               <div class="save-row" style="margin-top:8px">
                 <button type="button" onclick={testGithub} disabled={testingGithub}>
                   {testingGithub ? "Testing…" : "Test connection"}
                 </button>
                 <button type="button" onclick={openInstallUrl}>Open install URL</button>
+                <button type="button" onclick={repairInstallLink} disabled={repairingGithub}>
+                  {repairingGithub ? "Repairing…" : "Repair install link"}
+                </button>
                 <a
                   class="btn sm"
                   href="https://github.com/settings/apps"
@@ -1228,8 +1291,50 @@
                 <p class="save-msg" class:error={/fail|error/i.test(githubMsg)}>{githubMsg}</p>
               {/if}
               <div class="save-row">
-                <button class="primary" onclick={openInstallUrl}>Install GitHub App</button>
+                <button class="primary" type="button" onclick={openManifestPage}>Create GitHub App (one click)</button>
+                {#if canEditSettings}
+                  <button type="button" onclick={() => (showManualGithub = !showManualGithub)}>
+                    {showManualGithub ? "Hide manual setup" : "Enter existing app manually"}
+                  </button>
+                {/if}
               </div>
+              {#if showManualGithub && canEditSettings}
+                <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;max-width:560px">
+                  <div class="form-group">
+                    <label for="gh-app-id">App ID</label>
+                    <input id="gh-app-id" type="text" bind:value={ghAppId} placeholder="123456" autocomplete="off" />
+                  </div>
+                  <div class="form-group">
+                    <label for="gh-private-key">Private key (.pem contents)</label>
+                    <textarea
+                      id="gh-private-key"
+                      bind:value={ghPrivateKey}
+                      rows="4"
+                      placeholder="-----BEGIN RSA PRIVATE KEY-----"
+                      spellcheck="false"
+                      style="font-family:monospace;font-size:12px"
+                    ></textarea>
+                  </div>
+                  <div class="form-group">
+                    <label for="gh-webhook-secret">Webhook secret</label>
+                    <input id="gh-webhook-secret" type="password" bind:value={ghWebhookSecret} autocomplete="off" />
+                  </div>
+                  <div class="form-group">
+                    <label for="gh-slug">App slug <span style="opacity:0.6">(optional — auto-detected if blank)</span></label>
+                    <input id="gh-slug" type="text" bind:value={ghSlug} placeholder="my-codasaurus" autocomplete="off" />
+                  </div>
+                  <div>
+                    <button
+                      type="button"
+                      class="primary"
+                      onclick={saveManualGithub}
+                      disabled={savingManualGithub || !ghAppId.trim() || !ghPrivateKey.trim() || !ghWebhookSecret.trim()}
+                    >
+                      {savingManualGithub ? "Verifying…" : "Verify & save"}
+                    </button>
+                  </div>
+                </div>
+              {/if}
             {/if}
           </section>
 

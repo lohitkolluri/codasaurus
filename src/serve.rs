@@ -42,6 +42,7 @@ const SYNC_KEYS: &[(&str, &str)] = &[
     // Syncing base64 into the PEM column would corrupt it; runtime fallback uses
     // `github_jwt::resolve_private_key_from_env()`.
     ("GITHUB_WEBHOOK_SECRET", "github_webhook_secret"),
+    ("GITHUB_APP_SLUG", "github_app_slug"),
     ("OPENROUTER_API_KEY", "openrouter_api_key"),
 ];
 

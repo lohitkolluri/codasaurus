@@ -7,6 +7,7 @@
   let status = $state(null);
   let loading = $state(true);
   let installUrl = $state("");
+  let installMissing = $state("");
   let frame = null;
   let canvasEl = null;
 
@@ -21,9 +22,18 @@
         else push("/setup");
         return;
       }
-      installUrl =
-        status.github_install_url ||
-        "https://github.com/settings/installations";
+      installUrl = status.github_install_url || "";
+      if (!installUrl) {
+        try {
+          const data = await api.get("/api/github/install-url");
+          if (data.url) installUrl = data.url;
+          else if (data.error) installMissing = data.error;
+        } catch {
+          /* keep fallback message */
+        }
+      }
+      installMissing =
+        "Install link unavailable: Codasaurus couldn't resolve your app on GitHub. Open https://github.com/settings/apps, pick your app, and install it from there.";
       loading = false;
       if (typeof window !== "undefined" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         startConfetti();
@@ -126,6 +136,15 @@
         <button class="primary" style="width:100%;padding:12px" onclick={() => window.open(installUrl, "_blank", "noopener,noreferrer")}>
           Install on GitHub
         </button>
+      {:else if installMissing}
+        <p class="wizard-hint" style="text-align:center">{installMissing}</p>
+        <a
+          class="btn sm"
+          href="https://github.com/settings/apps"
+          target="_blank"
+          rel="noopener noreferrer"
+          style="text-align:center"
+        >Open GitHub Apps settings ↗</a>
       {/if}
       <button class="primary" style="width:100%;padding:12px" onclick={() => push("/login")}>
         Sign in to dashboard

@@ -117,6 +117,11 @@
     try {
       const data = await api.get("/api/github/install-url");
       if (data.url && popup) popup.location.href = data.url;
+      else {
+        popup?.close();
+        syncMsg = data.error || "Install URL unavailable: GitHub App slug is unknown.";
+        syncError = true;
+      }
     } catch (err) {
       error = err.message || "Failed to get install URL";
       popup?.close();

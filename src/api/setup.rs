@@ -70,6 +70,10 @@ pub struct GithubBody {
     pub app_id: String,
     pub private_key: String,
     pub webhook_secret: String,
+    /// Optional for manual setup — when omitted, resolved from `GET /app`
+    /// and persisted so install URLs keep working.
+    #[serde(default)]
+    pub slug: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -109,6 +113,7 @@ pub fn router() -> Router<AppState> {
         .route("/github/manifest-page", get(github_manifest_page))
         .route("/github/manifest-url", get(github_manifest_url))
         .route("/github", post(setup_github))
+        .route("/public-url", get(get_public_url).post(setup_public_url))
         .route(
             "/github/callback",
             get(github_callback_page).post(github_callback),
@@ -130,6 +135,9 @@ pub struct SetupStatus {
     /// Present when a GitHub App slug is known — used by the complete screen before login.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub github_install_url: Option<String>,
+    /// Effective public URL (DB → env → request Host) the manifest uses for
+    /// webhook and callback URLs. The wizard shows it for confirmation.
+    pub public_url: String,
 }
 
 /// GET /api/setup/status — check which setup steps have been completed.
@@ -170,10 +178,18 @@ async fn setup_status(
     let complete = database && llm && github && admin;
 
     let owner_exists = admin;
+    // Slug lives in DB after the manifest flow; env-configured deploys may
+    // only have GITHUB_APP_SLUG until the next boot syncs it into the DB.
     let mut github_install_url = get_config(&state.pool, "github_app_slug")
         .await
         .ok()
         .flatten()
+        .or_else(|| {
+            std::env::var("GITHUB_APP_SLUG")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
         .map(|slug| format!("https://github.com/apps/{slug}/installations/new"));
     if owner_exists
         && super::rbac::current_user(&state.pool, &headers)
@@ -190,6 +206,7 @@ async fn setup_status(
         admin,
         complete,
         github_install_url,
+        public_url: resolve_public_url(&state, &headers).await,
     }))
 }
 
@@ -477,6 +494,72 @@ async fn test_llm_connection(
     }
 }
 
+#[derive(Deserialize)]
+pub struct PublicUrlBody {
+    pub url: String,
+}
+
+/// GET /api/setup/public-url — effective public URL + where it came from.
+async fn get_public_url(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_setup_wizard_access(&state, &headers).await?;
+    let from_db = db::config::get_config(&state.pool, "public_url")
+        .await
+        .ok()
+        .flatten();
+    let from_env = std::env::var("PUBLIC_URL").ok();
+    let effective = resolve_public_url(&state, &headers).await;
+    let source = if from_db.is_some() {
+        "dashboard"
+    } else if from_env.is_some() {
+        "env"
+    } else {
+        "auto"
+    };
+    Ok(Json(json!({
+        "url": effective,
+        "source": source,
+        "localhost": is_local_url(&effective),
+    })))
+}
+
+fn is_local_url(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    lower.starts_with("http://localhost")
+        || lower.starts_with("http://127.")
+        || lower.starts_with("http://[::1]")
+        || lower.contains("://localhost:")
+}
+
+/// POST /api/setup/public-url — save the canonical HTTPS origin used for
+/// GitHub manifest webhook/callback URLs. Open before the first owner exists.
+async fn setup_public_url(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<PublicUrlBody>,
+) -> Result<Json<SetupResponse>, ApiError> {
+    require_setup_open_or_admin(&state, &headers).await?;
+    let url = body.url.trim().to_string();
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err(ApiError::bad_request("Public URL must be an http(s) URL"));
+    }
+    let trimmed = url.trim_end_matches('/').to_string();
+    db::config::set_config(&state.pool, "public_url", &trimmed).await?;
+    db::config::apply_setting_to_env("public_url", &trimmed);
+    Ok(Json(SetupResponse {
+        status: "ok".into(),
+        message: Some(if is_local_url(&trimmed) {
+            "Saved. Note: GitHub cannot reach a localhost URL — webhooks need a public HTTPS origin (deployed host or a tunnel)."
+                .into()
+        } else {
+            "Public URL saved".into()
+        }),
+        test_passed: None,
+    }))
+}
+
 /// Resolve the public-facing URL for the GitHub App manifest.
 /// Checks DB config → `PUBLIC_URL` env var → auto-detects from request Host header.
 async fn resolve_public_url(state: &AppState, headers: &axum::http::HeaderMap) -> String {
@@ -658,11 +741,37 @@ async fn setup_github(
             resp.status()
         )));
     }
+    let app_info: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
+
+    // The install button needs the app slug (`github.com/apps/<slug>/...`).
+    // Prefer an explicit slug, else whatever `GET /app` returned.
+    let slug = body
+        .slug
+        .clone()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            app_info
+                .get("slug")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        });
+    let app_name = app_info
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
     // Store credentials
     db::config::set_config(&state.pool, "github_app_id", &body.app_id).await?;
     db::config::set_config(&state.pool, "github_private_key", &body.private_key).await?;
     db::config::set_config(&state.pool, "github_webhook_secret", &body.webhook_secret).await?;
+    if let Some(slug) = slug.as_deref() {
+        db::config::set_config(&state.pool, "github_app_slug", slug).await?;
+        db::config::apply_setting_to_env("github_app_slug", slug);
+    }
+    if let Some(name) = app_name.as_deref() {
+        db::config::set_config(&state.pool, "github_app_name", name).await?;
+    }
 
     let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".into());
     let port: u16 = std::env::var("PORT")

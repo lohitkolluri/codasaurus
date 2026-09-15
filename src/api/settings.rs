@@ -405,7 +405,14 @@ async fn get_github_settings(
     let slug = db::config::get_config(&state.pool, "github_app_slug")
         .await
         .ok()
-        .flatten();
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            std::env::var("GITHUB_APP_SLUG")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        });
 
     Ok(Json(json!({
         "app_id": app_id,
